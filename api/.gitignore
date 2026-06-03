@@ -1,0 +1,7 @@
+node_modules
+dist
+
+# Segredos
+.env
+.env.*
+!.env.example
