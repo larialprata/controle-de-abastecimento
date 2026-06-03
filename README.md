@@ -361,9 +361,4 @@ Projeto desenvolvido por **[Larissa Prata](https://github.com/larialprata)**
 ---
 
 ## Licença
-
-**[MIT](LICENSE)** — código aberto no perfil [larialprata](https://github.com/larialprata).
-
-O projeto nasceu para controle de abastecimento em obra (tanque e melosa), mas está **público no GitHub** para estudo, portfólio e reutilização. Outras pessoas podem usar, modificar e distribuir, desde que mantenham o aviso de copyright e a licença MIT nos derivados.
-
 **Ao reutilizar:** configure seu próprio Supabase e `.env` (nunca use as chaves de outro ambiente). Crédito à autora é apreciado — link para [github.com/larialprata](https://github.com/larialprata).
