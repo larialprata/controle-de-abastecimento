@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: controle-abastecimento-api
+    restart: unless-stopped
+    env_file:
+      - ./api/.env
+    environment:
+      - NODE_ENV=production
+      - PORT=3010
+    ports:
+      - "3010:3010"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3010/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
