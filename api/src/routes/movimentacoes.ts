@@ -157,6 +157,40 @@ const tanqueUpdateSchema = z
     message: "Informe ao menos um campo para editar",
   });
 
+const MELOSA_DB_COLUMN_KEYS = [
+  "operation_id",
+  "usuario_id",
+  "tipo",
+  "obra_codigo",
+  "data_hora",
+  "litros",
+  "melosa_km_registro",
+  "melosa_litros_registro",
+  "melosa_combustivel_tipo_registro",
+  "melosa_comprovante_storage_path",
+  "melosa_medidor_acumulado_inicial_numero",
+  "melosa_medidor_acumulado_inicial_storage_path",
+  "melosa_lacre_numero",
+  "melosa_lacre_storage_path",
+  "melosa_medidor_acumulado_final_numero",
+  "melosa_medidor_acumulado_final_storage_path",
+  "melosa_horimetro_equipamento_abastecido_numero",
+  "melosa_horimetro_equipamento_abastecido_storage_path",
+  "melosa_motorista_equipamento_abastecido",
+  "melosa_equipamento_operador_storage_path",
+  "melosa_categoria",
+  "melosa_km_retirada",
+  "melosa_combustivel_tipo_retirada",
+  "melosa_tanque_storage_path",
+  "ativo_melosa_texto",
+  "ativo_equipamento_texto",
+  "tanque_numero",
+  "local_latitude",
+  "local_longitude",
+  "local_address",
+  "obs",
+] as const;
+
 function mapMelosaAtivoFields<T extends Record<string, unknown>>(row: T): T {
   const out = { ...row } as T & {
     ativo_melosa_texto?: string | null;
@@ -181,6 +215,18 @@ function mapMelosaAtivoFields<T extends Record<string, unknown>>(row: T): T {
   if (ativoMelosa != null) out.ativo_melosa_texto = ativoMelosa;
   if (ativoEquipamento != null) out.ativo_equipamento_texto = ativoEquipamento;
   return out as T;
+}
+
+/** Garante que só colunas válidas de melosa_movimentacoes vão ao Supabase (sem placa_texto legado). */
+function sanitizeMelosaRowForDb(row: Record<string, unknown>): Record<string, unknown> {
+  const mapped = mapMelosaAtivoFields(row);
+  const out: Record<string, unknown> = {};
+  for (const key of MELOSA_DB_COLUMN_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(mapped, key)) {
+      out[key] = mapped[key];
+    }
+  }
+  return out;
 }
 
 async function isAdmin(service: ReturnType<typeof createSupabaseServiceRole>, userId: string) {
@@ -379,7 +425,7 @@ router.patch("/melosa/movimentacoes/:operationId", requireAuth, async (req: Auth
 
     const { error: updateError } = await service
       .from("melosa_movimentacoes")
-      .update(mapMelosaAtivoFields(parsedBody.data as Record<string, unknown>))
+      .update(sanitizeMelosaRowForDb(parsedBody.data as Record<string, unknown>))
       .eq("operation_id", operationId);
 
     if (updateError) return res.status(400).json({ error: updateError.message });
@@ -750,7 +796,9 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
 
       const { error } = await service
         .from("melosa_movimentacoes")
-        .upsert(insertRowMelosa as any, { onConflict: "operation_id" });
+        .upsert(sanitizeMelosaRowForDb(insertRowMelosa as Record<string, unknown>), {
+          onConflict: "operation_id",
+        });
 
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ ok: true, operation_id: payload.operation_id });

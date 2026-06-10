@@ -23,7 +23,12 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/health", (_req, res) =>
+  res.json({
+    ok: true,
+    melosa_db_columns: "ativo_melosa_texto,ativo_equipamento_texto",
+  }),
+);
 
 app.use("/v1/admin", adminRouter);
 app.use("/v1", obrasRouter);
