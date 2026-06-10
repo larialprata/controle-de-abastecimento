@@ -8,6 +8,7 @@ export type MovimentoRowBase = {
   usuario_full_name?: string | null;
   placa_texto?: string | null;
   placa_caminhao?: string | null;
+  ativo_melosa_texto?: string | null;
 };
 
 export type MovimentoTanqueRow = MovimentoRowBase & {
@@ -44,7 +45,7 @@ export type DashboardAggregateFilters = {
   ate?: Date | null;
   obraCodigo?: number | null;
   usuarioId?: string | null;
-  /** Placa/ativo do caminhão-melosa (melosa_movimentacoes.placa_texto) */
+  /** Placa/ativo do caminhão-melosa (melosa_movimentacoes.ativo_melosa_texto) */
   ativoMelosa?: string | null;
 };
 
@@ -105,7 +106,7 @@ function normPlaca(v: unknown): string {
 }
 
 export function placaAtivoMelosa(row: MovimentoRowBase): string {
-  const p = normPlaca(row.placa_texto);
+  const p = normPlaca(row.ativo_melosa_texto ?? row.placa_texto);
   if (p) return p;
   return normPlaca(row.placa_caminhao);
 }
@@ -147,10 +148,22 @@ function litrosRetiradaTanque(row: MovimentoTanqueRow): number {
   return 0;
 }
 
+function parseLitrosField(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const trimmed = v.trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed.replace(/\s/g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function litrosFromMelosaRow(litros: unknown, ini: unknown, fin: unknown): number {
   const fromMedidor = calcQuantidadeLitrosFromMedidores(ini, fin);
   if (fromMedidor != null) return fromMedidor;
-  if (typeof litros === "number" && Number.isFinite(litros) && litros > 0) return litros;
+  const parsed = parseLitrosField(litros);
+  if (parsed != null && parsed > 0) return parsed;
   return 0;
 }
 

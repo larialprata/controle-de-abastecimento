@@ -16,6 +16,8 @@ type LinhaMelosa = Record<string, unknown> & {
   obra_nome?: string | null;
   data_hora?: string;
   placa_texto?: string | null;
+  ativo_melosa_texto?: string | null;
+  ativo_equipamento_texto?: string | null;
   tanque_numero?: number | string | null;
   melosa_combustivel_tipo_registro?: string | null;
   melosa_combustivel_tipo_retirada?: string | null;
@@ -27,6 +29,10 @@ type LinhaMelosa = Record<string, unknown> & {
   melosa_horimetro_equipamento_abastecido_numero?: string | null;
   melosa_motorista_equipamento_abastecido?: string | null;
   melosa_categoria?: string | null;
+  litros?: number | string | null;
+  local_latitude?: number | string | null;
+  local_longitude?: number | string | null;
+  local_address?: string | null;
   usuario_full_name?: string | null;
 };
 
@@ -40,7 +46,7 @@ function toMelosaExcelInput(m: LinhaMelosa): MelosaExcelRowInput {
     insumoRegistro: m.melosa_combustivel_tipo_registro,
     medidorInicial: m.melosa_medidor_acumulado_inicial_numero,
     medidorFinal: m.melosa_medidor_acumulado_final_numero,
-    placaTexto: m.placa_texto,
+    placaTexto: m.ativo_melosa_texto ?? m.placa_texto,
   };
 }
 
@@ -72,13 +78,27 @@ function parseMedidorNumero(v: unknown): number | null {
   return null;
 }
 
+function parseLitrosField(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const trimmed = v.trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed.replace(/\s/g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function calcQuantidadeLitros(m: LinhaMelosa): number | null {
   const ini = parseMedidorNumero(m.melosa_medidor_acumulado_inicial_numero);
   const fin = parseMedidorNumero(m.melosa_medidor_acumulado_final_numero);
-  if (ini == null || fin == null) return null;
-  if (fin >= ini) return null;
-  const diff = ini - fin;
-  return Number.isFinite(diff) && diff > 0 ? diff : null;
+  if (ini != null && fin != null && ini !== fin) {
+    const diff = fin > ini ? fin - ini : ini - fin;
+    if (Number.isFinite(diff) && diff > 0) return diff;
+  }
+  const litros = parseLitrosField(m.litros);
+  if (litros != null && litros > 0) return litros;
+  return null;
 }
 
 function fmtQuantidade(m: LinhaMelosa): string {
@@ -119,16 +139,11 @@ function buildMelosaTicketRow(m: LinhaMelosa): MelosaTicketRow {
 }
 
 function fmtAtivoPlaca(m: LinhaMelosa): string {
-  return fmt(m.placa_texto);
+  return fmt(m.ativo_melosa_texto ?? m.placa_texto);
 }
 
-function fmtCategoriaMelosa(m: LinhaMelosa): string {
-  const raw = String(m.melosa_categoria ?? "")
-    .trim()
-    .toUpperCase();
-  if (raw === "MOVEL") return "Móvel";
-  if (raw === "ESTACIONARIA") return "Estacionária";
-  return "—";
+function fmtAtivoEquipamento(m: LinhaMelosa): string {
+  return fmt(m.ativo_equipamento_texto ?? m.fornecedor_texto);
 }
 
 function fmtObra(m: LinhaMelosa): string {
@@ -356,7 +371,7 @@ export default function MelosaBIPage() {
       <header className={`mb-6 ${glassPanel} px-5 py-5 text-center md:text-left`}>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">BI — Melosa</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-          Quantidade (L): medidor inicial − medidor final (o final deve ser menor que o inicial). O Excel usa a
+          Quantidade (L): medidor final − medidor inicial (o final deve ser maior que o inicial). O Excel usa a
           planilha modelo do projeto (cores e cabeçalhos intactos); só os dados são preenchidos a partir da linha 2.
         </p>
       </header>
@@ -461,8 +476,8 @@ export default function MelosaBIPage() {
                   <th className={thCls}>Data início</th>
                   <th className={thCls}>Data fim</th>
                   <th className={thCls}>Horário</th>
-                  <th className={thCls}>Ativo/Placa</th>
-                  <th className={thCls}>Categoria</th>
+                  <th className={thCls}>Ativo Melosa</th>
+                  <th className={thCls}>Ativo equipamento</th>
                   <th className={thCls}>Insumo</th>
                   <th className={thCls}>Quantidade (L)</th>
                   <th className={thCls}>Nº lacre</th>
@@ -510,7 +525,7 @@ export default function MelosaBIPage() {
                       <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
                       <td className={`${tdCls} whitespace-nowrap`}>{fmtTimeOnly(m.data_hora)}</td>
                       <td className={`${tdCls} max-w-[140px]`}>{fmtAtivoPlaca(m)}</td>
-                      <td className={`${tdCls} max-w-[120px]`}>{fmtCategoriaMelosa(m)}</td>
+                      <td className={`${tdCls} max-w-[140px]`}>{fmtAtivoEquipamento(m)}</td>
                       <td className={`${tdCls} max-w-[140px]`}>{fmtInsumoMel(m)}</td>
                       <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
                       <td className={`${tdCls} max-w-[100px]`}>{temLacre ? fmt(lacreNum) : "—"}</td>

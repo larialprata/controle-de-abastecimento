@@ -89,12 +89,12 @@ function parseMedidorNumero(v: unknown): number | null {
   return null;
 }
 
-/** Melosa / medidor que desce ao dispensar: inicial − final. */
+/** Melosa — litros = |final − inicial| (registos novos: final > inicial; legado: inicial > final). */
 export function calcQuantidadeLitrosFromMedidores(inicial: unknown, final: unknown): number | null {
   const ini = parseMedidorNumero(inicial);
   const fin = parseMedidorNumero(final);
-  if (ini == null || fin == null || fin >= ini) return null;
-  const diff = ini - fin;
+  if (ini == null || fin == null || ini === fin) return null;
+  const diff = fin > ini ? fin - ini : ini - fin;
   return Number.isFinite(diff) && diff > 0 ? diff : null;
 }
 

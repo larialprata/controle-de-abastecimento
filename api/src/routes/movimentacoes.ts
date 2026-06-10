@@ -99,9 +99,11 @@ const movimentoSchema = z.object({
   melosa_combustivel_tipo_retirada: z.string().optional().nullable(),
   melosa_tanque_storage_path: z.string().optional().nullable(),
 
-  /** Placa do veículo (obrigatório nos três tipos de registo do app). */
+  /** Ativo melosa / equipamento (app envia placa_texto e fornecedor_texto; DB melosa usa ativo_*). */
   placa_texto: z.string().optional().nullable(),
   fornecedor_texto: z.string().optional().nullable(),
+  ativo_melosa_texto: z.string().optional().nullable(),
+  ativo_equipamento_texto: z.string().optional().nullable(),
   tanque_numero: tanqueNumeroSchema.optional().nullable(),
   local_latitude: z.number().optional().nullable(),
   local_longitude: z.number().optional().nullable(),
@@ -119,6 +121,8 @@ const melosaUpdateSchema = z
     melosa_combustivel_tipo_retirada: z.string().optional().nullable(),
     melosa_medidor_acumulado_inicial_numero: z.string().optional().nullable(),
     melosa_medidor_acumulado_inicial_storage_path: z.string().optional().nullable(),
+    ativo_melosa_texto: z.string().optional().nullable(),
+    ativo_equipamento_texto: z.string().optional().nullable(),
     placa_texto: z.string().optional().nullable(),
     fornecedor_texto: z.string().optional().nullable(),
     tanque_numero: tanqueNumeroSchema.optional().nullable(),
@@ -152,6 +156,32 @@ const tanqueUpdateSchema = z
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "Informe ao menos um campo para editar",
   });
+
+function mapMelosaAtivoFields<T extends Record<string, unknown>>(row: T): T {
+  const out = { ...row } as T & {
+    ativo_melosa_texto?: string | null;
+    ativo_equipamento_texto?: string | null;
+    placa_texto?: string | null;
+    fornecedor_texto?: string | null;
+  };
+  const ativoMelosa =
+    typeof out.ativo_melosa_texto === "string" && out.ativo_melosa_texto.trim()
+      ? out.ativo_melosa_texto.trim()
+      : typeof out.placa_texto === "string" && out.placa_texto.trim()
+        ? out.placa_texto.trim()
+        : null;
+  const ativoEquipamento =
+    typeof out.ativo_equipamento_texto === "string" && out.ativo_equipamento_texto.trim()
+      ? out.ativo_equipamento_texto.trim()
+      : typeof out.fornecedor_texto === "string" && out.fornecedor_texto.trim()
+        ? out.fornecedor_texto.trim()
+        : null;
+  delete out.placa_texto;
+  delete out.fornecedor_texto;
+  if (ativoMelosa != null) out.ativo_melosa_texto = ativoMelosa;
+  if (ativoEquipamento != null) out.ativo_equipamento_texto = ativoEquipamento;
+  return out as T;
+}
 
 async function isAdmin(service: ReturnType<typeof createSupabaseServiceRole>, userId: string) {
   const { data, error } = await service.from("profiles").select("role").eq("user_id", userId).maybeSingle();
@@ -201,12 +231,9 @@ router.get("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     }
 
     if (wantMelosa) {
-      const melosaSelect =
-        "id, operation_id, usuario_id, tipo, obra_codigo, data_hora, litros, melosa_km_registro, melosa_litros_registro, melosa_combustivel_tipo_registro, melosa_comprovante_storage_path, melosa_km_retirada, melosa_combustivel_tipo_retirada, melosa_tanque_storage_path, melosa_medidor_acumulado_inicial_numero, melosa_medidor_acumulado_inicial_storage_path, melosa_medidor_acumulado_final_numero, melosa_medidor_acumulado_final_storage_path, melosa_horimetro_equipamento_abastecido_numero, melosa_motorista_equipamento_abastecido, melosa_lacre_numero, melosa_lacre_storage_path, melosa_equipamento_operador_storage_path, melosa_categoria, placa_texto, fornecedor_texto, tanque_numero, local_latitude, local_longitude, local_address, obs, created_at";
-
       const melosaQuery = service
         .from("melosa_movimentacoes")
-        .select(melosaSelect as any)
+        .select("*")
         .order("data_hora", { ascending: false })
         .range(0, fetchCount - 1);
 
@@ -219,6 +246,8 @@ router.get("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
 
     const melosasUnified = melosas.map((m) => ({
       ...m,
+      placa_texto: m.ativo_melosa_texto ?? null,
+      fornecedor_texto: m.ativo_equipamento_texto ?? null,
       origem: "melosa" as const,
       tanque_texto: null,
       combustivel_tipo: null,
@@ -350,7 +379,7 @@ router.patch("/melosa/movimentacoes/:operationId", requireAuth, async (req: Auth
 
     const { error: updateError } = await service
       .from("melosa_movimentacoes")
-      .update(parsedBody.data as any)
+      .update(mapMelosaAtivoFields(parsedBody.data as Record<string, unknown>))
       .eq("operation_id", operationId);
 
     if (updateError) return res.status(400).json({ error: updateError.message });
@@ -481,8 +510,10 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       return res.status(403).json({ error: "Perfil Melosa: somente movimentações da Melosa são permitidas." });
     }
 
-    const placaNorm = (payload.placa_texto?.trim() || "").trim() || null;
-    const fornecedorNorm = (payload.fornecedor_texto?.trim() || "").trim() || null;
+    const placaNorm =
+      (payload.ativo_melosa_texto?.trim() || payload.placa_texto?.trim() || "").trim() || null;
+    const fornecedorNorm =
+      (payload.ativo_equipamento_texto?.trim() || payload.fornecedor_texto?.trim() || "").trim() || null;
     const tanqueNum = payload.tanque_numero;
 
     const needsVeiculoMeta =
@@ -586,9 +617,9 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     }
 
     if (payload.tipo === "RETIRADA_MELOSA") {
-      const categoria = payload.melosa_categoria;
-      if (categoria !== "ESTACIONARIA" && categoria !== "MOVEL") {
-        return res.status(400).json({ error: "melosa_categoria é obrigatório (ESTACIONARIA ou MOVEL)" });
+      const categoria = payload.melosa_categoria ?? null;
+      if (categoria != null && categoria !== "ESTACIONARIA" && categoria !== "MOVEL") {
+        return res.status(400).json({ error: "melosa_categoria inválido (use ESTACIONARIA ou MOVEL)" });
       }
       if (!payload.melosa_medidor_acumulado_inicial_numero?.trim()) {
         return res.status(400).json({ error: "melosa_medidor_acumulado_inicial_numero é obrigatório" });
@@ -661,11 +692,12 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       if (medidorInicial == null || medidorFinal == null) {
         return res.status(400).json({ error: "Números do medidor inicial e final inválidos" });
       }
-      if (medidorFinal >= medidorInicial) {
+      if (medidorFinal <= medidorInicial) {
         return res.status(400).json({
-          error: "O número final acumulado do medidor deve ser menor que o número inicial",
+          error: "O número final acumulado do medidor deve ser maior que o inicial (litros = final − inicial)",
         });
       }
+      const litrosMelosaCalculados = medidorFinal - medidorInicial;
       if (!payload.melosa_medidor_acumulado_final_storage_path?.trim()) {
         return res.status(400).json({ error: "melosa_medidor_acumulado_final_storage_path é obrigatório" });
       }
@@ -684,7 +716,7 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         tipo: payload.tipo,
         obra_codigo: payload.obra_codigo,
         data_hora: payload.data_hora ? new Date(payload.data_hora).toISOString() : new Date().toISOString(),
-        litros: payload.litros,
+        litros: litrosMelosaCalculados,
 
         melosa_km_registro: payload.melosa_km_registro ?? null,
         melosa_litros_registro: payload.melosa_litros_registro ?? null,
@@ -707,8 +739,8 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         melosa_combustivel_tipo_retirada: payload.melosa_combustivel_tipo_retirada ?? null,
         melosa_tanque_storage_path: payload.melosa_tanque_storage_path ?? null,
 
-        placa_texto: placaNorm,
-        fornecedor_texto: fornecedorNorm,
+        ativo_melosa_texto: placaNorm,
+        ativo_equipamento_texto: fornecedorNorm,
         tanque_numero: tanqueNum,
         local_latitude: payload.local_latitude ?? null,
         local_longitude: payload.local_longitude ?? null,

@@ -328,8 +328,8 @@ create table if not exists public.melosa_movimentacoes (
   melosa_combustivel_tipo_retirada text,
   melosa_tanque_storage_path text,
 
-  placa_texto text,
-  fornecedor_texto text,
+  ativo_melosa_texto text,
+  ativo_equipamento_texto text,
   tanque_numero smallint,
   local_latitude double precision,
   local_longitude double precision,
@@ -339,8 +339,8 @@ create table if not exists public.melosa_movimentacoes (
   created_at timestamptz not null default now()
 );
 
-alter table public.melosa_movimentacoes add column if not exists placa_texto text;
-alter table public.melosa_movimentacoes add column if not exists fornecedor_texto text;
+alter table public.melosa_movimentacoes add column if not exists ativo_melosa_texto text;
+alter table public.melosa_movimentacoes add column if not exists ativo_equipamento_texto text;
 alter table public.melosa_movimentacoes add column if not exists tanque_numero smallint;
 
 alter table public.melosa_movimentacoes drop constraint if exists melosa_movimentacoes_tanque_numero_check;

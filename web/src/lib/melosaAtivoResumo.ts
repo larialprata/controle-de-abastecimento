@@ -54,7 +54,7 @@ export type ResumoAbastecimentoAnalise = {
   sobraAntesLitros: number;
   medidorInicial: string;
   medidorFinal: string;
-  /** Litros que foram para o equipamento = medidor inicial − final (ex.: 187 − 57 = 130 L). */
+  /** Litros que foram para o equipamento = medidor final − inicial (ex.: 5100 − 5000 = 100 L). */
   litrosParaEquipamento: number | null;
   /**
    * Litros que “sumiram” da melosa entre a sobra contábil e a leitura ao chegar
@@ -120,6 +120,7 @@ type TanqueRow = MovimentoTanqueRow &
   RowBase & {
     obra_nome?: string | null;
     fornecedor_texto?: string | null;
+    ativo_equipamento_texto?: string | null;
     tanque_texto?: string | null;
     combustivel_tipo?: string | null;
     medidor_tanque_numero_inicial?: string | null;
@@ -130,6 +131,7 @@ type MelosaRow = MovimentoMelosaRow &
   RowBase & {
     obra_nome?: string | null;
     fornecedor_texto?: string | null;
+    ativo_equipamento_texto?: string | null;
     melosa_horimetro_equipamento_abastecido_numero?: string | null;
     melosa_km_registro?: number | null;
     melosa_km_retirada?: number | null;
@@ -301,13 +303,13 @@ function buildAnaliseAbastecimentosVsSobra(
     const medFin = parseMedidorNumero(raw?.melosa_medidor_acumulado_final_numero);
 
     let litrosParaEquipamento: number | null = null;
-    if (medIni != null && medFin != null && medFin < medIni) {
-      litrosParaEquipamento = medIni - medFin;
+    if (medIni != null && medFin != null && medFin > medIni) {
+      litrosParaEquipamento = medFin - medIni;
     }
 
     const litrosEfetivos = litrosParaEquipamento ?? ev.litros;
     const litrosSaidaMelosaAntesChegar = medIni != null ? sobraAntes - medIni : null;
-    const litrosNaMelosaApos = medFin != null && medIni != null && medFin < medIni ? medFin : null;
+    const litrosNaMelosaApos = null;
     const sobraContabilApos = sobraAntes - litrosEfetivos;
 
     const saidaAnalise =
@@ -342,12 +344,12 @@ function buildAnaliseAbastecimentosVsSobra(
 
     if (litrosParaEquipamento != null && Math.abs(litrosParaEquipamento - ev.litros) > 0.05) {
       alertas.push(
-        `Litros do registo (${fmtLitrosDashboard(ev.litros)} L) difere do medidor ini − fin (${fmtLitrosDashboard(litrosParaEquipamento)} L).`,
+        `Litros do registo (${fmtLitrosDashboard(ev.litros)} L) difere do medidor fin − ini (${fmtLitrosDashboard(litrosParaEquipamento)} L).`,
       );
       status = "atencao";
     }
-    if (medIni != null && medFin != null && medFin >= medIni) {
-      alertas.push("Medidor final deve ser menor que o inicial (combustível saiu da melosa para o equipamento).");
+    if (medIni != null && medFin != null && medFin <= medIni) {
+      alertas.push("Medidor final deve ser maior que o inicial (litros abastecidos = final − inicial).");
       status = "inconsistente";
     }
     if (litrosEfetivos > sobraAntes + 0.05) {
@@ -430,7 +432,7 @@ function buildAnaliseTrechos(
   for (let i = 0; i < abastComHor.length; i += 1) {
     const cur = abastComHor[i];
     const prev = i > 0 ? abastComHor[i - 1] : null;
-    const equip = String(cur.m.fornecedor_texto ?? "").trim() || "Equipamento";
+    const equip = String(cur.m.ativo_equipamento_texto ?? cur.m.fornecedor_texto ?? "").trim() || "Equipamento";
     if (prev && prev.parsed && cur.parsed && prev.parsed.unidade === cur.parsed.unidade) {
       const delta = cur.parsed.valor - prev.parsed.valor;
       if (delta > 0) {
@@ -583,7 +585,7 @@ export function buildResumoAtivoMelosa(
       litrosFmt: `${fmtLitrosDashboard(litros)} L`,
       local: fmtLocal(m),
       horimetro,
-      equipamento: String(m.fornecedor_texto ?? "").trim() || "—",
+      equipamento: String(m.ativo_equipamento_texto ?? m.fornecedor_texto ?? "").trim() || "—",
       responsavel: resp,
       obra: fmtObra(m, obrasMap),
       detalhe: [medidorDetalheMelosa(m), motorista ? `Operador: ${motorista}` : ""].filter(Boolean).join(" · "),
