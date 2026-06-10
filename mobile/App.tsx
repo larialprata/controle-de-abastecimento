@@ -110,6 +110,7 @@ function GpsLocationBlock({
   localLongitude,
   localAddress,
   onCapture,
+  showDetails = true,
 }: {
   isDarkMode: boolean;
   busy: boolean;
@@ -118,6 +119,7 @@ function GpsLocationBlock({
   localLongitude: number | null;
   localAddress: string | null;
   onCapture: () => void;
+  showDetails?: boolean;
 }) {
   return (
     <>
@@ -133,18 +135,22 @@ function GpsLocationBlock({
           <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Obter localização</Text>
         </TouchableOpacity>
       </View>
-      {localLatitude != null && localLongitude != null ? (
-        <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6, textAlign: "center" }]}>
-          Coordenadas: {localLatitude.toFixed(5)}, {localLongitude.toFixed(5)}
-        </Text>
-      ) : (
-        <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6, textAlign: "center" }]}>
-          Aguardando GPS… toque em “Obter localização” se não atualizar.
-        </Text>
-      )}
-      <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4, textAlign: "center" }]}>
-        Endereço: {localAddress ?? "— (capturando automaticamente...)"}
-      </Text>
+      {showDetails ? (
+        <>
+          {localLatitude != null && localLongitude != null ? (
+            <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6, textAlign: "center" }]}>
+              Coordenadas: {localLatitude.toFixed(5)}, {localLongitude.toFixed(5)}
+            </Text>
+          ) : (
+            <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6, textAlign: "center" }]}>
+              Aguardando GPS… toque em “Obter localização” se não atualizar.
+            </Text>
+          )}
+          <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4, textAlign: "center" }]}>
+            Endereço: {localAddress ?? "— (capturando automaticamente...)"}
+          </Text>
+        </>
+      ) : null}
     </>
   );
 }
@@ -2439,6 +2445,7 @@ export default function App() {
         localLongitude={localLongitude}
         localAddress={localAddress}
         onCapture={safeCaptureLocationAndAddress}
+        showDetails={false}
       />
     );
 
@@ -2549,6 +2556,7 @@ export default function App() {
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
                     placeholder="Ex.: 1542,3"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="decimal-pad"
                   />
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
                     Foto Inicial Acumulado do Medidor da Melosa
@@ -2703,6 +2711,7 @@ export default function App() {
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
                     placeholder="Opcional"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="number-pad"
                   />
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Foto do Lacre</Text>
                   <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
@@ -2743,16 +2752,13 @@ export default function App() {
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
                     Número final do acumulado do medidor da melosa
                   </Text>
-                  <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 2 }]}>
-                    Deve ser maior que o inicial ({melosaMedidorAcumuladoInicialNumero.trim() || "—"}). Litros = final −
-                    inicial.
-                  </Text>
                   <TextInput
                     value={melosaMedidorAcumuladoFinalNumero}
                     onChangeText={setMelosaMedidorAcumuladoFinalNumero}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: 5100 (maior que o inicial)"
+                    placeholder="Ex.: 5100"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="decimal-pad"
                   />
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
                     Foto final acumulado do medidor da melosa
@@ -2988,6 +2994,7 @@ export default function App() {
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
                     placeholder="Ex.: 1542,3 h ou 85620 km"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="decimal-pad"
                   />
                 </>
               ) : null}
@@ -3038,6 +3045,7 @@ export default function App() {
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
                     placeholder="Informe o número do lacre do tanque"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="number-pad"
                   />
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto do Lacre do Tanque</Text>
@@ -3071,6 +3079,7 @@ export default function App() {
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
                     placeholder="Informe o número do lacre da melosa"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="number-pad"
                   />
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto do Lacre da Melosa</Text>
@@ -3118,6 +3127,7 @@ export default function App() {
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
                     placeholder="Informe o número inicial do medidor"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="decimal-pad"
                   />
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto Inicial do Medidor do Tanque</Text>
@@ -3159,6 +3169,7 @@ export default function App() {
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
                     placeholder="Informe o número final do medidor"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="decimal-pad"
                   />
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto Final do Medidor do Tanque</Text>
@@ -3266,7 +3277,7 @@ export default function App() {
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
                     placeholder="Ex.: 12345"
                     placeholderTextColor={inputPlaceholderColor}
-                    keyboardType="default"
+                    keyboardType="number-pad"
                   />
                 </>
               ) : null}
@@ -3580,6 +3591,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     alignItems: "center",
+    justifyContent: "center",
     paddingTop: 28,
     paddingBottom: 48,
   },
@@ -3587,6 +3599,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: 20,
     alignItems: "center",
+    justifyContent: "center",
     paddingTop: 28,
     paddingBottom: 48,
   },
@@ -3608,6 +3621,8 @@ const styles = StyleSheet.create({
   },
   glassWrapper: {
     width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
     borderRadius: 26,
     overflow: "hidden",
     borderWidth: 1,
@@ -4043,8 +4058,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   formScroll: {
+    flexGrow: 1,
     padding: 20,
     paddingBottom: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
   formFooter: {
     paddingHorizontal: 20,
@@ -4084,6 +4102,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   formGlassWrap: {
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
     borderRadius: 26,
     overflow: "hidden",
     borderWidth: 1,
