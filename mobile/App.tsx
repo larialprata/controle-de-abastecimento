@@ -178,7 +178,6 @@ export default function App() {
   const [isMelosaUser, setIsMelosaUser] = useState(false);
 
   const [melosaObraCodigo, setMelosaObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
-  const [melosaCategoria, setMelosaCategoria] = useState<"ESTACIONARIA" | "MOVEL">("ESTACIONARIA");
   const [melosaPlacaTexto, setMelosaPlacaTexto] = useState("");
   const [melosaFornecedorTexto, setMelosaFornecedorTexto] = useState("");
   const [melosaTanqueNumero, setMelosaTanqueNumero] = useState<1 | 2>(1);
@@ -245,7 +244,7 @@ export default function App() {
       }
       return;
     }
-    if (screen.name === "melosa" && (screen.step === "register" || screen.step === "lacre_medidor")) {
+    if (screen.name === "melosa" && screen.step === "lacre_medidor") {
       safeCaptureLocationAndAddress();
     }
   }, [screen]);
@@ -355,7 +354,6 @@ export default function App() {
 
   function resetMelosaFlow() {
     setMelosaObraCodigo(OBRAS[0]?.codigo ?? 229);
-    setMelosaCategoria("ESTACIONARIA");
     setMelosaPlacaTexto("");
     setMelosaFornecedorTexto("");
     setMelosaTanqueNumero(1);
@@ -1707,11 +1705,11 @@ export default function App() {
     }
 
     if (!melosaPlacaTexto.trim()) {
-      Alert.alert("Placa obrigatória", "Informe a placa.");
+      Alert.alert("Ativo Melosa obrigatório", "Informe o Ativo Melosa.");
       return;
     }
     if (!melosaFornecedorTexto.trim()) {
-      Alert.alert("Fornecedor obrigatório", "Informe o fornecedor.");
+      Alert.alert("Ativo do Equipamento obrigatório", "Informe o Ativo do Equipamento.");
       return;
     }
     if (!melosaWdrCombustivelTipo.trim()) {
@@ -1760,13 +1758,14 @@ export default function App() {
       Alert.alert("Medidor inválido", "Informe números válidos no medidor inicial e final.");
       return;
     }
-    if (medidorFinal >= medidorInicial) {
+    if (medidorFinal <= medidorInicial) {
       Alert.alert(
         "Medidor inválido",
-        "O número final acumulado deve ser menor que o número inicial acumulado do medidor da melosa."
+        "O número final deve ser maior que o inicial (litros abastecidos = final − inicial)."
       );
       return;
     }
+    const litrosMelosa = medidorFinal - medidorInicial;
     if (localLatitude == null || localLongitude == null) {
       Alert.alert("Localização obrigatória", "Toque em “Obter localização” e aguarde as coordenadas.");
       return;
@@ -1874,10 +1873,10 @@ export default function App() {
       tipo: "RETIRADA_MELOSA",
       obra_codigo: melosaObraCodigo,
       data_hora: new Date().toISOString(),
-      litros: 0,
+      litros: litrosMelosa,
       placa_texto: melosaPlacaTexto.trim(),
       fornecedor_texto: melosaFornecedorTexto.trim(),
-      melosa_categoria: melosaCategoria,
+      melosa_categoria: null,
       tanque_numero: melosaTanqueNumero,
 
       melosa_km_registro: null,
@@ -1907,19 +1906,31 @@ export default function App() {
 
     enqueueOutbox(operationId, payload);
     setPending(outboxCount());
-    setMessage("Registro (melosa) salvo. Sincronizando se estiver online...");
+    setMessage("Registro (melosa) salvo localmente. Sincronizando...");
 
+    let syncedOk = false;
     try {
       const r = await syncOutboxWithTokenRetry();
-      if (r.synced > 0) setMessage(`Sincronizado: ${r.synced} registro(s).`);
+      syncedOk = r.synced > 0;
+      if (syncedOk) {
+        setMessage(`Sincronizado: ${r.synced} registro(s).`);
+      } else {
+        throw new Error("O servidor não confirmou o registro. Tente sincronizar novamente na tela inicial.");
+      }
     } catch (e: any) {
-      setMessage(`Falha ao sincronizar: ${String(e?.message ?? e)}`);
+      const msg = String(e?.message ?? e);
+      setMessage(`Falha ao sincronizar: ${msg}`);
+      Alert.alert(
+        "Sincronização pendente",
+        `As fotos foram enviadas, mas o servidor não gravou o registro completo.\n\n${msg}\n\nO registro ficou na fila local — use "Sincronizar pendentes" na tela inicial após atualizar a API.`
+      );
+      return;
     } finally {
       setPending(outboxCount());
     }
 
-      resetMelosaFlow();
-      setScreen({ name: "home" });
+    resetMelosaFlow();
+    setScreen({ name: "home" });
     } catch (e: any) {
       Alert.alert("Salvar falhou", String(e?.message ?? e));
     } finally {
@@ -1928,20 +1939,12 @@ export default function App() {
   }
 
   function continueMelosaRegister() {
-    if (melosaCategoria !== "ESTACIONARIA" && melosaCategoria !== "MOVEL") {
-      Alert.alert("Categoria obrigatória", "Selecione Estacionária ou Móvel.");
-      return;
-    }
     if (!melosaPlacaTexto.trim()) {
       Alert.alert("Ativo Melosa obrigatório", "Informe o Ativo Melosa.");
       return;
     }
     if (!melosaFornecedorTexto.trim()) {
-      Alert.alert("Patrimônio obrigatório", "Informe o Patrimônio do Equipamento.");
-      return;
-    }
-    if (localLatitude == null || localLongitude == null) {
-      Alert.alert("Localização obrigatória", "Toque em “Obter localização” e aguarde as coordenadas.");
+      Alert.alert("Ativo do Equipamento obrigatório", "Informe o Ativo do Equipamento.");
       return;
     }
 
@@ -2501,18 +2504,6 @@ export default function App() {
                     </Picker>
                   </View>
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Categoria</Text>
-                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                    <Picker
-                      selectedValue={melosaCategoria}
-                      onValueChange={(v) => setMelosaCategoria(v === "MOVEL" ? "MOVEL" : "ESTACIONARIA")}
-                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                    >
-                      <Picker.Item label="Estacionária" value="ESTACIONARIA" />
-                      <Picker.Item label="Móvel" value="MOVEL" />
-                    </Picker>
-                  </View>
-
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Ativo Melosa</Text>
                   <TextInput
                     value={melosaPlacaTexto}
@@ -2523,16 +2514,15 @@ export default function App() {
                     autoCapitalize="characters"
                   />
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Patrimônio do Equipamento</Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Ativo do Equipamento</Text>
                   <TextInput
                     value={melosaFornecedorTexto}
                     onChangeText={setMelosaFornecedorTexto}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Patrimônio do equipamento"
+                    placeholder="Patrimônio / identificação do equipamento"
                     placeholderTextColor={inputPlaceholderColor}
+                    autoCapitalize="characters"
                   />
-
-                  {melosaLocationFields}
                 </>
               ) : null}
 
@@ -2754,13 +2744,14 @@ export default function App() {
                     Número final do acumulado do medidor da melosa
                   </Text>
                   <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 2 }]}>
-                    Deve ser menor que o número inicial ({melosaMedidorAcumuladoInicialNumero.trim() || "—"}).
+                    Deve ser maior que o inicial ({melosaMedidorAcumuladoInicialNumero.trim() || "—"}). Litros = final −
+                    inicial.
                   </Text>
                   <TextInput
                     value={melosaMedidorAcumuladoFinalNumero}
                     onChangeText={setMelosaMedidorAcumuladoFinalNumero}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: 1540,0 (menor que o inicial)"
+                    placeholder="Ex.: 5100 (maior que o inicial)"
                     placeholderTextColor={inputPlaceholderColor}
                   />
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
