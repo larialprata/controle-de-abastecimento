@@ -36,6 +36,7 @@ async function main() {
         email: EMAIL,
         cnh_storage_path: null,
         role: ROLE,
+        access_platform: "both",
       },
       { onConflict: "user_id" }
     );
@@ -56,6 +57,7 @@ async function main() {
       email: EMAIL,
       cnh_storage_path: null,
       role: ROLE,
+      access_platform: "both",
     },
     { onConflict: "user_id" }
   );

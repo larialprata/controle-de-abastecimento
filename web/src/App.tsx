@@ -9,6 +9,8 @@ import MelosaBIPage from "./pages/MelosaBIPage";
 import TanqueBIPage from "./pages/TanqueBIPage";
 import UsersPage from "./pages/UsersPage";
 import ContratosPage from "./pages/ContratosPage";
+import EquipamentosPage from "./pages/EquipamentosPage";
+import type { WebPageKey } from "./lib/webPermissions";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
@@ -20,6 +22,32 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     );
   }
   if (!session) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function RequirePage({ page, children }: { page: WebPageKey; children: React.ReactNode }) {
+  const { canAccessPage, session, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#eef1f6] text-slate-600 dark:bg-[#0f1117] dark:text-slate-400">
+        A carregar…
+      </div>
+    );
+  }
+  if (!session) return <Navigate to="/login" replace />;
+  if (!canAccessPage(page)) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-8 text-center dark:border-amber-900/40 dark:bg-amber-950/25">
+        <h1 className="text-lg font-bold text-amber-900 dark:text-amber-200">Acesso negado</h1>
+        <p className="mt-2 text-sm text-amber-800/90 dark:text-amber-200/80">
+          Não tem permissão para ver esta página. Peça ao administrador.
+        </p>
+        <Link to="/" className="mt-6 inline-block text-sm font-semibold text-accent hover:underline">
+          Voltar ao início
+        </Link>
+      </div>
+    );
+  }
   return <>{children}</>;
 }
 
@@ -63,10 +91,46 @@ function AppRoutes() {
           </RequireAuth>
         }
       >
-        <Route index element={<HomePage />} />
-        <Route path="contratos" element={<ContratosPage />} />
-        <Route path="bi" element={<TanqueBIPage />} />
-        <Route path="bi/melosa" element={<MelosaBIPage />} />
+        <Route
+          index
+          element={
+            <RequirePage page="dashboard">
+              <HomePage />
+            </RequirePage>
+          }
+        />
+        <Route
+          path="contratos"
+          element={
+            <RequirePage page="contratos">
+              <ContratosPage />
+            </RequirePage>
+          }
+        />
+        <Route
+          path="equipamentos"
+          element={
+            <RequirePage page="equipamentos">
+              <EquipamentosPage />
+            </RequirePage>
+          }
+        />
+        <Route
+          path="bi"
+          element={
+            <RequirePage page="bi_tanque">
+              <TanqueBIPage />
+            </RequirePage>
+          }
+        />
+        <Route
+          path="bi/melosa"
+          element={
+            <RequirePage page="bi_melosa">
+              <MelosaBIPage />
+            </RequirePage>
+          }
+        />
         <Route
           path="usuarios"
           element={

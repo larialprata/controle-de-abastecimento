@@ -6,6 +6,7 @@ import {
   Droplets,
   FileText,
   Fuel,
+  HardHat,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
@@ -123,7 +124,7 @@ function MelosaDevolvidoSobraCard({
 }
 
 export default function HomePage() {
-  const { user, isAdmin, token } = useAuth();
+  const { user, isAdmin, token, canAccessPage } = useAuth();
   const email = user?.email ?? "";
   const shortName = email ? email.split("@")[0] : "";
   const greeting = isAdmin ? "Administrador" : shortName || "Utilizador";
@@ -707,24 +708,38 @@ export default function HomePage() {
       ) : null}
 
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        <DashboardCard
-          to="/bi"
-          title="BI Tanque"
-          description="Movimentações, mapa, exportação Descarbonize e tickets."
-          icon={TrendingDown}
-        />
-        <DashboardCard
-          to="/bi/melosa"
-          title="BI Melosa"
-          description="Retiradas melosa, fotos, lacre e Excel."
-          icon={Droplets}
-        />
-        <DashboardCard
-          to="/contratos"
-          title="Contratos"
-          description="Obras cadastradas para abastecimento."
-          icon={FileText}
-        />
+        {canAccessPage("bi_tanque") ? (
+          <DashboardCard
+            to="/bi"
+            title="BI Tanque"
+            description="Movimentações, mapa, exportação Descarbonize e tickets."
+            icon={TrendingDown}
+          />
+        ) : null}
+        {canAccessPage("bi_melosa") ? (
+          <DashboardCard
+            to="/bi/melosa"
+            title="BI Melosa"
+            description="Retiradas melosa, fotos, lacre e Excel."
+            icon={Droplets}
+          />
+        ) : null}
+        {canAccessPage("contratos") ? (
+          <DashboardCard
+            to="/contratos"
+            title="Contratos"
+            description="Obras cadastradas para abastecimento."
+            icon={FileText}
+          />
+        ) : null}
+        {canAccessPage("equipamentos") ? (
+          <DashboardCard
+            to="/equipamentos"
+            title="Equipamentos"
+            description="Ativos e equipamentos cadastrados para abastecimento melosa."
+            icon={HardHat}
+          />
+        ) : null}
       </div>
     </div>
   );

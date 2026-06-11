@@ -1,7 +1,12 @@
 import { useMemo, useRef } from "react";
 import { Printer, X } from "lucide-react";
+import type { ObraEmpresa } from "../../lib/obrasEmpresa";
+import DimensionalAbastecimentoTicket, {
+  type DimensionalAbastecimentoRow,
+} from "./DimensionalAbastecimentoTicket";
 
 export type MelosaTicketRow = {
+  numero: string;
   data: string;
   responsavelAbastecimento: string;
   placaAtivo: string;
@@ -9,10 +14,14 @@ export type MelosaTicketRow = {
   horimetro: string;
   litros: string;
   nomeMotorista: string;
+  equipamento: string;
+  obra: string;
+  observacoes: string;
 };
 
 type Props = {
   rows: MelosaTicketRow[];
+  variant: ObraEmpresa;
   onClose: () => void;
 };
 
@@ -43,7 +52,7 @@ function parseTicketDate(dataStr: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export default function MelosaTicketModal({ rows, onClose }: Props) {
+function DelurbMelosaTicket({ rows, onClose }: { rows: MelosaTicketRow[]; onClose: () => void }) {
   const printRef = useRef<HTMLDivElement>(null);
 
   const mesReferencia = useMemo(() => {
@@ -53,10 +62,6 @@ export default function MelosaTicketModal({ rows, onClose }: Props) {
     if (!d) return "—";
     return MONTHS_PT[d.getMonth()] ?? "—";
   }, [rows]);
-
-  function handlePrint() {
-    window.print();
-  }
 
   return (
     <div
@@ -72,7 +77,7 @@ export default function MelosaTicketModal({ rows, onClose }: Props) {
         <div className="mb-3 flex flex-wrap justify-end gap-2 print:hidden">
           <button
             type="button"
-            onClick={handlePrint}
+            onClick={() => window.print()}
             className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-900"
           >
             <Printer className="h-4 w-4" aria-hidden />
@@ -209,4 +214,31 @@ export default function MelosaTicketModal({ rows, onClose }: Props) {
       `}</style>
     </div>
   );
+}
+
+export default function MelosaTicketModal({ rows, variant, onClose }: Props) {
+  if (variant === "DIMENSIONAL") {
+    const dimensionalRows: DimensionalAbastecimentoRow[] = rows.map((row) => ({
+      numero: row.numero,
+      data: row.data,
+      insumo: row.insumo,
+      litros: row.litros,
+      equipamento: row.equipamento,
+      obra: row.obra,
+      horimetro: row.horimetro,
+      observacoes: row.observacoes,
+      nome: row.nomeMotorista,
+      responsavelAbastecimento: row.responsavelAbastecimento,
+    }));
+    return (
+      <DimensionalAbastecimentoTicket
+        rows={dimensionalRows}
+        tituloSub="Retirada Melosa"
+        printId="melosa-dimensional-ticket-print"
+        onClose={onClose}
+      />
+    );
+  }
+
+  return <DelurbMelosaTicket rows={rows} onClose={onClose} />;
 }

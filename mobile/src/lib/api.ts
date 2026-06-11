@@ -121,6 +121,7 @@ export async function apiPost<TResponse = any>(
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        "X-Client-Platform": "app",
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -223,7 +224,7 @@ export async function finishEmailSignupAfterRegister(email: string, password: st
 
 export async function apiGet<TResponse = any>(path: string, token: string) {
   const res = await fetchWithTimeout(`${API_URL}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, "X-Client-Platform": "app" },
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);

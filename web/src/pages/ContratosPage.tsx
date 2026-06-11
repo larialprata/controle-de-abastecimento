@@ -2,13 +2,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Plus, X } from "lucide-react";
 import { useAuth } from "../state/AuthContext";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { glassField, glassPanel } from "../lib/glass";
+import {
+  EMPRESA_LABEL,
+  OBRA_EMPRESAS,
+  type ObraComEmpresa,
+  type ObraEmpresa,
+} from "../lib/obrasEmpresa";
 
-type ObraRow = {
-  codigo: number;
-  nome: string;
-};
+type ObraRow = ObraComEmpresa;
+
+function fmtEmpresa(v: ObraEmpresa | null | undefined): string {
+  if (!v) return "—";
+  return EMPRESA_LABEL[v] ?? v;
+}
 
 export default function ContratosPage() {
   const { token, isAdmin } = useAuth();
@@ -16,11 +24,14 @@ export default function ContratosPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busca, setBusca] = useState("");
+  const [empresaFiltro, setEmpresaFiltro] = useState<"" | ObraEmpresa>("");
   const [addOpen, setAddOpen] = useState(false);
   const [addCodigo, setAddCodigo] = useState("");
   const [addNome, setAddNome] = useState("");
+  const [addEmpresa, setAddEmpresa] = useState<ObraEmpresa>("DIMENSIONAL");
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [savingEmpresaCodigo, setSavingEmpresaCodigo] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -42,17 +53,21 @@ export default function ContratosPage() {
 
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    if (!q) return obras;
-    return obras.filter(
-      (o) =>
+    return obras.filter((o) => {
+      if (empresaFiltro && o.empresa !== empresaFiltro) return false;
+      if (!q) return true;
+      return (
         String(o.codigo).includes(q) ||
-        (o.nome ?? "").toLowerCase().includes(q),
-    );
-  }, [obras, busca]);
+        (o.nome ?? "").toLowerCase().includes(q) ||
+        fmtEmpresa(o.empresa).toLowerCase().includes(q)
+      );
+    });
+  }, [obras, busca, empresaFiltro]);
 
   const openAddModal = useCallback(() => {
     setAddCodigo("");
     setAddNome("");
+    setAddEmpresa("DIMENSIONAL");
     setAddError(null);
     setAddOpen(true);
   }, []);
@@ -80,7 +95,7 @@ export default function ContratosPage() {
     setAddSaving(true);
     setAddError(null);
     try {
-      await apiPost("/v1/obras", token, { codigo, nome: nomeTrim });
+      await apiPost("/v1/obras", token, { codigo, nome: nomeTrim, empresa: addEmpresa });
       setAddOpen(false);
       setAddCodigo("");
       setAddNome("");
@@ -91,7 +106,24 @@ export default function ContratosPage() {
     } finally {
       setAddSaving(false);
     }
-  }, [addCodigo, addNome, load, token]);
+  }, [addCodigo, addEmpresa, addNome, load, token]);
+
+  const handleEmpresaChange = useCallback(
+    async (codigo: number, empresa: ObraEmpresa) => {
+      if (!token) return;
+      setSavingEmpresaCodigo(codigo);
+      setError(null);
+      try {
+        await apiPatch(`/v1/obras/${codigo}`, token, { empresa });
+        setObras((prev) => prev.map((o) => (o.codigo === codigo ? { ...o, empresa } : o)));
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Erro ao atualizar empresa");
+      } finally {
+        setSavingEmpresaCodigo(null);
+      }
+    },
+    [token],
+  );
 
   return (
     <div>
@@ -107,7 +139,7 @@ export default function ContratosPage() {
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">Contratos</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
           Obras cadastradas em <code className="rounded bg-black/5 px-1 text-xs dark:bg-black/20">public.obras</code>{" "}
-          (código e nome utilizados nos registos de abastecimento).
+          (código, nome e empresa — Dimensional ou Delurb).
         </p>
       </header>
 
@@ -142,13 +174,31 @@ export default function ContratosPage() {
           </div>
         ) : null}
 
+        <div className="flex min-w-[160px] flex-col gap-1">
+          <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Empresa
+          </span>
+          <select
+            className={glassField}
+            value={empresaFiltro}
+            onChange={(e) => setEmpresaFiltro(e.target.value as "" | ObraEmpresa)}
+          >
+            <option value="">Todas</option>
+            {OBRA_EMPRESAS.map((e) => (
+              <option key={e} value={e}>
+                {EMPRESA_LABEL[e]}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="min-w-[200px] flex-1 flex-col gap-1 sm:max-w-md">
           <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Pesquisar
           </span>
           <input
             type="search"
-            placeholder="Código ou nome da obra…"
+            placeholder="Código, obra ou empresa…"
             className={glassField}
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
@@ -164,7 +214,7 @@ export default function ContratosPage() {
 
       <div className={`overflow-hidden p-0 ${glassPanel}`}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] border-collapse text-sm">
+          <table className="w-full min-w-[640px] border-collapse text-sm">
             <thead>
               <tr>
                 <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
@@ -173,11 +223,15 @@ export default function ContratosPage() {
                 <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                   Obra
                 </th>
+                <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
+                  Empresa
+                </th>
               </tr>
             </thead>
             <tbody>
               {filtradas.map((o, idx) => {
                 const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-slate-50/90 dark:bg-white/[0.03]";
+                const savingEmpresa = savingEmpresaCodigo === o.codigo;
                 return (
                   <tr key={o.codigo} className={zebra}>
                     <td className="border-b border-slate-100 px-4 py-3 font-mono text-slate-700 dark:border-white/5 dark:text-slate-300">
@@ -186,12 +240,36 @@ export default function ContratosPage() {
                     <td className="border-b border-slate-100 px-4 py-3 dark:border-white/5">
                       <span className="font-semibold text-slate-900 dark:text-white">{o.nome}</span>
                     </td>
+                    <td className="border-b border-slate-100 px-4 py-3 dark:border-white/5">
+                      {isAdmin ? (
+                        <select
+                          className={`${glassField} min-w-[140px] py-1.5 text-sm`}
+                          value={o.empresa ?? ""}
+                          disabled={savingEmpresa || loading}
+                          onChange={(e) => {
+                            const v = e.target.value as ObraEmpresa;
+                            if (v) void handleEmpresaChange(o.codigo, v);
+                          }}
+                        >
+                          <option value="" disabled>
+                            Selecionar…
+                          </option>
+                          {OBRA_EMPRESAS.map((e) => (
+                            <option key={e} value={e}>
+                              {EMPRESA_LABEL[e]}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="font-medium text-slate-800 dark:text-slate-200">{fmtEmpresa(o.empresa)}</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
               {filtradas.length === 0 && !loading ? (
                 <tr>
-                  <td colSpan={2} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={3} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
                     Nenhuma obra para mostrar.
                   </td>
                 </tr>
@@ -227,7 +305,7 @@ export default function ContratosPage() {
               </button>
             </div>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-              O código deve ser único. Será usado nos registos de abastecimento no app.
+              O código deve ser único. Vincule o contrato a Dimensional ou Delurb.
             </p>
 
             <div className="mt-4 space-y-4">
@@ -259,6 +337,24 @@ export default function ContratosPage() {
                   onChange={(e) => setAddNome(e.target.value)}
                   disabled={addSaving}
                 />
+              </div>
+              <div>
+                <label htmlFor="add-obra-empresa" className="mb-1 block text-xs font-bold uppercase text-slate-500">
+                  Empresa
+                </label>
+                <select
+                  id="add-obra-empresa"
+                  className={glassField}
+                  value={addEmpresa}
+                  onChange={(e) => setAddEmpresa(e.target.value as ObraEmpresa)}
+                  disabled={addSaving}
+                >
+                  {OBRA_EMPRESAS.map((e) => (
+                    <option key={e} value={e}>
+                      {EMPRESA_LABEL[e]}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

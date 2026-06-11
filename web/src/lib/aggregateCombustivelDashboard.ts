@@ -111,7 +111,7 @@ export function placaAtivoMelosa(row: MovimentoRowBase): string {
   return normPlaca(row.placa_caminhao);
 }
 
-function passesCommonFilters(
+export function passesDashboardFilters(
   row: MovimentoRowBase & { obra_codigo?: number; data_hora?: string },
   filters: DashboardAggregateFilters,
 ): boolean {
@@ -120,6 +120,13 @@ function passesCommonFilters(
     matchObra(row.obra_codigo, filters.obraCodigo) &&
     matchUsuario(row, filters.usuarioId)
   );
+}
+
+function passesCommonFilters(
+  row: MovimentoRowBase & { obra_codigo?: number; data_hora?: string },
+  filters: DashboardAggregateFilters,
+): boolean {
+  return passesDashboardFilters(row, filters);
 }
 
 export function parseTanqueNumero(v: unknown): 1 | 2 | null {

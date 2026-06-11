@@ -3,6 +3,7 @@ import {
   BarChart3,
   Droplets,
   FileText,
+  HardHat,
   LayoutDashboard,
   LogOut,
   Moon,
@@ -12,6 +13,7 @@ import {
 import { useAuth } from "../../state/AuthContext";
 import { useTheme } from "../../state/ThemeContext";
 import { glassSidebar } from "../../lib/glass";
+import { navItemToPageKey } from "../../lib/webPermissions";
 
 export const APP_VERSION = "1.0.0";
 
@@ -26,16 +28,20 @@ type NavItem = {
 const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/contratos", label: "Contratos", icon: FileText },
+  { to: "/equipamentos", label: "Equipamentos", icon: HardHat },
   { to: "/usuarios", label: "Usuários", icon: Users, adminOnly: true },
   { to: "/bi", label: "BI Tanque", icon: BarChart3, end: true },
   { to: "/bi/melosa", label: "BI Melosa", icon: Droplets },
 ];
 
 export default function Sidebar() {
-  const { signOut, isAdmin } = useAuth();
+  const { signOut, isAdmin, canAccessPage } = useAuth();
   const { theme, setTheme } = useTheme();
 
-  const items = NAV.filter((item) => !item.adminOnly || isAdmin);
+  const items = NAV.filter((item) => {
+    if (item.adminOnly) return isAdmin;
+    return canAccessPage(navItemToPageKey(item.to));
+  });
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     [

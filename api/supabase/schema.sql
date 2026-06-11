@@ -4,10 +4,19 @@
 -- Para gen_random_uuid()
 create extension if not exists pgcrypto;
 
+-- Empresa do contrato (Dimensional ou Delurb)
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'obra_empresa') then
+    create type public.obra_empresa as enum ('DIMENSIONAL', 'DELURB');
+  end if;
+end $$;
+
 -- Obras (pré-cadastradas)
 create table if not exists public.obras (
   codigo int primary key,
-  nome text not null
+  nome text not null,
+  empresa public.obra_empresa
 );
 
 -- Seed das obras informadas
@@ -24,6 +33,12 @@ insert into public.obras (codigo, nome) values
   (249, 'ATA')
 on conflict (codigo) do update
 set nome = excluded.nome;
+
+-- Equipamentos (cadastro melosa)
+create table if not exists public.equipamentos (
+  ativo text primary key,
+  nome text not null
+);
 
 -- Tipo de movimentação (MVP)
 do $$
@@ -153,6 +168,12 @@ create table if not exists public.profiles (
   role text not null default 'user' check (role in ('admin', 'user')),
   active boolean not null default false,
   is_melosa boolean not null default false,
+  access_platform text not null default 'app' check (access_platform in ('app', 'web', 'both')),
+  web_permissions text[] not null default array['dashboard']::text[]
+    check (
+      web_permissions <@ array['dashboard', 'contratos', 'equipamentos', 'bi_tanque', 'bi_melosa']::text[]
+      and 'dashboard' = any (web_permissions)
+    ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

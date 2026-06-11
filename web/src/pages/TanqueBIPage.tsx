@@ -1,17 +1,37 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import TanqueTicketModal, { type TanqueTicketRow } from "../components/bi/TanqueTicketModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
 import { useAuth } from "../state/AuthContext";
+import { apiGet, apiPost } from "../lib/api";
+import { fmtTicketNumero, ticketNumeroParaFiltro } from "../lib/ticketNumero";
 import { downloadTanqueDescarbonizeExcel, type TanqueExcelRowInput } from "../lib/tanqueDescarbonizeExcel";
 import { resolveLitrosMovimentoTanque } from "../lib/descarbonizeExcel";
-import { biTableRowKey, resolveSelectedRows } from "../lib/biSelection";
+import { biMovementRowKey, resolveSelectedRows } from "../lib/biSelection";
+import {
+  defaultPeriodoMesAtual,
+  parseDateInputValue,
+  passesDashboardFilters,
+  toDateInputValue,
+} from "../lib/aggregateCombustivelDashboard";
 import { glassField, glassPanel } from "../lib/glass";
+import {
+  EMPRESA_LABEL,
+  OBRA_EMPRESAS,
+  obraCodigosDaEmpresa,
+  empresasDasLinhas,
+  filtrarObrasPorEmpresa,
+  type ObraComEmpresa,
+  type ObraEmpresa,
+} from "../lib/obrasEmpresa";
+
+type ObraRow = ObraComEmpresa;
 
 type LinhaTanque = Record<string, unknown> & {
   id?: string;
   operation_id?: string;
+  ticket_numero?: number | null;
   usuario_id?: string;
   usuario_full_name?: string | null;
   tipo?: string;
@@ -185,6 +205,7 @@ function buildTanqueTicketRow(m: LinhaTanque): TanqueTicketRow {
   const entrada = isEntradaTanque(m);
   const nota = m.nota_numero != null && String(m.nota_numero).trim() ? String(m.nota_numero).trim() : "";
   return {
+    numero: fmtTicketNumero(m.ticket_numero),
     data: fmtDateOnly(m.data_hora),
     responsavelAbastecimento: responsavel,
     placaAtivo: entrada ? (nota ? `NF ${nota}` : "—") : fmtPatrimonioRow(m),
@@ -195,12 +216,16 @@ function buildTanqueTicketRow(m: LinhaTanque): TanqueTicketRow {
       ? `Entrada${fmtEquipamentoRow(m) !== "—" ? ` · ${fmtEquipamentoRow(m)}` : ""}`
       : fmtEquipamentoRow(m),
     movimento: entrada ? "Entrada" : "Saída",
+    obra: fmtObra(m),
+    observacoes: m.obs != null && String(m.obs).trim() ? String(m.obs).trim() : "",
+    nome: responsavel,
   };
 }
 
-const TIPOS = ["", "ENTRADA_TANQUE_OBRA", "RETIRADA_TANQUE"] as const;
 const PAGE_SIZE = 500;
 const TABLE_COL_COUNT = 25;
+/** Altura visível ≈ 10 linhas + cabeçalho; o restante rola na barra lateral */
+const TABLE_SCROLL_MAX_HEIGHT = "min(28.5rem, 52vh)";
 
 const labelCls =
   "flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400";
@@ -214,12 +239,203 @@ const tdCls =
 const tdPhotoCls =
   "border-b border-white/25 px-2 py-2 text-center align-middle dark:border-white/5";
 
+type TanqueTableProps = {
+  title: string;
+  subtitle: string;
+  rows: LinhaTanque[];
+  loading: boolean;
+  emptyMessage: string;
+  authToken: string;
+  selectedKeys: string[];
+  setSelectedKeys: Dispatch<SetStateAction<string[]>>;
+  rowKey: (m: LinhaTanque) => string;
+  onOpenPhoto: (src: string) => void;
+};
+
+function TanqueBiScrollTable({
+  title,
+  subtitle,
+  rows,
+  loading,
+  emptyMessage,
+  authToken,
+  selectedKeys,
+  setSelectedKeys,
+  rowKey,
+  onOpenPhoto,
+}: TanqueTableProps) {
+  const visibleKeys = useMemo(() => rows.map((m) => rowKey(m)), [rows, rowKey]);
+  const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selectedKeys.includes(k));
+
+  return (
+    <div className={`flex min-h-0 flex-col overflow-hidden ${glassPanel} p-0`}>
+      <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
+        <h2 className="text-base font-bold text-slate-900 dark:text-white">{title}</h2>
+        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
+      </div>
+      <div className="overflow-auto" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
+        <table className="w-max min-w-full border-collapse text-sm">
+          <thead>
+            <tr className="text-left align-middle">
+              <th className={thCls}>
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setSelectedKeys((prev) => {
+                      if (checked) {
+                        return Array.from(new Set([...prev, ...visibleKeys]));
+                      }
+                      const visibleSet = new Set(visibleKeys);
+                      return prev.filter((k) => !visibleSet.has(k));
+                    });
+                  }}
+                  aria-label={`Selecionar todas em ${title}`}
+                />
+              </th>
+              <th className={thCls}>Data/hora</th>
+              <th className={thCls}>Obra</th>
+              <th className={thCls}>Usuário</th>
+              <th className={thCls}>Litros</th>
+              <th className={thCls}>Insumo</th>
+              <th className={thCls}>Nº nota</th>
+              <th className={thCls}>Foto nota</th>
+              <th className={thCls}>Valor unit. (L)</th>
+              <th className={thCls}>Patrimônio</th>
+              <th className={thCls}>Equipamento</th>
+              <th className={thCls}>Horímetro</th>
+              <th className={thCls}>Tanque</th>
+              <th className={thCls}>Lacre tanque</th>
+              <th className={thCls}>Foto lacre T.</th>
+              <th className={thCls}>Lacre melosa</th>
+              <th className={thCls}>Foto lacre M.</th>
+              <th className={thCls}>Med. ini.</th>
+              <th className={thCls}>Foto med. ini.</th>
+              <th className={thCls}>Med. fin.</th>
+              <th className={thCls}>Foto med. fin.</th>
+              <th className={thCls}>Confirmação</th>
+              <th className={thCls}>Local</th>
+              <th className={thCls}>Obs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((m, idx) => {
+              const insumo = fmtCombustivelCurto(m.combustivel_tipo);
+              const valorUnit =
+                isEntradaTanque(m) && m.valor_unitario != null && m.valor_unitario !== ""
+                  ? fmt(m.valor_unitario)
+                  : "—";
+              const ret = isRetiradaTanque(m);
+              const ent = isEntradaTanque(m);
+              const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
+              const k = rowKey(m);
+              const checked = selectedKeys.includes(k);
+              const usuarioCell =
+                typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
+                  ? m.usuario_full_name.trim()
+                  : "—";
+              const photo = (path: string | undefined, label = "Abrir") => (
+                <StoragePhotoCell
+                  storagePath={path}
+                  token={authToken}
+                  onOpen={onOpenPhoto}
+                  shortLabel={label}
+                />
+              );
+
+              return (
+                <tr key={k} className={zebra}>
+                  <td className={`${tdCls} w-10`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        const isChecked = e.target.checked;
+                        setSelectedKeys((prev) =>
+                          isChecked ? [...prev, k] : prev.filter((x) => x !== k),
+                        );
+                      }}
+                      aria-label="Selecionar movimentação"
+                    />
+                  </td>
+                  <td className={`${tdCls} max-w-[200px]`}>{fmtDateBr(m.data_hora)}</td>
+                  <td className={`${tdCls} max-w-[220px]`}>{fmtObra(m)}</td>
+                  <td className={`${tdCls} max-w-[200px]`}>{usuarioCell}</td>
+                  <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
+                  <td className={`${tdCls} max-w-[120px]`}>{insumo}</td>
+                  <td className={`${tdCls} max-w-[100px]`}>{ent ? fmt(m.nota_numero) : "—"}</td>
+                  <td className={tdPhotoCls}>{ent ? photo(storagePath(m, "nota_storage_path"), "Nota") : "—"}</td>
+                  <td className={`${tdCls} max-w-[120px]`}>{valorUnit}</td>
+                  <td className={`${tdCls} max-w-[120px]`}>{fmtPatrimonioRow(m)}</td>
+                  <td className={`${tdCls} max-w-[160px]`}>{fmtEquipamentoRow(m)}</td>
+                  <td className={`${tdCls} max-w-[120px]`}>{fmtHorimetroRow(m)}</td>
+                  <td className={`${tdCls} max-w-[72px]`}>{fmtTanqueNumRow(m)}</td>
+                  <td className={`${tdCls} max-w-[100px]`}>{ret ? fmt(m.lacre_tanque_numero) : "—"}</td>
+                  <td className={tdPhotoCls}>
+                    {ret ? photo(storagePath(m, "lacre_tanque_storage_path"), "Lacre T.") : "—"}
+                  </td>
+                  <td className={`${tdCls} max-w-[100px]`}>{ret ? fmt(m.lacre_melosa_numero) : "—"}</td>
+                  <td className={tdPhotoCls}>
+                    {ret ? photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.") : "—"}
+                  </td>
+                  <td className={`${tdCls} max-w-[100px]`}>
+                    {ret ? fmt(m.medidor_tanque_numero_inicial) : "—"}
+                  </td>
+                  <td className={tdPhotoCls}>
+                    {ret
+                      ? photo(storagePath(m, "medidor_tanque_foto_inicial_storage_path"), "Med. ini.")
+                      : "—"}
+                  </td>
+                  <td className={`${tdCls} max-w-[100px]`}>
+                    {ret ? fmt(m.medidor_tanque_numero_final) : "—"}
+                  </td>
+                  <td className={tdPhotoCls}>
+                    {ret
+                      ? photo(storagePath(m, "medidor_tanque_foto_final_storage_path"), "Med. fin.")
+                      : "—"}
+                  </td>
+                  <td className={tdPhotoCls}>
+                    {ret
+                      ? photo(storagePath(m, "confirmacao_abastecimento_foto_storage_path"), "Confirm.")
+                      : "—"}
+                  </td>
+                  <td className={`${tdCls} max-w-[200px]`}>{fmtLocal(m)}</td>
+                  <td className={`${tdCls} max-w-[200px]`}>{fmt(m.obs)}</td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && !loading ? (
+              <tr>
+                <td colSpan={TABLE_COL_COUNT} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                  {emptyMessage}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 10 ? (
+        <p className="border-t border-white/30 px-4 py-2 text-xs text-slate-500 dark:border-white/10 dark:text-slate-400">
+          {rows.length} registros — use a barra de rolagem para ver além das 10 primeiras linhas.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function TanqueBIPage() {
   const { token } = useAuth();
+  const periodoInicial = defaultPeriodoMesAtual();
   const [raw, setRaw] = useState<LinhaTanque[]>([]);
+  const [obras, setObras] = useState<ObraRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [filtroTipo, setFiltroTipo] = useState<string>("");
+  const [dataDe, setDataDe] = useState(toDateInputValue(periodoInicial.de));
+  const [dataAte, setDataAte] = useState(toDateInputValue(periodoInicial.ate));
+  const [empresaFiltro, setEmpresaFiltro] = useState<"" | ObraEmpresa>("");
+  const [contratoFiltro, setContratoFiltro] = useState("");
+  const [ticketFiltro, setTicketFiltro] = useState("");
   const [busca, setBusca] = useState("");
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -246,7 +462,9 @@ export default function TanqueBIPage() {
         if (chunk.length < PAGE_SIZE) break;
         offset += PAGE_SIZE;
       }
+      const obrasJson = await apiGet<{ obras: ObraRow[] }>("/v1/obras", token);
       setRaw(rows);
+      setObras(obrasJson?.obras ?? []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erro ao carregar");
     } finally {
@@ -258,27 +476,60 @@ export default function TanqueBIPage() {
     load();
   }, [load]);
 
+  const obrasContratoOpcoes = useMemo(
+    () => filtrarObrasPorEmpresa(obras, empresaFiltro),
+    [obras, empresaFiltro],
+  );
+
+  const obraCodigosEmpresa = useMemo(
+    () => obraCodigosDaEmpresa(obras, empresaFiltro),
+    [obras, empresaFiltro],
+  );
+
+  useEffect(() => {
+    if (!contratoFiltro) return;
+    const cod = Number(contratoFiltro);
+    if (!obrasContratoOpcoes.some((o) => o.codigo === cod)) {
+      setContratoFiltro("");
+    }
+  }, [contratoFiltro, obrasContratoOpcoes]);
+
+  const filtros = useMemo(
+    () => ({
+      de: parseDateInputValue(dataDe),
+      ate: parseDateInputValue(dataAte),
+      obraCodigo: contratoFiltro ? Number(contratoFiltro) : null,
+    }),
+    [contratoFiltro, dataAte, dataDe],
+  );
+
   const filtradas = useMemo(() => {
-    let rows = raw;
-    if (filtroTipo) {
-      rows = rows.filter((r) => r.tipo === filtroTipo);
+    let rows = raw.filter((r) => passesDashboardFilters(r, filtros));
+    if (obraCodigosEmpresa) {
+      rows = rows.filter(
+        (r) => typeof r.obra_codigo === "number" && obraCodigosEmpresa.has(r.obra_codigo),
+      );
+    }
+    const ticketQ = ticketFiltro.trim();
+    if (ticketQ) {
+      rows = rows.filter((r) => ticketNumeroParaFiltro(r.ticket_numero).includes(ticketQ));
     }
     const q = busca.trim().toLowerCase();
-    if (q) {
-      rows = rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
-    }
+    if (q) rows = rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
     return rows;
-  }, [raw, filtroTipo, busca]);
+  }, [raw, busca, filtros, obraCodigosEmpresa, ticketFiltro]);
 
-  const retiradasFiltradas = useMemo(() => filtradas.filter(isRetiradaTanque), [filtradas]);
+  const filtroTextoAtivo = Boolean(busca.trim() || contratoFiltro || empresaFiltro || ticketFiltro.trim());
 
-  const rowKey = useCallback((m: LinhaTanque, idx: number) => biTableRowKey(m, idx), []);
+  const aberturasFiltradas = useMemo(() => filtradas.filter(isRetiradaTanque), [filtradas]);
+  const entradasFiltradas = useMemo(() => filtradas.filter(isEntradaTanque), [filtradas]);
+  const retiradasFiltradas = aberturasFiltradas;
 
-  const visibleKeys = useMemo(() => filtradas.map((m, idx) => rowKey(m, idx)), [filtradas, rowKey]);
-  const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selectedKeys.includes(k));
+  const rowKey = useCallback((m: LinhaTanque) => biMovementRowKey(m), []);
+
   const selectedRows = useMemo(
-    () => resolveSelectedRows(filtradas, selectedKeys, rowKey),
-    [filtradas, selectedKeys, rowKey],
+    () => resolveSelectedRows(filtradas, selectedKeys, (row) => biMovementRowKey(row)),
+    [filtradas, selectedKeys],
   );
   const selectedTicketRows = useMemo(() => selectedRows.filter(isTicketavelTanque), [selectedRows]);
   const selectedOperationIds = useMemo(() => {
@@ -294,6 +545,54 @@ export default function TanqueBIPage() {
     () => selectedTicketRows.map((m) => buildTanqueTicketRow(m)),
     [selectedTicketRows],
   );
+
+  const ticketVariant = useMemo((): ObraEmpresa => {
+    const set = empresasDasLinhas(
+      obras,
+      selectedTicketRows.map((r) => r.obra_codigo),
+    );
+    if (set.has("DIMENSIONAL")) return "DIMENSIONAL";
+    return "DELURB";
+  }, [obras, selectedTicketRows]);
+
+  const openTicket = useCallback(async () => {
+    if (!token) return;
+    const empresas = empresasDasLinhas(
+      obras,
+      selectedTicketRows.map((r) => r.obra_codigo),
+    );
+    if (empresas.size > 1) {
+      window.alert("Selecione registros de uma única empresa para gerar o ticket.");
+      return;
+    }
+
+    const operationIds = selectedTicketRows
+      .map((r) => (typeof r.operation_id === "string" ? r.operation_id : ""))
+      .filter(Boolean);
+    if (operationIds.length === 0) return;
+
+    setLoading(true);
+    try {
+      const json = (await apiPost("/v1/tickets/numeros", token, {
+        origem: "tanque",
+        operation_ids: operationIds,
+      })) as { numeros?: Record<string, number> };
+      const numeros = json?.numeros ?? {};
+      setRaw((prev) =>
+        prev.map((r) => {
+          const op = typeof r.operation_id === "string" ? r.operation_id : "";
+          const n = op ? numeros[op] : undefined;
+          if (n != null) return { ...r, ticket_numero: n };
+          return r;
+        }),
+      );
+      setTicketOpen(true);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : "Erro ao gerar número do ticket");
+    } finally {
+      setLoading(false);
+    }
+  }, [obras, selectedTicketRows, token]);
 
   const mapPoints = useMemo((): MapPoint[] => {
     const out: MapPoint[] = [];
@@ -494,14 +793,49 @@ export default function TanqueBIPage() {
           </button>
         </div>
         <div className="flex flex-col gap-1">
-          <span className={labelCls}>Tipo</span>
-          <select className={glassField} value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}>
-            {TIPOS.map((t) => (
-              <option key={t || "all"} value={t}>
-                {t === "" ? "Todos" : t === "ENTRADA_TANQUE_OBRA" ? "Entrada" : "Retirada"}
+          <span className={labelCls}>De</span>
+          <input type="date" className={glassField} value={dataDe} onChange={(e) => setDataDe(e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={labelCls}>Até</span>
+          <input type="date" className={glassField} value={dataAte} onChange={(e) => setDataAte(e.target.value)} />
+        </div>
+        <div className="flex min-w-[160px] flex-col gap-1">
+          <span className={labelCls}>Empresa</span>
+          <select
+            className={glassField}
+            value={empresaFiltro}
+            onChange={(e) => setEmpresaFiltro(e.target.value as "" | ObraEmpresa)}
+          >
+            <option value="">Todas</option>
+            {OBRA_EMPRESAS.map((e) => (
+              <option key={e} value={e}>
+                {EMPRESA_LABEL[e]}
               </option>
             ))}
           </select>
+        </div>
+        <div className="flex min-w-[180px] flex-col gap-1">
+          <span className={labelCls}>Contrato</span>
+          <select className={glassField} value={contratoFiltro} onChange={(e) => setContratoFiltro(e.target.value)}>
+            <option value="">Todos</option>
+            {obrasContratoOpcoes.map((o) => (
+              <option key={o.codigo} value={String(o.codigo)}>
+                {o.codigo} — {o.nome}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex min-w-[120px] flex-col gap-1">
+          <span className={labelCls}>Nº ticket</span>
+          <input
+            type="search"
+            inputMode="numeric"
+            className={glassField}
+            placeholder="Ex.: 4586"
+            value={ticketFiltro}
+            onChange={(e) => setTicketFiltro(e.target.value)}
+          />
         </div>
         <div className="min-w-[200px] flex-1 flex-col gap-1 sm:min-w-[260px]">
           <span className={labelCls}>Buscar</span>
@@ -516,12 +850,13 @@ export default function TanqueBIPage() {
       </div>
 
       <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
-        Mostrando <strong className="text-slate-900 dark:text-white">{filtradas.length}</strong> de{" "}
-        <strong className="text-slate-900 dark:text-white">{raw.length}</strong> linhas
-        {filtroTipo || busca ? " (filtrado)" : ""} ·{" "}
-        <strong className="text-slate-900 dark:text-white">{retiradasFiltradas.length}</strong> retirada
-        {retiradasFiltradas.length === 1 ? "" : "s"} para Excel ·{" "}
-        <strong className="text-slate-900 dark:text-white">{mapPoints.length}</strong> com coordenadas no mapa.
+        <strong className="text-slate-900 dark:text-white">{aberturasFiltradas.length}</strong> abertura
+        {aberturasFiltradas.length === 1 ? "" : "s"} ·{" "}
+        <strong className="text-slate-900 dark:text-white">{entradasFiltradas.length}</strong> entrada
+        {entradasFiltradas.length === 1 ? "" : "s"}
+        {filtroTextoAtivo ? " (filtrado)" : ""} ·{" "}
+        <strong className="text-slate-900 dark:text-white">{retiradasFiltradas.length}</strong> para Excel ·{" "}
+        <strong className="text-slate-900 dark:text-white">{mapPoints.length}</strong> no mapa.
       </p>
 
       {error ? (
@@ -530,198 +865,72 @@ export default function TanqueBIPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_minmax(300px,440px)] xl:grid-cols-[1fr_minmax(340px,480px)]">
-        <div className={`flex min-h-0 flex-col overflow-hidden ${glassPanel} p-0`}>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/40 px-4 py-3 dark:border-white/10">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">Movimentações Tanque</h2>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setTicketOpen(true)}
-                disabled={loading || selectedTicketRows.length === 0}
-                className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Ticket{selectedTicketRows.length > 0 ? ` (${selectedTicketRows.length})` : ""}
-              </button>
-              <button
-                type="button"
-                onClick={handleEditSelected}
-                disabled={loading || selectedOperationIds.length !== 1}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Editar selecionada
-              </button>
-              <button
-                type="button"
-                onClick={openDeleteConfirm}
-                disabled={loading || selectedOperationIds.length === 0}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Excluir selecionadas
-              </button>
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                {filtradas.length} {filtradas.length === 1 ? "linha" : "linhas"} · {selectedOperationIds.length}{" "}
-                selecionada{selectedOperationIds.length === 1 ? "" : "s"}
-              </span>
-            </div>
-          </div>
-          <div className="max-h-[min(72vh,780px)] overflow-auto">
-            <table className="w-max min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="text-left align-middle">
-                  <th className={thCls}>
-                    <input
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setSelectedKeys((prev) => {
-                          if (checked) {
-                            const merged = new Set([...prev, ...visibleKeys]);
-                            return Array.from(merged);
-                          }
-                          const visibleSet = new Set(visibleKeys);
-                          return prev.filter((k) => !visibleSet.has(k));
-                        });
-                      }}
-                      aria-label="Selecionar todas as movimentações visíveis"
-                    />
-                  </th>
-                  <th className={thCls}>Data/hora</th>
-                  <th className={thCls}>Obra</th>
-                  <th className={thCls}>Usuário</th>
-                  <th className={thCls}>Movimento</th>
-                  <th className={thCls}>Litros</th>
-                  <th className={thCls}>Insumo</th>
-                  <th className={thCls}>Nº nota</th>
-                  <th className={thCls}>Foto nota</th>
-                  <th className={thCls}>Valor unit. (L)</th>
-                  <th className={thCls}>Patrimônio</th>
-                  <th className={thCls}>Equipamento</th>
-                  <th className={thCls}>Horímetro</th>
-                  <th className={thCls}>Tanque</th>
-                  <th className={thCls}>Lacre tanque</th>
-                  <th className={thCls}>Foto lacre T.</th>
-                  <th className={thCls}>Lacre melosa</th>
-                  <th className={thCls}>Foto lacre M.</th>
-                  <th className={thCls}>Med. ini.</th>
-                  <th className={thCls}>Foto med. ini.</th>
-                  <th className={thCls}>Med. fin.</th>
-                  <th className={thCls}>Foto med. fin.</th>
-                  <th className={thCls}>Confirmação</th>
-                  <th className={thCls}>Local</th>
-                  <th className={thCls}>Obs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtradas.map((m, idx) => {
-                  const movimento = isEntradaTanque(m) ? "Entrada" : isRetiradaTanque(m) ? "Saída" : "—";
-                  const insumo = fmtCombustivelCurto(m.combustivel_tipo);
-                  const valorUnit =
-                    isEntradaTanque(m) && m.valor_unitario != null && m.valor_unitario !== ""
-                      ? fmt(m.valor_unitario)
-                      : "—";
-                  const ret = isRetiradaTanque(m);
-                  const ent = isEntradaTanque(m);
-                  const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
-                  const k = rowKey(m, idx);
-                  const checked = selectedKeys.includes(k);
+      <div className={`mb-4 flex flex-wrap items-center justify-end gap-2 ${glassPanel} px-4 py-3`}>
+        <button
+          type="button"
+          onClick={() => void openTicket()}
+          disabled={loading || selectedTicketRows.length === 0}
+          className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Ticket{selectedTicketRows.length > 0 ? ` (${selectedTicketRows.length})` : ""}
+        </button>
+        <button
+          type="button"
+          onClick={handleEditSelected}
+          disabled={loading || selectedOperationIds.length !== 1}
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Editar selecionada
+        </button>
+        <button
+          type="button"
+          onClick={openDeleteConfirm}
+          disabled={loading || selectedOperationIds.length === 0}
+          className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Excluir selecionadas
+        </button>
+        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          {selectedOperationIds.length} selecionada{selectedOperationIds.length === 1 ? "" : "s"}
+        </span>
+      </div>
 
-                  const usuarioCell =
-                    typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
-                      ? m.usuario_full_name.trim()
-                      : "—";
-
-                  const photo = (path: string | undefined, label = "Abrir") => (
-                    <StoragePhotoCell
-                      storagePath={path}
-                      token={authToken}
-                      onOpen={setLightboxSrc}
-                      shortLabel={label}
-                    />
-                  );
-
-                  return (
-                    <tr key={k} className={zebra}>
-                      <td className={`${tdCls} w-10`}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const isChecked = e.target.checked;
-                            setSelectedKeys((prev) =>
-                              isChecked ? [...prev, k] : prev.filter((x) => x !== k),
-                            );
-                          }}
-                          aria-label="Selecionar movimentação"
-                        />
-                      </td>
-                      <td className={`${tdCls} max-w-[200px]`}>{fmtDateBr(m.data_hora)}</td>
-                      <td className={`${tdCls} max-w-[220px]`}>{fmtObra(m)}</td>
-                      <td className={`${tdCls} max-w-[200px]`}>{usuarioCell}</td>
-                      <td className={`${tdCls} max-w-[100px]`}>{movimento}</td>
-                      <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
-                      <td className={`${tdCls} max-w-[120px]`}>{insumo}</td>
-                      <td className={`${tdCls} max-w-[100px]`}>{ent ? fmt(m.nota_numero) : "—"}</td>
-                      <td className={tdPhotoCls}>
-                        {ent ? photo(storagePath(m, "nota_storage_path"), "Nota") : "—"}
-                      </td>
-                      <td className={`${tdCls} max-w-[120px]`}>{valorUnit}</td>
-                      <td className={`${tdCls} max-w-[120px]`}>{fmtPatrimonioRow(m)}</td>
-                      <td className={`${tdCls} max-w-[160px]`}>{fmtEquipamentoRow(m)}</td>
-                      <td className={`${tdCls} max-w-[120px]`}>{fmtHorimetroRow(m)}</td>
-                      <td className={`${tdCls} max-w-[72px]`}>{fmtTanqueNumRow(m)}</td>
-                      <td className={`${tdCls} max-w-[100px]`}>{ret ? fmt(m.lacre_tanque_numero) : "—"}</td>
-                      <td className={tdPhotoCls}>
-                        {ret ? photo(storagePath(m, "lacre_tanque_storage_path"), "Lacre T.") : "—"}
-                      </td>
-                      <td className={`${tdCls} max-w-[100px]`}>{ret ? fmt(m.lacre_melosa_numero) : "—"}</td>
-                      <td className={tdPhotoCls}>
-                        {ret ? photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.") : "—"}
-                      </td>
-                      <td className={`${tdCls} max-w-[100px]`}>
-                        {ret ? fmt(m.medidor_tanque_numero_inicial) : "—"}
-                      </td>
-                      <td className={tdPhotoCls}>
-                        {ret
-                          ? photo(storagePath(m, "medidor_tanque_foto_inicial_storage_path"), "Med. ini.")
-                          : "—"}
-                      </td>
-                      <td className={`${tdCls} max-w-[100px]`}>
-                        {ret ? fmt(m.medidor_tanque_numero_final) : "—"}
-                      </td>
-                      <td className={tdPhotoCls}>
-                        {ret
-                          ? photo(storagePath(m, "medidor_tanque_foto_final_storage_path"), "Med. fin.")
-                          : "—"}
-                      </td>
-                      <td className={tdPhotoCls}>
-                        {ret
-                          ? photo(storagePath(m, "confirmacao_abastecimento_foto_storage_path"), "Confirm.")
-                          : "—"}
-                      </td>
-                      <td className={`${tdCls} max-w-[200px]`}>{fmtLocal(m)}</td>
-                      <td className={`${tdCls} max-w-[200px]`}>{fmt(m.obs)}</td>
-                    </tr>
-                  );
-                })}
-                {filtradas.length === 0 && !loading ? (
-                  <tr>
-                    <td colSpan={TABLE_COL_COUNT} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
-                      Nenhuma linha. Confirme se o app já sincronizou os registros.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+      <div className="flex flex-col gap-5">
+        <div className="grid gap-5 xl:grid-cols-2">
+          <TanqueBiScrollTable
+            title="Abertura"
+            subtitle="Retiradas do tanque (saída para abastecimento)"
+            rows={aberturasFiltradas}
+            loading={loading}
+            emptyMessage="Nenhuma abertura registrada."
+            authToken={authToken}
+            selectedKeys={selectedKeys}
+            setSelectedKeys={setSelectedKeys}
+            rowKey={rowKey}
+            onOpenPhoto={setLightboxSrc}
+          />
+          <TanqueBiScrollTable
+            title="Entrada"
+            subtitle="Entradas de combustível no tanque da obra"
+            rows={entradasFiltradas}
+            loading={loading}
+            emptyMessage="Nenhuma entrada registrada."
+            authToken={authToken}
+            selectedKeys={selectedKeys}
+            setSelectedKeys={setSelectedKeys}
+            rowKey={rowKey}
+            onOpenPhoto={setLightboxSrc}
+          />
         </div>
 
         <div className={`flex min-h-0 flex-col overflow-hidden ${glassPanel} p-0`}>
           <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
             <h2 className="text-base font-bold text-slate-900 dark:text-white">Mapa das localizações</h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Aberturas e entradas com coordenadas GPS
+            </p>
           </div>
-          <div className="relative min-h-[320px] flex-1 overflow-hidden rounded-b-2xl">
+          <div className="relative min-h-[360px] overflow-hidden rounded-b-2xl md:min-h-[420px]">
             <MovementsMap points={mapPoints} />
           </div>
         </div>
@@ -772,7 +981,7 @@ export default function TanqueBIPage() {
       ) : null}
 
       {ticketOpen && ticketRows.length > 0 ? (
-        <TanqueTicketModal rows={ticketRows} onClose={() => setTicketOpen(false)} />
+        <TanqueTicketModal rows={ticketRows} variant={ticketVariant} onClose={() => setTicketOpen(false)} />
       ) : null}
     </div>
   );

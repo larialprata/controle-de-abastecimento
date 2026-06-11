@@ -197,8 +197,6 @@ export default function App() {
   const [melosaHorimetroEquipamentoFotoUri, setMelosaHorimetroEquipamentoFotoUri] = useState<string | null>(null);
   const [melosaMotoristaEquipamentoTexto, setMelosaMotoristaEquipamentoTexto] = useState("");
   const [melosaEquipamentoOperadorFotoUri, setMelosaEquipamentoOperadorFotoUri] = useState<string | null>(null);
-  const [melosaLacreNumero, setMelosaLacreNumero] = useState("");
-  const [melosaLacreFotoUri, setMelosaLacreFotoUri] = useState<string | null>(null);
   const [melosaMedidorAcumuladoFinalNumero, setMelosaMedidorAcumuladoFinalNumero] = useState("");
   const [melosaMedidorAcumuladoFinalFotoUri, setMelosaMedidorAcumuladoFinalFotoUri] = useState<string | null>(null);
 
@@ -373,8 +371,6 @@ export default function App() {
     setMelosaHorimetroEquipamentoFotoUri(null);
     setMelosaMotoristaEquipamentoTexto("");
     setMelosaEquipamentoOperadorFotoUri(null);
-    setMelosaLacreNumero("");
-    setMelosaLacreFotoUri(null);
     setMelosaMedidorAcumuladoFinalNumero("");
     setMelosaMedidorAcumuladoFinalFotoUri(null);
 
@@ -492,6 +488,7 @@ export default function App() {
     const body = profile
       ? {
           role: "user" as const,
+          platform: "app" as const,
           full_name: profile.full_name,
           cpf: profile.cpf,
           address: profile.address,
@@ -499,7 +496,7 @@ export default function App() {
           email: profile.email,
           cnh_storage_path: profile.cnh_storage_path,
         }
-      : { role: "user" as const };
+      : { role: "user" as const, platform: "app" as const };
     await apiPost("/v1/auth/ensure-role", token, body, { action: "ensure-role" });
   }
 
@@ -872,40 +869,6 @@ export default function App() {
     setMelosaEquipamentoOperadorFotoUri(asset.uri);
   }
 
-  async function pickMelosaLacreFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do lacre.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaLacreFotoUri(asset.uri);
-  }
-
-  async function pickMelosaLacreFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do lacre.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaLacreFotoUri(asset.uri);
-  }
-
   async function pickMelosaMedidorAcumuladoFinalFromLibrary() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -1180,6 +1143,15 @@ export default function App() {
         setScreen({ name: "registro" });
       } else if (msg.toLowerCase().includes("perfil inativo")) {
         Alert.alert("Acesso bloqueado", "Seu cadastro está inativo. Peça para um administrador liberar seu acesso.");
+        try {
+          await supabase.auth.signOut();
+        } catch {
+        }
+      } else if (msg.toLowerCase().includes("não tem permissão") || msg.toLowerCase().includes("aplicativo mobile")) {
+        Alert.alert(
+          "Acesso bloqueado",
+          "Esta conta é de utilizador web e não pode entrar no aplicativo. Peça ao administrador para alterar o tipo de utilizador."
+        );
         try {
           await supabase.auth.signOut();
         } catch {
@@ -1746,10 +1718,6 @@ export default function App() {
       Alert.alert("Foto obrigatória", "Selecione a foto do equipamento junto com o operador/motorista.");
       return;
     }
-    if (melosaLacreNumero.trim() && !melosaLacreFotoUri) {
-      Alert.alert("Foto obrigatória", "Informe o número do lacre e selecione a foto do lacre.");
-      return;
-    }
     if (!melosaMedidorAcumuladoFinalNumero.trim()) {
       Alert.alert("Medidor obrigatório", "Informe o número final acumulado do medidor da melosa.");
       return;
@@ -1797,8 +1765,6 @@ export default function App() {
     const MELOSA_MEDIDOR_BUCKET = "melosa_medidor_acumulado";
     const MELOSA_HORIMETRO_BUCKET = "melosa_horimetro_equipamento_abastecido";
     const MELOSA_EQUIPAMENTO_OPERADOR_BUCKET = "melosa_equipamento_operador";
-    const MELOSA_LACRE_BUCKET = "melosa_lacre";
-
     function extFromUri(uri: string) {
       const extMatch = uri.match(/\.(\w+)(?:\?|#|$)/);
       const ext = (extMatch?.[1] ?? "jpg").toLowerCase();
@@ -1831,12 +1797,6 @@ export default function App() {
     const horimetroPath = `${userId}/melosa/horimetro/${operationId}.${extHorimetro}`;
     const operadorPath = `${userId}/melosa/equipamento-operador/${operationId}.${extOperador}`;
 
-    let lacrePath: string | null = null;
-    if (melosaLacreFotoUri) {
-      const extLacre = extFromUri(melosaLacreFotoUri);
-      lacrePath = `${userId}/melosa/lacre/${operationId}.${extLacre}`;
-    }
-
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData.session?.access_token) {
       throw new Error("Sessão expirada. Faça login novamente antes de enviar as fotos.");
@@ -1867,11 +1827,6 @@ export default function App() {
         melosaEquipamentoOperadorFotoUri as string,
         "foto do equipamento com operador/motorista"
       ),
-      ...(lacrePath && melosaLacreFotoUri
-        ? [
-            uploadToBucket(MELOSA_LACRE_BUCKET, lacrePath, melosaLacreFotoUri, "foto do lacre"),
-          ]
-        : []),
     ]);
 
     const payload: MovimentacaoPayload = {
@@ -1895,8 +1850,8 @@ export default function App() {
       melosa_horimetro_equipamento_abastecido_storage_path: horimetroPath,
       melosa_motorista_equipamento_abastecido: melosaMotoristaEquipamentoTexto.trim(),
       melosa_equipamento_operador_storage_path: operadorPath,
-      melosa_lacre_numero: melosaLacreNumero.trim() ? melosaLacreNumero.trim() : null,
-      melosa_lacre_storage_path: lacrePath,
+      melosa_lacre_numero: null,
+      melosa_lacre_storage_path: null,
       melosa_medidor_acumulado_final_numero: melosaMedidorAcumuladoFinalNumero.trim(),
       melosa_medidor_acumulado_final_storage_path: medidorFinalPath,
 
@@ -2292,6 +2247,17 @@ export default function App() {
 
               <View style={{ height: 14 }} />
 
+              <TouchableOpacity
+                style={[styles.homeActionCard, !isDarkMode ? styles.homeActionCardLight : null]}
+                onPress={() => {
+                  resetMelosaFlow();
+                  setMelosaObraCodigo(obraCodigo);
+                  setScreen({ name: "melosa", step: "register" });
+                }}
+              >
+                <Text style={[styles.homeActionTitle, !isDarkMode ? styles.homeActionTitleLight : null]}>Registrar retirada da melosa</Text>
+              </TouchableOpacity>
+
               {!isMelosaUser ? (
                 <TouchableOpacity
                   style={[styles.homeActionCard, !isDarkMode ? styles.homeActionCardLight : null]}
@@ -2315,17 +2281,6 @@ export default function App() {
                   <Text style={[styles.homeActionTitle, !isDarkMode ? styles.homeActionTitleLight : null]}>Registrar retirada do tanque</Text>
                 </TouchableOpacity>
               ) : null}
-
-              <TouchableOpacity
-                style={[styles.homeActionCard, !isDarkMode ? styles.homeActionCardLight : null]}
-                onPress={() => {
-                  resetMelosaFlow();
-                  setMelosaObraCodigo(obraCodigo);
-                  setScreen({ name: "melosa", step: "register" });
-                }}
-              >
-                <Text style={[styles.homeActionTitle, !isDarkMode ? styles.homeActionTitleLight : null]}>Registrar retirada da melosa</Text>
-              </TouchableOpacity>
 
               <View style={{ height: 18 }} />
 
@@ -2702,53 +2657,6 @@ export default function App() {
 
               {isLacreMedidor ? (
                 <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
-                    Número do Lacre (caso tenha)
-                  </Text>
-                  <TextInput
-                    value={melosaLacreNumero}
-                    onChangeText={setMelosaLacreNumero}
-                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Opcional"
-                    placeholderTextColor={inputPlaceholderColor}
-                    keyboardType="number-pad"
-                  />
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Foto do Lacre</Text>
-                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
-                    {melosaLacreFotoUri ? (
-                      <>
-                        <Image source={{ uri: melosaLacreFotoUri }} style={styles.photoPreview} />
-                        <TouchableOpacity
-                          style={styles.photoRemove}
-                          onPress={() => setMelosaLacreFotoUri(null)}
-                          disabled={busy}
-                        >
-                          <Text style={styles.photoRemoveText}>Remover</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : (
-                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
-                        Selecione a foto do lacre (se houver)
-                      </Text>
-                    )}
-                  </View>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMelosaLacreFromLibrary}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMelosaLacreFromCamera}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
-                    </TouchableOpacity>
-                  </View>
-
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
                     Número final do acumulado do medidor da melosa
                   </Text>

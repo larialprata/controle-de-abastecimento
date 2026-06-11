@@ -4,6 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { envValidated } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
+import { canAccessClientPlatform, parseClientPlatform } from "../lib/accessPlatform";
+import { DEFAULT_WEB_PERMISSIONS } from "../lib/webPermissions";
 
 const router = Router();
 
@@ -35,6 +37,48 @@ function looksLikeEmailNotConfirmedError(message: string, code?: string) {
 
 function normalizeCpf(input: string) {
   return input.replace(/\D/g, "");
+}
+
+function placeholderCpfFromUserId(userId: string) {
+  const digits = userId.replace(/\D/g, "");
+  return `9${digits.slice(0, 10).padStart(10, "0")}`;
+}
+
+async function ensureWebProfileForOAuthUser(
+  service: ReturnType<typeof createSupabaseServiceRole>,
+  userId: string
+) {
+  const { data: adminUser, error: adminErr } = await service.auth.admin.getUserById(userId);
+  if (adminErr || !adminUser?.user) throw new HttpError(401, "Usuário não encontrado no Auth");
+
+  const authUser = adminUser.user;
+  const meta = (authUser.user_metadata ?? {}) as Record<string, unknown>;
+  const email = authUser.email?.trim().toLowerCase() ?? null;
+  const fullName =
+    (typeof meta.full_name === "string" && meta.full_name.trim()) ||
+    (typeof meta.name === "string" && meta.name.trim()) ||
+    email?.split("@")[0] ||
+    "Utilizador";
+
+  const nowIso = new Date().toISOString();
+  const { error: upsertError } = await service.from("profiles").upsert(
+    {
+      user_id: userId,
+      full_name: fullName,
+      cpf: placeholderCpfFromUserId(userId),
+      address: "—",
+      phone: "—",
+      email,
+      cnh_storage_path: null,
+      role: "user",
+      active: false,
+      access_platform: "web",
+      web_permissions: DEFAULT_WEB_PERMISSIONS,
+      updated_at: nowIso,
+    },
+    { onConflict: "user_id" }
+  );
+  if (upsertError) throw new HttpError(400, upsertError.message);
 }
 
 class HttpError extends Error {
@@ -94,6 +138,7 @@ async function upsertProfileFromValidatedOrThrow(
     cnh_storage_path: cnhPath,
     role: "user" as const,
     active: false,
+    access_platform: "app" as const,
     updated_at: nowIso,
   };
 
@@ -276,45 +321,81 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
   try {
     if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
 
-    const ensureSchema = z.object({ role: z.literal("user").optional() }).and(motoristaProfileBodySchema);
+    const ensureSchema = z
+      .object({
+        role: z.literal("user").optional(),
+        platform: z.enum(["app", "web"]).optional(),
+      })
+      .and(motoristaProfileBodySchema);
     const parsed = ensureSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       return res.status(400).json({ error: "Corpo inválido", details: parsed.error.flatten() });
     }
 
-    const { role: _roleIgnored, ...profileBody } = parsed.data;
+    const { role: _roleIgnored, platform: bodyPlatform, ...profileBody } = parsed.data;
+    const clientPlatform =
+      parseClientPlatform(bodyPlatform) ?? parseClientPlatform(req.header("X-Client-Platform"));
 
     const service = createSupabaseServiceRole();
 
-    const { data: profRow, error: profRoleError } = await service
+    let { data: profRow, error: profRoleError } = await service
       .from("profiles")
-      .select("role, active")
+      .select("role, active, access_platform, web_permissions")
       .eq("user_id", req.userId)
       .maybeSingle();
 
     if (profRoleError) return res.status(500).json({ error: profRoleError.message });
 
+    if (!profRow && clientPlatform === "web") {
+      await ensureWebProfileForOAuthUser(service, req.userId);
+      const refetch = await service
+        .from("profiles")
+        .select("role, active, access_platform, web_permissions")
+        .eq("user_id", req.userId)
+        .maybeSingle();
+      if (refetch.error) return res.status(500).json({ error: refetch.error.message });
+      profRow = refetch.data;
+    }
+
     if (profRow?.role === "admin") {
-      return res.json({ ok: true, role: "admin" });
+      return res.json({
+        ok: true,
+        role: "admin",
+        access_platform: profRow.access_platform ?? "both",
+        web_permissions: profRow.web_permissions ?? DEFAULT_WEB_PERMISSIONS,
+      });
     }
 
     if (profRow && profRow.active === false) {
       return res.status(403).json({ error: "Perfil inativo. Aguarde liberação pelo administrador." });
     }
 
-    try {
-      await syncMotoristaProfileFromParsedBodyOrThrow(service, req.userId, profileBody);
-    } catch (e: any) {
-      if (e instanceof HttpError) {
-        return res.status(e.status).json({
-          error: e.message,
-          ...(e.details !== undefined ? { details: e.details } : {}),
-        });
-      }
-      throw e;
+    if (profRow && clientPlatform && !canAccessClientPlatform(profRow, clientPlatform)) {
+      const destino = clientPlatform === "web" ? "o painel web" : "o aplicativo mobile";
+      return res.status(403).json({
+        error: `Esta conta não tem permissão para acessar ${destino}.`,
+      });
     }
 
-    return res.json({ ok: true });
+    if (clientPlatform !== "web") {
+      try {
+        await syncMotoristaProfileFromParsedBodyOrThrow(service, req.userId, profileBody);
+      } catch (e: any) {
+        if (e instanceof HttpError) {
+          return res.status(e.status).json({
+            error: e.message,
+            ...(e.details !== undefined ? { details: e.details } : {}),
+          });
+        }
+        throw e;
+      }
+    }
+
+    return res.json({
+      ok: true,
+      web_permissions: profRow?.web_permissions ?? DEFAULT_WEB_PERMISSIONS,
+      access_platform: profRow?.access_platform ?? "app",
+    });
   } catch (err: any) {
     if (err instanceof HttpError) {
       return res.status(err.status).json({

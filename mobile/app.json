@@ -34,7 +34,10 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "./plugins/withAndroidSdkLocalProperties.js",
+      "./plugins/withExpoAutolinkingProjectRoot.js",
+      "./plugins/withWindowsNativeCmakeShortPaths.js"
     ],
     "web": {
       "favicon": "./assets/favicon.png"

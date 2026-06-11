@@ -4,13 +4,33 @@ import MelosaTicketModal, { type MelosaTicketRow } from "../components/bi/Melosa
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
 import { useAuth } from "../state/AuthContext";
+import { apiGet, apiPost } from "../lib/api";
+import { fmtTicketNumero, ticketNumeroParaFiltro } from "../lib/ticketNumero";
 import { downloadMelosaDescarbonizeExcel, type MelosaExcelRowInput } from "../lib/melosaDescarbonizeExcel";
 import { biTableRowKey, resolveSelectedRows } from "../lib/biSelection";
+import {
+  defaultPeriodoMesAtual,
+  parseDateInputValue,
+  passesDashboardFilters,
+  toDateInputValue,
+} from "../lib/aggregateCombustivelDashboard";
 import { glassField, glassPanel } from "../lib/glass";
+import {
+  EMPRESA_LABEL,
+  OBRA_EMPRESAS,
+  obraCodigosDaEmpresa,
+  empresasDasLinhas,
+  filtrarObrasPorEmpresa,
+  type ObraComEmpresa,
+  type ObraEmpresa,
+} from "../lib/obrasEmpresa";
+
+type ObraRow = ObraComEmpresa;
 
 type LinhaMelosa = Record<string, unknown> & {
   id?: string;
   operation_id?: string;
+  ticket_numero?: number | null;
   usuario_id?: string;
   obra_codigo?: number;
   obra_nome?: string | null;
@@ -23,8 +43,6 @@ type LinhaMelosa = Record<string, unknown> & {
   melosa_combustivel_tipo_retirada?: string | null;
   melosa_medidor_acumulado_inicial_numero?: string | null;
   melosa_medidor_acumulado_final_numero?: string | null;
-  melosa_lacre_numero?: string | null;
-  melosa_lacre_storage_path?: string | null;
   melosa_equipamento_operador_storage_path?: string | null;
   melosa_horimetro_equipamento_abastecido_numero?: string | null;
   melosa_motorista_equipamento_abastecido?: string | null;
@@ -128,6 +146,7 @@ function buildMelosaTicketRow(m: LinhaMelosa): MelosaTicketRow {
       ? m.usuario_full_name.trim()
       : "—";
   return {
+    numero: fmtTicketNumero(m.ticket_numero),
     data: fmtDateOnly(m.data_hora),
     responsavelAbastecimento: responsavel,
     placaAtivo: fmtAtivoPlaca(m),
@@ -135,6 +154,9 @@ function buildMelosaTicketRow(m: LinhaMelosa): MelosaTicketRow {
     horimetro: fmt(m.melosa_horimetro_equipamento_abastecido_numero),
     litros: fmtQuantidade(m),
     nomeMotorista: fmt(m.melosa_motorista_equipamento_abastecido),
+    equipamento: fmtAtivoEquipamento(m),
+    obra: fmtObra(m),
+    observacoes: m.obs != null && String(m.obs).trim() ? String(m.obs).trim() : "",
   };
 }
 
@@ -211,7 +233,7 @@ function municipioFromAddress(v: unknown): string {
 }
 
 const PAGE_SIZE = 500;
-const TABLE_COL_COUNT = 13;
+const TABLE_COL_COUNT = 11;
 
 const labelCls =
   "flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400";
@@ -227,9 +249,16 @@ const tdPhotoCls =
 
 export default function MelosaBIPage() {
   const { token } = useAuth();
+  const periodoInicial = defaultPeriodoMesAtual();
   const [raw, setRaw] = useState<LinhaMelosa[]>([]);
+  const [obras, setObras] = useState<ObraRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dataDe, setDataDe] = useState(toDateInputValue(periodoInicial.de));
+  const [dataAte, setDataAte] = useState(toDateInputValue(periodoInicial.ate));
+  const [empresaFiltro, setEmpresaFiltro] = useState<"" | ObraEmpresa>("");
+  const [contratoFiltro, setContratoFiltro] = useState("");
+  const [ticketFiltro, setTicketFiltro] = useState("");
   const [busca, setBusca] = useState("");
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -256,7 +285,9 @@ export default function MelosaBIPage() {
         if (chunk.length < PAGE_SIZE) break;
         offset += PAGE_SIZE;
       }
+      const obrasJson = await apiGet<{ obras: ObraRow[] }>("/v1/obras", token);
       setRaw(rows);
+      setObras(obrasJson?.obras ?? []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erro ao carregar");
     } finally {
@@ -268,11 +299,50 @@ export default function MelosaBIPage() {
     load();
   }, [load]);
 
+  const obrasContratoOpcoes = useMemo(
+    () => filtrarObrasPorEmpresa(obras, empresaFiltro),
+    [obras, empresaFiltro],
+  );
+
+  const obraCodigosEmpresa = useMemo(
+    () => obraCodigosDaEmpresa(obras, empresaFiltro),
+    [obras, empresaFiltro],
+  );
+
+  useEffect(() => {
+    if (!contratoFiltro) return;
+    const cod = Number(contratoFiltro);
+    if (!obrasContratoOpcoes.some((o) => o.codigo === cod)) {
+      setContratoFiltro("");
+    }
+  }, [contratoFiltro, obrasContratoOpcoes]);
+
+  const filtros = useMemo(
+    () => ({
+      de: parseDateInputValue(dataDe),
+      ate: parseDateInputValue(dataAte),
+      obraCodigo: contratoFiltro ? Number(contratoFiltro) : null,
+    }),
+    [contratoFiltro, dataAte, dataDe],
+  );
+
   const filtradas = useMemo(() => {
+    let rows = raw.filter((r) => passesDashboardFilters(r, filtros));
+    if (obraCodigosEmpresa) {
+      rows = rows.filter(
+        (r) => typeof r.obra_codigo === "number" && obraCodigosEmpresa.has(r.obra_codigo),
+      );
+    }
+    const ticketQ = ticketFiltro.trim();
+    if (ticketQ) {
+      rows = rows.filter((r) => ticketNumeroParaFiltro(r.ticket_numero).includes(ticketQ));
+    }
     const q = busca.trim().toLowerCase();
-    if (!q) return raw;
-    return raw.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
-  }, [raw, busca]);
+    if (q) rows = rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
+    return rows;
+  }, [raw, busca, filtros, obraCodigosEmpresa, ticketFiltro]);
+
+  const filtroTextoAtivo = Boolean(busca.trim() || contratoFiltro || empresaFiltro || ticketFiltro.trim());
 
   const rowKey = useCallback((m: LinhaMelosa, idx: number) => biTableRowKey(m, idx), []);
 
@@ -295,6 +365,54 @@ export default function MelosaBIPage() {
     () => selectedRows.map((m) => buildMelosaTicketRow(m)),
     [selectedRows],
   );
+
+  const ticketVariant = useMemo((): ObraEmpresa => {
+    const set = empresasDasLinhas(
+      obras,
+      selectedRows.map((r) => r.obra_codigo),
+    );
+    if (set.has("DIMENSIONAL")) return "DIMENSIONAL";
+    return "DELURB";
+  }, [obras, selectedRows]);
+
+  const openTicket = useCallback(async () => {
+    if (!token) return;
+    const empresas = empresasDasLinhas(
+      obras,
+      selectedRows.map((r) => r.obra_codigo),
+    );
+    if (empresas.size > 1) {
+      window.alert("Selecione registros de uma única empresa para gerar o ticket.");
+      return;
+    }
+
+    const operationIds = selectedRows
+      .map((r) => (typeof r.operation_id === "string" ? r.operation_id : ""))
+      .filter(Boolean);
+    if (operationIds.length === 0) return;
+
+    setLoading(true);
+    try {
+      const json = (await apiPost("/v1/tickets/numeros", token, {
+        origem: "melosa",
+        operation_ids: operationIds,
+      })) as { numeros?: Record<string, number> };
+      const numeros = json?.numeros ?? {};
+      setRaw((prev) =>
+        prev.map((r) => {
+          const op = typeof r.operation_id === "string" ? r.operation_id : "";
+          const n = op ? numeros[op] : undefined;
+          if (n != null) return { ...r, ticket_numero: n };
+          return r;
+        }),
+      );
+      setTicketOpen(true);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : "Erro ao gerar número do ticket");
+    } finally {
+      setLoading(false);
+    }
+  }, [obras, selectedRows, token]);
 
   const mapPoints = useMemo((): MapPoint[] => {
     const out: MapPoint[] = [];
@@ -398,6 +516,51 @@ export default function MelosaBIPage() {
             Exportar Excel
           </button>
         </div>
+        <div className="flex flex-col gap-1">
+          <span className={labelCls}>De</span>
+          <input type="date" className={glassField} value={dataDe} onChange={(e) => setDataDe(e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={labelCls}>Até</span>
+          <input type="date" className={glassField} value={dataAte} onChange={(e) => setDataAte(e.target.value)} />
+        </div>
+        <div className="flex min-w-[160px] flex-col gap-1">
+          <span className={labelCls}>Empresa</span>
+          <select
+            className={glassField}
+            value={empresaFiltro}
+            onChange={(e) => setEmpresaFiltro(e.target.value as "" | ObraEmpresa)}
+          >
+            <option value="">Todas</option>
+            {OBRA_EMPRESAS.map((e) => (
+              <option key={e} value={e}>
+                {EMPRESA_LABEL[e]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex min-w-[180px] flex-col gap-1">
+          <span className={labelCls}>Contrato</span>
+          <select className={glassField} value={contratoFiltro} onChange={(e) => setContratoFiltro(e.target.value)}>
+            <option value="">Todos</option>
+            {obrasContratoOpcoes.map((o) => (
+              <option key={o.codigo} value={String(o.codigo)}>
+                {o.codigo} — {o.nome}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex min-w-[120px] flex-col gap-1">
+          <span className={labelCls}>Nº ticket</span>
+          <input
+            type="search"
+            inputMode="numeric"
+            className={glassField}
+            placeholder="Ex.: 4586"
+            value={ticketFiltro}
+            onChange={(e) => setTicketFiltro(e.target.value)}
+          />
+        </div>
         <div className="min-w-[200px] flex-1 flex-col gap-1 sm:min-w-[260px]">
           <span className={labelCls}>Buscar</span>
           <input
@@ -413,7 +576,7 @@ export default function MelosaBIPage() {
       <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
         Mostrando <strong className="text-slate-900 dark:text-white">{filtradas.length}</strong> de{" "}
         <strong className="text-slate-900 dark:text-white">{raw.length}</strong> linhas
-        {busca ? " (filtrado)" : ""} ·{" "}
+        {filtroTextoAtivo ? " (filtrado)" : ""} ·{" "}
         <strong className="text-slate-900 dark:text-white">{mapPoints.length}</strong> com coordenadas no mapa.
       </p>
 
@@ -430,7 +593,7 @@ export default function MelosaBIPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setTicketOpen(true)}
+                onClick={() => void openTicket()}
                 disabled={loading || selectedRows.length === 0}
                 className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -480,8 +643,6 @@ export default function MelosaBIPage() {
                   <th className={thCls}>Ativo equipamento</th>
                   <th className={thCls}>Insumo</th>
                   <th className={thCls}>Quantidade (L)</th>
-                  <th className={thCls}>Nº lacre</th>
-                  <th className={thCls}>Foto lacre</th>
                   <th className={thCls}>Foto operador</th>
                   <th className={thCls}>Local</th>
                 </tr>
@@ -491,8 +652,6 @@ export default function MelosaBIPage() {
                   const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
                   const k = rowKey(m, idx);
                   const checked = selectedKeys.includes(k);
-                  const lacreNum = m.melosa_lacre_numero;
-                  const temLacre = lacreNum != null && String(lacreNum).trim().length > 0;
                   const dataRef = fmtDateOnly(m.data_hora);
 
                   const photo = (path: string | undefined, label: string) => (
@@ -528,10 +687,6 @@ export default function MelosaBIPage() {
                       <td className={`${tdCls} max-w-[140px]`}>{fmtAtivoEquipamento(m)}</td>
                       <td className={`${tdCls} max-w-[140px]`}>{fmtInsumoMel(m)}</td>
                       <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
-                      <td className={`${tdCls} max-w-[100px]`}>{temLacre ? fmt(lacreNum) : "—"}</td>
-                      <td className={tdPhotoCls}>
-                        {temLacre ? photo(storagePath(m, "melosa_lacre_storage_path"), "Lacre") : "—"}
-                      </td>
                       <td className={tdPhotoCls}>
                         {photo(storagePath(m, "melosa_equipamento_operador_storage_path"), "Operador")}
                       </td>
@@ -606,7 +761,7 @@ export default function MelosaBIPage() {
       ) : null}
 
       {ticketOpen && ticketRows.length > 0 ? (
-        <MelosaTicketModal rows={ticketRows} onClose={() => setTicketOpen(false)} />
+        <MelosaTicketModal rows={ticketRows} variant={ticketVariant} onClose={() => setTicketOpen(false)} />
       ) : null}
     </div>
   );

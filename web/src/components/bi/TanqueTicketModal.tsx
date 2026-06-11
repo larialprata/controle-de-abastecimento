@@ -1,7 +1,12 @@
 import { useMemo, useRef } from "react";
 import { Printer, X } from "lucide-react";
+import type { ObraEmpresa } from "../../lib/obrasEmpresa";
+import DimensionalAbastecimentoTicket, {
+  type DimensionalAbastecimentoRow,
+} from "./DimensionalAbastecimentoTicket";
 
 export type TanqueTicketRow = {
+  numero: string;
   data: string;
   responsavelAbastecimento: string;
   placaAtivo: string;
@@ -10,10 +15,14 @@ export type TanqueTicketRow = {
   litros: string;
   equipamento: string;
   movimento: string;
+  obra: string;
+  observacoes: string;
+  nome: string;
 };
 
 type Props = {
   rows: TanqueTicketRow[];
+  variant: ObraEmpresa;
   onClose: () => void;
 };
 
@@ -44,7 +53,7 @@ function parseTicketDate(dataStr: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export default function TanqueTicketModal({ rows, onClose }: Props) {
+function DelurbTanqueTicket({ rows, onClose }: { rows: TanqueTicketRow[]; onClose: () => void }) {
   const printRef = useRef<HTMLDivElement>(null);
 
   const mesReferencia = useMemo(() => {
@@ -208,4 +217,31 @@ export default function TanqueTicketModal({ rows, onClose }: Props) {
       `}</style>
     </div>
   );
+}
+
+export default function TanqueTicketModal({ rows, variant, onClose }: Props) {
+  if (variant === "DIMENSIONAL") {
+    const dimensionalRows: DimensionalAbastecimentoRow[] = rows.map((row) => ({
+      numero: row.numero,
+      data: row.data,
+      insumo: row.insumo,
+      litros: row.litros,
+      equipamento: row.equipamento,
+      obra: row.obra,
+      horimetro: row.horimetro,
+      observacoes: row.observacoes || `${row.movimento}${row.placaAtivo !== "—" ? ` · ${row.placaAtivo}` : ""}`,
+      nome: row.nome,
+      responsavelAbastecimento: row.responsavelAbastecimento,
+    }));
+    return (
+      <DimensionalAbastecimentoTicket
+        rows={dimensionalRows}
+        tituloSub="Tanque — obra"
+        printId="tanque-dimensional-ticket-print"
+        onClose={onClose}
+      />
+    );
+  }
+
+  return <DelurbTanqueTicket rows={rows} onClose={onClose} />;
 }

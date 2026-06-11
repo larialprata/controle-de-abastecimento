@@ -3,7 +3,7 @@
 # Uso: powershell -ExecutionPolicy Bypass -File .\scripts\setup-short-path.ps1
 
 $ErrorActionPreference = "Stop"
-$Src = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
+$Src = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Dest = "C:\abast\controle-abast"
 
 Write-Host "Origem:  $Src"
