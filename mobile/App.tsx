@@ -1,23 +1,29 @@
+import { BlurView } from "expo-blur";
+import * as FileSystem from "expo-file-system";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
+  SafeAreaView,
   ScrollView,
+  StatusBar as RNStatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
   type StyleProp,
+  type TextStyle,
   type ViewStyle,
 } from "react-native";
 import * as Location from "expo-location";
 import NetInfo from "@react-native-community/netinfo";
-import { BlurView } from "expo-blur";
 import * as ImagePicker from "expo-image-picker";
 import { Picker } from "@react-native-picker/picker";
 import type { Session } from "@supabase/supabase-js";
@@ -28,7 +34,7 @@ import { syncOutbox } from "./src/sync/syncOutbox";
 import { OBRAS } from "./src/constants/obras";
 import type { MovimentoTipo, MovimentacaoPayload } from "./src/types/movimentacao";
 import { v4 as uuidv4 } from "uuid";
-import { apiPost, registerCredentials } from "./src/lib/api";
+import { apiGet, apiPost, registerCredentials } from "./src/lib/api";
 import { readImageUriAsArrayBuffer } from "./src/lib/readImageUri";
 import { lightTheme } from "./src/theme/light";
 
@@ -42,15 +48,311 @@ type Screen =
 /** Espaço reservado no scroll para o rodapé fixo (Salvar/Cancelar) + barra do sistema. */
 const FORM_SCROLL_FOOTER_SPACE = 100;
 const FORM_FOOTER_BOTTOM_INSET = Platform.OS === "android" ? 40 : 24;
+const SCREEN_CARD_MAX_WIDTH = 520;
+const SCREEN_HORIZONTAL_PADDING = 16;
+const SCREEN_TOP_INSET =
+  Platform.OS === "android" ? Math.max(48, (RNStatusBar.currentHeight ?? 32) + 16) : 10;
+const THEME_TOGGLE_WIDTH = 116;
+const THEME_TOGGLE_HEIGHT = 40;
+const THEME_TOGGLE_POS_FILE = FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}theme-toggle-position.json`
+  : null;
+
+type CardBounds = { x: number; y: number; width: number; height: number };
+type ThemeTogglePosition = { x: number; y: number };
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+async function loadThemeTogglePosition(): Promise<ThemeTogglePosition | null> {
+  if (!THEME_TOGGLE_POS_FILE) return null;
+  try {
+    const info = await FileSystem.getInfoAsync(THEME_TOGGLE_POS_FILE);
+    if (!info.exists) return null;
+    const raw = await FileSystem.readAsStringAsync(THEME_TOGGLE_POS_FILE);
+    const parsed = JSON.parse(raw) as ThemeTogglePosition;
+    if (typeof parsed?.x === "number" && typeof parsed?.y === "number") return parsed;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function saveThemeTogglePosition(position: ThemeTogglePosition) {
+  if (!THEME_TOGGLE_POS_FILE) return;
+  try {
+    await FileSystem.writeAsStringAsync(THEME_TOGGLE_POS_FILE, JSON.stringify(position));
+  } catch {
+    // ignore
+  }
+}
+
+function scaleFontSize(base: number, screenWidth: number) {
+  return Math.max(12, Math.min(base, Math.round((screenWidth / 390) * base)));
+}
+
+function AdaptiveCardText({
+  children,
+  style,
+  lightStyle,
+  isDarkMode,
+  numberOfLines = 2,
+}: {
+  children: string;
+  style: TextStyle;
+  lightStyle?: TextStyle;
+  isDarkMode: boolean;
+  numberOfLines?: number;
+}) {
+  return (
+    <Text
+      style={[style, !isDarkMode ? lightStyle : null]}
+      adjustsFontSizeToFit
+      numberOfLines={numberOfLines}
+      minimumFontScale={0.72}
+      textAlign="center"
+    >
+      {children}
+    </Text>
+  );
+}
+
+function useScreenLayout() {
+  const { width: screenWidth } = useWindowDimensions();
+  return useMemo(() => {
+    const contentWidth = Math.min(screenWidth - SCREEN_HORIZONTAL_PADDING * 2, SCREEN_CARD_MAX_WIDTH);
+    const cardShellStyle = {
+      width: contentWidth,
+      maxWidth: SCREEN_CARD_MAX_WIDTH,
+      alignSelf: "center" as const,
+    };
+    return {
+      screenWidth,
+      contentWidth,
+      cardShellStyle,
+      brandLogoSize: {
+        width: Math.min(240, Math.max(150, Math.round(contentWidth * 0.82))),
+        height: Math.min(120, Math.max(68, Math.round(contentWidth * 0.36))),
+      },
+      heroImageHeight: Math.min(120, Math.max(76, Math.round(contentWidth * 0.28))),
+      statusFontSize: scaleFontSize(14, screenWidth),
+      actionTitleFontSize: scaleFontSize(16, screenWidth),
+    };
+  }, [screenWidth]);
+}
+
+function GlassCard({
+  isDarkMode,
+  shellStyle,
+  innerStyle,
+  children,
+}: {
+  isDarkMode: boolean;
+  shellStyle?: StyleProp<ViewStyle>;
+  innerStyle?: StyleProp<ViewStyle>;
+  children: ReactNode;
+}) {
+  return (
+    <View style={[styles.glassCard, shellStyle, !isDarkMode ? styles.glassCardLight : null]}>
+      <BlurView tint={isDarkMode ? "dark" : "light"} intensity={58} style={styles.glassBlur} />
+      <View style={[styles.glassInner, innerStyle]}>{children}</View>
+    </View>
+  );
+}
+
+function CardMeasuredWrap({
+  layout,
+  isDarkMode,
+  onBoundsChange,
+  innerStyle,
+  children,
+}: {
+  layout: ReturnType<typeof useScreenLayout>;
+  isDarkMode: boolean;
+  onBoundsChange: (bounds: CardBounds) => void;
+  innerStyle?: StyleProp<ViewStyle>;
+  children: ReactNode;
+}) {
+  const cardRef = useRef<View>(null);
+
+  const measureCard = () => {
+    cardRef.current?.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) onBoundsChange({ x, y, width, height });
+    });
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(measureCard, 80);
+    return () => clearTimeout(timer);
+  }, [layout.contentWidth]);
+
+  return (
+    <View ref={cardRef} onLayout={measureCard} style={layout.cardShellStyle}>
+      <GlassCard isDarkMode={isDarkMode} shellStyle={styles.glassCardFullWidth} innerStyle={innerStyle}>
+        {children}
+      </GlassCard>
+    </View>
+  );
+}
+
+function DraggableThemeToggle({
+  isDarkMode,
+  onToggleTheme,
+  cardBounds,
+  layout,
+  position,
+  onPositionChange,
+}: {
+  isDarkMode: boolean;
+  onToggleTheme: () => void;
+  cardBounds: CardBounds | null;
+  layout: ReturnType<typeof useScreenLayout>;
+  position: ThemeTogglePosition | null;
+  onPositionChange: (position: ThemeTogglePosition) => void;
+}) {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
+  const defaultPosition = useMemo(() => {
+    if (cardBounds) {
+      return {
+        x: cardBounds.x + cardBounds.width - THEME_TOGGLE_WIDTH,
+        y: Math.max(SCREEN_TOP_INSET, cardBounds.y - THEME_TOGGLE_HEIGHT - 8),
+      };
+    }
+    const cardX = (screenWidth - layout.contentWidth) / 2;
+    return { x: cardX + layout.contentWidth - THEME_TOGGLE_WIDTH, y: SCREEN_TOP_INSET + 8 };
+  }, [cardBounds, layout.contentWidth, screenWidth]);
+
+  const [dragPos, setDragPos] = useState<ThemeTogglePosition>(position ?? defaultPosition);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragOrigin = useRef<ThemeTogglePosition>(defaultPosition);
+  const dragPosRef = useRef<ThemeTogglePosition>(defaultPosition);
+  const movedDuringDrag = useRef(false);
+
+  useEffect(() => {
+    dragPosRef.current = dragPos;
+  }, [dragPos]);
+
+  useEffect(() => {
+    if (!isDragging) setDragPos(position ?? defaultPosition);
+  }, [defaultPosition.x, defaultPosition.y, isDragging, position]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
+        onPanResponderGrant: () => {
+          movedDuringDrag.current = false;
+          dragOrigin.current = dragPosRef.current;
+          setIsDragging(true);
+        },
+        onPanResponderMove: (_, gesture) => {
+          if (Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4) movedDuringDrag.current = true;
+          const next = {
+            x: clamp(dragOrigin.current.x + gesture.dx, 8, screenWidth - THEME_TOGGLE_WIDTH - 8),
+            y: clamp(dragOrigin.current.y + gesture.dy, 8, screenHeight - THEME_TOGGLE_HEIGHT - 8),
+          };
+          dragPosRef.current = next;
+          setDragPos(next);
+        },
+        onPanResponderRelease: () => {
+          setIsDragging(false);
+          if (movedDuringDrag.current) {
+            onPositionChange(dragPosRef.current);
+          } else {
+            onToggleTheme();
+          }
+        },
+        onPanResponderTerminate: () => setIsDragging(false),
+      }),
+    [onPositionChange, onToggleTheme, screenHeight, screenWidth]
+  );
+
+  return (
+    <View
+      style={[
+        styles.themeToggleFloating,
+        { left: dragPos.x, top: dragPos.y, opacity: isDragging ? 0.92 : 1 },
+      ]}
+      {...panResponder.panHandlers}
+    >
+      <View style={[styles.themeToggle, !isDarkMode ? styles.themeToggleLight : null]}>
+        <Text style={[styles.themeToggleText, !isDarkMode ? styles.themeToggleTextLight : null]}>
+          {isDarkMode ? "Modo claro" : "Modo escuro"}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function CenteredScrollView({
+  children,
+  contentContainerStyle,
+  style,
+  keyboardPadding = 0,
+  preferCenter = true,
+  viewportHeightOverride,
+}: {
+  children: ReactNode;
+  contentContainerStyle?: StyleProp<ViewStyle>;
+  style?: StyleProp<ViewStyle>;
+  keyboardPadding?: number;
+  preferCenter?: boolean;
+  viewportHeightOverride?: number;
+}) {
+  const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const viewportHeight = viewportHeightOverride && viewportHeightOverride > 0 ? viewportHeightOverride : scrollViewportHeight;
+  const scrollTopInset = SCREEN_TOP_INSET;
+  const availableHeight = Math.max(0, viewportHeight - scrollTopInset - 12);
+  const shouldCenter =
+    preferCenter && viewportHeight > 0 && contentHeight > 0 && contentHeight <= availableHeight;
+  const freeSpace = shouldCenter ? Math.max(0, availableHeight - contentHeight) : 0;
+  const paddingTop = shouldCenter ? scrollTopInset + freeSpace / 2 : scrollTopInset;
+  const paddingBottom = shouldCenter ? Math.max(16, freeSpace / 2) : 16;
+
+  return (
+    <ScrollView
+      style={[styles.screenScrollFill, style]}
+      onLayout={(event) => setScrollViewportHeight(event.nativeEvent.layout.height)}
+      contentContainerStyle={[
+        styles.centeredScreenScroll,
+        { paddingTop, paddingBottom },
+        viewportHeight > 0 && !shouldCenter ? { minHeight: viewportHeight } : null,
+        contentContainerStyle,
+        keyboardPadding > 0 ? { paddingBottom: keyboardPadding + paddingBottom } : null,
+      ]}
+      keyboardShouldPersistTaps="always"
+      keyboardDismissMode="on-drag"
+      nestedScrollEnabled
+      showsVerticalScrollIndicator
+      automaticallyAdjustKeyboardInsets
+    >
+      <View
+        style={styles.centeredScrollInner}
+        onLayout={(event) => setContentHeight(event.nativeEvent.layout.height)}
+      >
+        {children}
+      </View>
+    </ScrollView>
+  );
+}
 
 function FormScreenScroll({
   children,
   contentContainerStyle,
+  preferCenter = true,
+  layoutKey,
 }: {
   children: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  preferCenter?: boolean;
+  layoutKey?: string;
 }) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [scrollAreaHeight, setScrollAreaHeight] = useState(0);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -65,30 +367,27 @@ function FormScreenScroll({
 
   return (
     <KeyboardAvoidingView
+      key={layoutKey}
       style={styles.formScrollView}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? 56 : 0}
+      onLayout={(event) => setScrollAreaHeight(event.nativeEvent.layout.height)}
     >
-      <ScrollView
-        style={styles.formScrollView}
-        contentContainerStyle={[
-          styles.formScroll,
-          contentContainerStyle,
-          { paddingBottom: FORM_SCROLL_FOOTER_SPACE + keyboardHeight + 16 },
-        ]}
-        keyboardShouldPersistTaps="always"
-        keyboardDismissMode="on-drag"
-        nestedScrollEnabled
-        showsVerticalScrollIndicator
-        automaticallyAdjustKeyboardInsets
+      <CenteredScrollView
+        contentContainerStyle={contentContainerStyle}
+        keyboardPadding={keyboardHeight}
+        preferCenter={preferCenter}
+        viewportHeightOverride={scrollAreaHeight}
       >
         {children}
-      </ScrollView>
+      </CenteredScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 function FormActionFooter({ isDarkMode, children }: { isDarkMode: boolean; children: ReactNode }) {
+  const { cardShellStyle } = useScreenLayout();
+
   return (
     <View
       style={[
@@ -97,7 +396,7 @@ function FormActionFooter({ isDarkMode, children }: { isDarkMode: boolean; child
         { paddingBottom: 12 + FORM_FOOTER_BOTTOM_INSET },
       ]}
     >
-      {children}
+      <View style={cardShellStyle}>{children}</View>
     </View>
   );
 }
@@ -123,12 +422,12 @@ function GpsLocationBlock({
 }) {
   return (
     <>
-      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10, textAlign: "center" }]}>
+      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8, textAlign: "center" }]}>
         {label}
       </Text>
-      <View style={styles.locationButtonWrap}>
+      <View style={[styles.locationButtonWrap, { marginTop: 2, marginBottom: 0 }]}>
         <TouchableOpacity
-          style={[styles.ghostButtonLocation, !isDarkMode ? styles.ghostButtonLight : null]}
+          style={[styles.ghostButtonLocation, styles.ghostButtonLocationCompact, !isDarkMode ? styles.ghostButtonLight : null]}
           onPress={onCapture}
           disabled={busy}
         >
@@ -156,6 +455,21 @@ function GpsLocationBlock({
 }
 
 export default function App() {
+  const layout = useScreenLayout();
+  const [cardBounds, setCardBounds] = useState<CardBounds | null>(null);
+  const [themeTogglePosition, setThemeTogglePosition] = useState<ThemeTogglePosition | null>(null);
+
+  useEffect(() => {
+    loadThemeTogglePosition().then((pos) => {
+      if (pos) setThemeTogglePosition(pos);
+    });
+  }, []);
+
+  const handleThemeTogglePositionChange = (position: ThemeTogglePosition) => {
+    setThemeTogglePosition(position);
+    saveThemeTogglePosition(position);
+  };
+
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
   const isDarkMode = themeMode === "dark";
   const barStyle = isDarkMode ? "light" : "dark";
@@ -183,6 +497,7 @@ export default function App() {
   const [driverFullName, setDriverFullName] = useState<string>("");
   const [isMelosaUser, setIsMelosaUser] = useState(false);
 
+  const [melosasCadastradas, setMelosasCadastradas] = useState<{ ativo: string; nome: string | null }[]>([]);
   const [melosaObraCodigo, setMelosaObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
   const [melosaPlacaTexto, setMelosaPlacaTexto] = useState("");
   const [melosaFornecedorTexto, setMelosaFornecedorTexto] = useState("");
@@ -299,6 +614,19 @@ export default function App() {
       setAuthUserId(null);
       setIsMelosaUser(false);
     });
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      setMelosasCadastradas([]);
+      return;
+    }
+    apiGet<{ equipamentos: { ativo: string; nome: string | null }[] }>(
+      "/v1/equipamentos?tipo=MELOSA",
+      session.access_token
+    )
+      .then((json) => setMelosasCadastradas(json.equipamentos ?? []))
+      .catch(() => setMelosasCadastradas([]));
   }, [session?.access_token]);
 
   useEffect(() => {
@@ -1212,12 +1540,16 @@ export default function App() {
     return value;
   }
 
-  async function captureLocationAndAddress() {
+  async function captureLocationAndAddress(): Promise<{
+    latitude: number;
+    longitude: number;
+    address: string | null;
+  } | null> {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("Permissão negada", "Habilite a localização para continuar.");
-        return;
+        return null;
       }
 
       const servicesEnabled = await Location.hasServicesEnabledAsync();
@@ -1226,7 +1558,7 @@ export default function App() {
         setLocalLongitude(null);
         setLocalAddress(null);
         Alert.alert("Localização desativada", "Ative os serviços de localização do dispositivo.");
-        return;
+        return null;
       }
 
       const lastKnown = await Location.getLastKnownPositionAsync();
@@ -1252,22 +1584,25 @@ export default function App() {
       }
 
       const finalPosition = position ?? lastKnown!;
+      const latitude = finalPosition.coords.latitude;
+      const longitude = finalPosition.coords.longitude;
 
-      setLocalLatitude(finalPosition.coords.latitude);
-      setLocalLongitude(finalPosition.coords.longitude);
+      setLocalLatitude(latitude);
+      setLocalLongitude(longitude);
 
       if (!isOnline) {
         setLocalAddress(null);
-        return;
+        return { latitude, longitude, address: null };
       }
 
+      let address: string | null = null;
       try {
         const geocoded = await Location.reverseGeocodeAsync({
-          latitude: finalPosition.coords.latitude,
-          longitude: finalPosition.coords.longitude,
+          latitude,
+          longitude,
         });
         const first = geocoded?.[0];
-        const address = first
+        address = first
           ? [
               first.street,
               first.city,
@@ -1282,6 +1617,7 @@ export default function App() {
       } catch {
         setLocalAddress(null);
       }
+      return { latitude, longitude, address };
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       if (msg.toLowerCase().includes("current location is unavailable")) {
@@ -1289,9 +1625,10 @@ export default function App() {
         setLocalLongitude(null);
         setLocalAddress(null);
         Alert.alert("Localização indisponível", "O emulador não tem posição definida. Defina uma localização no Emulator.");
-        return;
+        return null;
       }
       setLocalAddress(null);
+      return null;
     }
   }
 
@@ -1740,8 +2077,22 @@ export default function App() {
       return;
     }
     const litrosMelosa = medidorFinal - medidorInicial;
-    if (localLatitude == null || localLongitude == null) {
-      Alert.alert("Localização obrigatória", "Toque em “Obter localização” e aguarde as coordenadas.");
+    let gpsLatitude = localLatitude;
+    let gpsLongitude = localLongitude;
+    let gpsAddress = localAddress;
+    if (gpsLatitude == null || gpsLongitude == null) {
+      const captured = await captureLocationAndAddress();
+      if (captured) {
+        gpsLatitude = captured.latitude;
+        gpsLongitude = captured.longitude;
+        gpsAddress = captured.address;
+      }
+    }
+    if (gpsLatitude == null || gpsLongitude == null) {
+      Alert.alert(
+        "Localização obrigatória",
+        "Não foi possível obter o GPS. Verifique se a localização está ativa e tente salvar novamente."
+      );
       return;
     }
 
@@ -1859,9 +2210,9 @@ export default function App() {
       melosa_combustivel_tipo_retirada: melosaWdrCombustivelTipo.trim(),
       melosa_tanque_storage_path: null,
 
-      local_latitude: localLatitude,
-      local_longitude: localLongitude,
-      local_address: localAddress,
+      local_latitude: gpsLatitude,
+      local_longitude: gpsLongitude,
+      local_address: gpsAddress,
       obs: null,
     };
 
@@ -1951,18 +2302,18 @@ export default function App() {
     setScreen({ name: "melosa", step: "lacre_medidor" });
   }
 
-  function ThemeToggleButton() {
-    return (
-      <TouchableOpacity
-        style={[styles.themeToggle, !isDarkMode ? styles.themeToggleLight : null]}
-        onPress={() => setThemeMode((m) => (m === "dark" ? "light" : "dark"))}
-      >
-        <Text style={[styles.themeToggleText, !isDarkMode ? styles.themeToggleTextLight : null]}>
-          {isDarkMode ? "Modo claro" : "Modo escuro"}
-        </Text>
-      </TouchableOpacity>
-    );
-  }
+  const toggleTheme = () => setThemeMode((m) => (m === "dark" ? "light" : "dark"));
+
+  const themeToggleOverlay = (
+    <DraggableThemeToggle
+      isDarkMode={isDarkMode}
+      onToggleTheme={toggleTheme}
+      cardBounds={cardBounds}
+      layout={layout}
+      position={themeTogglePosition}
+      onPositionChange={handleThemeTogglePositionChange}
+    />
+  );
 
   if (screen.name === "login") {
     return (
@@ -1972,28 +2323,24 @@ export default function App() {
           <View style={[styles.orb1, !isDarkMode ? styles.orb1Light : null]} />
           <View style={[styles.orb2, !isDarkMode ? styles.orb2Light : null]} />
         </View>
-        <ThemeToggleButton />
 
-        <KeyboardAvoidingView
-          style={styles.authKeyboardFlex}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
-        >
-          <ScrollView
-            style={styles.authScrollFlex}
-            contentContainerStyle={styles.authScrollLogin}
-            keyboardShouldPersistTaps="always"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator
-            nestedScrollEnabled
-          >
-            <View style={styles.brandWrap}>
-              <Image source={require("./assets/logo_compacto.png")} style={styles.brandLogo} resizeMode="contain" />
-            </View>
+        <SafeAreaView style={styles.screenSafeArea}>
+          <View style={styles.screenShell}>
+            <KeyboardAvoidingView
+              style={styles.authKeyboardFlex}
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
+            >
+              <CenteredScrollView contentContainerStyle={styles.authScrollLogin}>
+                <CardMeasuredWrap layout={layout} isDarkMode={isDarkMode} onBoundsChange={setCardBounds}>
+                <View style={styles.brandWrap}>
+                  <Image
+                    source={require("./assets/logo_compacto.png")}
+                    style={[styles.brandLogo, layout.brandLogoSize]}
+                    resizeMode="contain"
+                  />
+                </View>
 
-            <View style={[styles.glassWrapper, !isDarkMode ? styles.glassWrapperLight : null]}>
-              <BlurView tint={isDarkMode ? "dark" : "light"} intensity={55} style={styles.glassBlur} />
-              <View style={styles.glassInner}>
                 <Text style={[styles.authTitle, !isDarkMode ? styles.authTitleLight : null]}>Entrar</Text>
 
                 <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Email</Text>
@@ -2041,19 +2388,12 @@ export default function App() {
                 >
                   <Text style={styles.primaryButtonText}>{busy ? "Entrando..." : "Entrar"}</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity style={styles.secondaryLink} onPress={() => setScreen({ name: "registro" })} disabled={busy}>
-                  <Text style={[styles.secondaryLinkText, !isDarkMode ? styles.secondaryLinkTextLight : null]}>Criar conta</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.secondaryLink} onPress={testApiConnection} disabled={busy}>
-                  <Text style={[styles.secondaryLinkText, !isDarkMode ? styles.secondaryLinkTextLight : null]}>
-                    Testar conexão API
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+                </CardMeasuredWrap>
+              </CenteredScrollView>
+            </KeyboardAvoidingView>
+            {themeToggleOverlay}
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
@@ -2066,28 +2406,24 @@ export default function App() {
           <View style={[styles.orb1, !isDarkMode ? styles.orb1Light : null]} />
           <View style={[styles.orb2, !isDarkMode ? styles.orb2Light : null]} />
         </View>
-        <ThemeToggleButton />
 
-        <KeyboardAvoidingView
-          style={styles.authKeyboardFlex}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
-        >
-          <ScrollView
-            style={styles.authScrollFlex}
-            contentContainerStyle={styles.authScrollRegister}
-            keyboardShouldPersistTaps="always"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator
-            nestedScrollEnabled
-          >
-            <View style={styles.brandWrap}>
-              <Image source={require("./assets/logo_compacto.png")} style={styles.brandLogo} resizeMode="contain" />
-            </View>
+        <SafeAreaView style={styles.screenSafeArea}>
+          <View style={styles.screenShell}>
+            <KeyboardAvoidingView
+              style={styles.authKeyboardFlex}
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
+            >
+              <CenteredScrollView contentContainerStyle={styles.authScrollRegister}>
+                <CardMeasuredWrap layout={layout} isDarkMode={isDarkMode} onBoundsChange={setCardBounds}>
+                <View style={styles.brandWrap}>
+                  <Image
+                    source={require("./assets/logo_compacto.png")}
+                    style={[styles.brandLogo, layout.brandLogoSize]}
+                    resizeMode="contain"
+                  />
+                </View>
 
-            <View style={[styles.glassWrapper, !isDarkMode ? styles.glassWrapperLight : null]}>
-              <BlurView tint={isDarkMode ? "dark" : "light"} intensity={55} style={styles.glassBlur} />
-              <View style={styles.glassInner}>
                 <Text style={[styles.authTitle, !isDarkMode ? styles.authTitleLight : null]}>Registro</Text>
 
                 <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Nome completo</Text>
@@ -2216,32 +2552,47 @@ export default function App() {
                     Testar conexão API
                   </Text>
                 </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+                </CardMeasuredWrap>
+              </CenteredScrollView>
+            </KeyboardAvoidingView>
+            {themeToggleOverlay}
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
 
   if (screen.name === "home") {
     return (
-      <View style={[styles.homeRoot, !isDarkMode ? styles.homeRootLight : null]}>
+      <SafeAreaView style={[styles.homeRoot, !isDarkMode ? styles.homeRootLight : null]}>
         <StatusBar style={barStyle} />
-        <ThemeToggleButton />
-        <ScrollView contentContainerStyle={styles.homeScroll}>
-          <View style={[styles.homeGlassWrap, !isDarkMode ? styles.homeGlassWrapLight : null]}>
-            <BlurView tint={isDarkMode ? "dark" : "light"} intensity={60} style={styles.homeGlassBlur} />
-            <View style={styles.homeGlassInner}>
+        <View style={styles.screenShell}>
+          <CenteredScrollView>
+            <CardMeasuredWrap
+              layout={layout}
+              isDarkMode={isDarkMode}
+              onBoundsChange={setCardBounds}
+              innerStyle={styles.homeGlassInner}
+            >
               <View style={styles.homeHeroWrap}>
                 <View style={[styles.homeHeroPlate, !isDarkMode ? styles.homeHeroPlateLight : null]}>
-                  <Image source={require("./assets/home_carbono.png")} style={styles.homeHeroImage} resizeMode="contain" />
+                  <Image
+                    source={require("./assets/home_carbono.png")}
+                    style={[styles.homeHeroImage, { height: layout.heroImageHeight }]}
+                    resizeMode="contain"
+                  />
                 </View>
               </View>
-              <View style={styles.homeHeaderRow}>
-                <Text style={[styles.homeTitle, !isDarkMode ? styles.homeTitleLight : null]}>Home</Text>
-              </View>
-              <Text style={[styles.homeSub, !isDarkMode ? styles.homeSubLight : null]}>
+              <Text
+                style={[
+                  styles.homeSub,
+                  !isDarkMode ? styles.homeSubLight : null,
+                  { fontSize: layout.statusFontSize },
+                ]}
+                adjustsFontSizeToFit
+                numberOfLines={1}
+                minimumFontScale={0.75}
+              >
                 Status: {isOnline ? "Online" : "Offline"} | Pendentes: {pending}
               </Text>
 
@@ -2255,30 +2606,54 @@ export default function App() {
                   setScreen({ name: "melosa", step: "register" });
                 }}
               >
-                <Text style={[styles.homeActionTitle, !isDarkMode ? styles.homeActionTitleLight : null]}>Registrar retirada da melosa</Text>
+                <AdaptiveCardText
+                  style={[styles.homeActionTitle, { fontSize: layout.actionTitleFontSize }]}
+                  lightStyle={styles.homeActionTitleLight}
+                  isDarkMode={isDarkMode}
+                >
+                  Registrar retirada da melosa
+                </AdaptiveCardText>
               </TouchableOpacity>
 
               {!isMelosaUser ? (
                 <TouchableOpacity
-                  style={[styles.homeActionCard, !isDarkMode ? styles.homeActionCardLight : null]}
-                  onPress={() => {
-                    resetForm();
-                    setScreen({ name: "form", tipo: "ENTRADA_TANQUE_OBRA" });
-                  }}
+                  style={[
+                    styles.homeActionCard,
+                    styles.homeActionCardDisabled,
+                    !isDarkMode ? styles.homeActionCardLight : null,
+                    !isDarkMode ? styles.homeActionCardDisabledLight : null,
+                  ]}
+                  disabled
+                  activeOpacity={1}
                 >
-                  <Text style={[styles.homeActionTitle, !isDarkMode ? styles.homeActionTitleLight : null]}>Registrar entrada no tanque da obra</Text>
+                  <AdaptiveCardText
+                    style={[styles.homeActionTitle, styles.homeActionTitleDisabled, { fontSize: layout.actionTitleFontSize }]}
+                    lightStyle={styles.homeActionTitleDisabledLight}
+                    isDarkMode={isDarkMode}
+                  >
+                    Registrar entrada no tanque da obra
+                  </AdaptiveCardText>
                 </TouchableOpacity>
               ) : null}
 
               {!isMelosaUser ? (
                 <TouchableOpacity
-                  style={[styles.homeActionCard, !isDarkMode ? styles.homeActionCardLight : null]}
-                  onPress={() => {
-                    resetForm();
-                    setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "dados" });
-                  }}
+                  style={[
+                    styles.homeActionCard,
+                    styles.homeActionCardDisabled,
+                    !isDarkMode ? styles.homeActionCardLight : null,
+                    !isDarkMode ? styles.homeActionCardDisabledLight : null,
+                  ]}
+                  disabled
+                  activeOpacity={1}
                 >
-                  <Text style={[styles.homeActionTitle, !isDarkMode ? styles.homeActionTitleLight : null]}>Registrar retirada do tanque</Text>
+                  <AdaptiveCardText
+                    style={[styles.homeActionTitle, styles.homeActionTitleDisabled, { fontSize: layout.actionTitleFontSize }]}
+                    lightStyle={styles.homeActionTitleDisabledLight}
+                    isDarkMode={isDarkMode}
+                  >
+                    Registrar retirada do tanque
+                  </AdaptiveCardText>
                 </TouchableOpacity>
               ) : null}
 
@@ -2353,11 +2728,11 @@ export default function App() {
               </TouchableOpacity>
 
               {message ? <Text style={[styles.homeMessage, !isDarkMode ? styles.homeMessageLight : null]}>{message}</Text> : null}
-            </View>
-          </View>
-
-        </ScrollView>
-      </View>
+            </CardMeasuredWrap>
+          </CenteredScrollView>
+          {themeToggleOverlay}
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -2390,19 +2765,6 @@ export default function App() {
       else if (isHorimetro) setScreen({ name: "melosa", step: "medidor_acumulado" });
       else if (isLacreMedidor) setScreen({ name: "melosa", step: "horimetro" });
     }
-
-    const melosaLocationFields = (
-      <GpsLocationBlock
-        isDarkMode={isDarkMode}
-        busy={busy}
-        label="Localização do operador (GPS)"
-        localLatitude={localLatitude}
-        localLongitude={localLongitude}
-        localAddress={localAddress}
-        onCapture={safeCaptureLocationAndAddress}
-        showDetails={false}
-      />
-    );
 
     const melosaActionFooter = (
       <FormActionFooter isDarkMode={isDarkMode}>
@@ -2443,13 +2805,24 @@ export default function App() {
     return (
       <View style={[styles.formRoot, !isDarkMode ? styles.formRootLight : null]}>
         <StatusBar style={barStyle} />
-        <ThemeToggleButton />
-        <FormScreenScroll>
-          <View style={[styles.formGlassWrap, !isDarkMode ? styles.formGlassWrapLight : null]}>
-            <BlurView tint={isDarkMode ? "dark" : "light"} intensity={60} style={styles.formGlassBlur} />
-            <View style={styles.formGlassInner}>
+        <SafeAreaView style={styles.screenSafeArea}>
+          <View style={styles.screenShell}>
+            <FormScreenScroll layoutKey={melosaStep}>
+              <CardMeasuredWrap
+                layout={layout}
+                isDarkMode={isDarkMode}
+                onBoundsChange={setCardBounds}
+                innerStyle={isLacreMedidor || isMedidorAcumulado || isHorimetro ? styles.glassInnerCompact : undefined}
+              >
               <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>Melosa</Text>
-              <Text style={[styles.formSubtitle, !isDarkMode ? styles.formSubtitleLight : null]}>{melosaSubtitle}</Text>
+              <Text
+                style={[styles.formSubtitle, !isDarkMode ? styles.formSubtitleLight : null]}
+                adjustsFontSizeToFit
+                numberOfLines={2}
+                minimumFontScale={0.8}
+              >
+                {melosaSubtitle}
+              </Text>
 
               {isRegister ? (
                 <>
@@ -2467,14 +2840,38 @@ export default function App() {
                   </View>
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Ativo Melosa</Text>
-                  <TextInput
-                    value={melosaPlacaTexto}
-                    onChangeText={setMelosaPlacaTexto}
-                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: ABC1D23"
-                    placeholderTextColor={inputPlaceholderColor}
-                    autoCapitalize="characters"
-                  />
+                  {melosasCadastradas.length > 0 ? (
+                    <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                      <Picker
+                        selectedValue={melosaPlacaTexto}
+                        onValueChange={(v) => setMelosaPlacaTexto(String(v))}
+                        style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                      >
+                        <Picker.Item label="Selecione o ativo da melosa" value="" />
+                        {melosasCadastradas.map((m) => (
+                          <Picker.Item
+                            key={m.ativo}
+                            label={m.nome && m.nome !== m.ativo ? `${m.ativo} - ${m.nome}` : m.ativo}
+                            value={m.ativo}
+                          />
+                        ))}
+                      </Picker>
+                    </View>
+                  ) : (
+                    <>
+                      <TextInput
+                        value={melosaPlacaTexto}
+                        onChangeText={setMelosaPlacaTexto}
+                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                        placeholder="Ex.: ABC1D23"
+                        placeholderTextColor={inputPlaceholderColor}
+                        autoCapitalize="characters"
+                      />
+                      <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
+                        Nenhuma melosa cadastrada na web. Peça ao administrador para cadastrar em Equipamentos.
+                      </Text>
+                    </>
+                  )}
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Ativo do Equipamento</Text>
                   <TextInput
@@ -2513,13 +2910,16 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     keyboardType="decimal-pad"
                   />
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
                     Foto Inicial Acumulado do Medidor da Melosa
                   </Text>
-                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
+                  <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
                     {melosaMedidorAcumuladoInicialFotoUri ? (
                       <>
-                        <Image source={{ uri: melosaMedidorAcumuladoInicialFotoUri }} style={styles.photoPreview} />
+                        <Image
+                          source={{ uri: melosaMedidorAcumuladoInicialFotoUri }}
+                          style={[styles.photoPreview, styles.photoPreviewCompact]}
+                        />
                         <TouchableOpacity
                           style={styles.photoRemove}
                           onPress={() => setMelosaMedidorAcumuladoInicialFotoUri(null)}
@@ -2529,12 +2929,14 @@ export default function App() {
                         </TouchableOpacity>
                       </>
                     ) : (
-                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
+                      <Text
+                        style={[styles.photoPlaceholder, styles.photoPlaceholderCompact, !isDarkMode ? styles.photoPlaceholderLight : null]}
+                      >
                         Selecione a foto inicial acumulada do medidor da melosa
                       </Text>
                     )}
                   </View>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
+                  <View style={styles.photoActionRow}>
                     <TouchableOpacity
                       style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
                       onPress={pickMelosaMedidorAcumuladoInicialFromLibrary}
@@ -2566,13 +2968,16 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     keyboardType="decimal-pad"
                   />
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
                     Foto do Hodômetro do Equipamento Abastecido
                   </Text>
-                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
+                  <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
                     {melosaHorimetroEquipamentoFotoUri ? (
                       <>
-                        <Image source={{ uri: melosaHorimetroEquipamentoFotoUri }} style={styles.photoPreview} />
+                        <Image
+                          source={{ uri: melosaHorimetroEquipamentoFotoUri }}
+                          style={[styles.photoPreview, styles.photoPreviewCompact]}
+                        />
                         <TouchableOpacity
                           style={styles.photoRemove}
                           onPress={() => setMelosaHorimetroEquipamentoFotoUri(null)}
@@ -2582,12 +2987,14 @@ export default function App() {
                         </TouchableOpacity>
                       </>
                     ) : (
-                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
+                      <Text
+                        style={[styles.photoPlaceholder, styles.photoPlaceholderCompact, !isDarkMode ? styles.photoPlaceholderLight : null]}
+                      >
                         Selecione a foto do hodômetro do equipamento abastecido
                       </Text>
                     )}
                   </View>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
+                  <View style={styles.photoActionRow}>
                     <TouchableOpacity
                       style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
                       onPress={pickMelosaHorimetroEquipamentoFromLibrary}
@@ -2604,7 +3011,7 @@ export default function App() {
                     </TouchableOpacity>
                   </View>
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
                     Motorista do equipamento abastecido
                   </Text>
                   <TextInput
@@ -2615,13 +3022,16 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                   />
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
                     Foto do equipamento junto com o Operador/Motorista
                   </Text>
-                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
+                  <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
                     {melosaEquipamentoOperadorFotoUri ? (
                       <>
-                        <Image source={{ uri: melosaEquipamentoOperadorFotoUri }} style={styles.photoPreview} />
+                        <Image
+                          source={{ uri: melosaEquipamentoOperadorFotoUri }}
+                          style={[styles.photoPreview, styles.photoPreviewCompact]}
+                        />
                         <TouchableOpacity
                           style={styles.photoRemove}
                           onPress={() => setMelosaEquipamentoOperadorFotoUri(null)}
@@ -2631,12 +3041,14 @@ export default function App() {
                         </TouchableOpacity>
                       </>
                     ) : (
-                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
+                      <Text
+                        style={[styles.photoPlaceholder, styles.photoPlaceholderCompact, !isDarkMode ? styles.photoPlaceholderLight : null]}
+                      >
                         Selecione a foto do equipamento com o operador/motorista
                       </Text>
                     )}
                   </View>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
+                  <View style={styles.photoActionRow}>
                     <TouchableOpacity
                       style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
                       onPress={pickMelosaEquipamentoOperadorFromLibrary}
@@ -2668,13 +3080,21 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     keyboardType="decimal-pad"
                   />
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                  <Text
+                    style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}
+                    adjustsFontSizeToFit
+                    numberOfLines={2}
+                    minimumFontScale={0.85}
+                  >
                     Foto final acumulado do medidor da melosa
                   </Text>
-                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
+                  <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
                     {melosaMedidorAcumuladoFinalFotoUri ? (
                       <>
-                        <Image source={{ uri: melosaMedidorAcumuladoFinalFotoUri }} style={styles.photoPreview} />
+                        <Image
+                          source={{ uri: melosaMedidorAcumuladoFinalFotoUri }}
+                          style={[styles.photoPreview, styles.photoPreviewCompact]}
+                        />
                         <TouchableOpacity
                           style={styles.photoRemove}
                           onPress={() => setMelosaMedidorAcumuladoFinalFotoUri(null)}
@@ -2684,12 +3104,14 @@ export default function App() {
                         </TouchableOpacity>
                       </>
                     ) : (
-                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
+                      <Text
+                        style={[styles.photoPlaceholder, styles.photoPlaceholderCompact, !isDarkMode ? styles.photoPlaceholderLight : null]}
+                      >
                         Selecione a foto final acumulada do medidor da melosa
                       </Text>
                     )}
                   </View>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
+                  <View style={styles.photoActionRow}>
                     <TouchableOpacity
                       style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
                       onPress={pickMelosaMedidorAcumuladoFinalFromLibrary}
@@ -2705,8 +3127,6 @@ export default function App() {
                       <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
                     </TouchableOpacity>
                   </View>
-
-                  {melosaLocationFields}
                 </>
               ) : null}
 
@@ -2717,10 +3137,12 @@ export default function App() {
               ) : null}
 
               {message ? <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>{message}</Text> : null}
-            </View>
+              </CardMeasuredWrap>
+            </FormScreenScroll>
+            {melosaActionFooter}
+            {themeToggleOverlay}
           </View>
-        </FormScreenScroll>
-        {melosaActionFooter}
+        </SafeAreaView>
       </View>
     );
   }
@@ -2823,13 +3245,19 @@ export default function App() {
     return (
       <View style={[styles.formRoot, !isDarkMode ? styles.formRootLight : null]}>
         <StatusBar style={barStyle} />
-        <ThemeToggleButton />
-        <FormScreenScroll>
-          <View style={[styles.formGlassWrap, !isDarkMode ? styles.formGlassWrapLight : null]}>
-            <BlurView tint={isDarkMode ? "dark" : "light"} intensity={60} style={styles.formGlassBlur} />
-            <View style={styles.formGlassInner}>
+        <SafeAreaView style={styles.screenSafeArea}>
+          <View style={styles.screenShell}>
+            <FormScreenScroll>
+              <CardMeasuredWrap layout={layout} isDarkMode={isDarkMode} onBoundsChange={setCardBounds}>
               <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>Registrar</Text>
-              <Text style={[styles.formSubtitle, !isDarkMode ? styles.formSubtitleLight : null]}>{subtitle}</Text>
+              <Text
+                style={[styles.formSubtitle, !isDarkMode ? styles.formSubtitleLight : null]}
+                adjustsFontSizeToFit
+                numberOfLines={2}
+                minimumFontScale={0.8}
+              >
+                {subtitle}
+              </Text>
 
               {isEntradaTanqueObra || isRetiradaDados ? (
                 <>
@@ -3253,10 +3681,12 @@ export default function App() {
               ) : null}
 
               {message ? <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>{message}</Text> : null}
-            </View>
+              </CardMeasuredWrap>
+            </FormScreenScroll>
+            {tanqueActionFooter}
+            {themeToggleOverlay}
           </View>
-        </FormScreenScroll>
-        {tanqueActionFooter}
+        </SafeAreaView>
       </View>
     );
   }
@@ -3264,13 +3694,21 @@ export default function App() {
   return (
     <View style={[styles.formRoot, !isDarkMode ? styles.formRootLight : null]}>
       <StatusBar style={barStyle} />
-      <FormScreenScroll contentContainerStyle={{ padding: 16 }}>
-        <Text style={styles.title}>Registrar</Text>
-        <Text style={{ color: "#666", marginBottom: 12 }}>
-          {tipoAtual === "RETIRADA_MELOSA" ? "Retirada da melosa" : "Registrar"}
-        </Text>
+      <SafeAreaView style={styles.screenSafeArea}>
+        <View style={styles.screenShell}>
+          <FormScreenScroll>
+            <CardMeasuredWrap layout={layout} isDarkMode={isDarkMode} onBoundsChange={setCardBounds}>
+          <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>Registrar</Text>
+          <Text
+            style={[styles.formSubtitle, !isDarkMode ? styles.formSubtitleLight : null]}
+            adjustsFontSizeToFit
+            numberOfLines={2}
+            minimumFontScale={0.8}
+          >
+            {tipoAtual === "RETIRADA_MELOSA" ? "Retirada da melosa" : "Registrar"}
+          </Text>
 
-        <Text>Obra</Text>
+        <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Obra</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled style={{ marginTop: 6 }}>
           {OBRAS.map((o) => {
             const selected = o.codigo === obraCodigo;
@@ -3347,24 +3785,28 @@ export default function App() {
         />
 
         {message ? <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 12 }]}>{message}</Text> : null}
-      </FormScreenScroll>
-      <FormActionFooter isDarkMode={isDarkMode}>
-        <View style={styles.formActionRow}>
-          <TouchableOpacity
-            style={[styles.secondaryButton, !isDarkMode ? styles.secondaryButtonLight : null, { flex: 1 }]}
-            onPress={() => setScreen({ name: "home" })}
-          >
-            <Text style={[styles.secondaryButtonText, !isDarkMode ? styles.secondaryButtonTextLight : null]}>Cancelar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
-            onPress={submitMovement}
-            disabled={busy}
-          >
-            <Text style={styles.primaryButtonText}>Salvar</Text>
-          </TouchableOpacity>
+            </CardMeasuredWrap>
+          </FormScreenScroll>
+          <FormActionFooter isDarkMode={isDarkMode}>
+          <View style={styles.formActionRow}>
+            <TouchableOpacity
+              style={[styles.secondaryButton, !isDarkMode ? styles.secondaryButtonLight : null, { flex: 1 }]}
+              onPress={() => setScreen({ name: "home" })}
+            >
+              <Text style={[styles.secondaryButtonText, !isDarkMode ? styles.secondaryButtonTextLight : null]}>Cancelar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
+              onPress={submitMovement}
+              disabled={busy}
+            >
+              <Text style={styles.primaryButtonText}>Salvar</Text>
+            </TouchableOpacity>
+          </View>
+          </FormActionFooter>
+          {themeToggleOverlay}
         </View>
-      </FormActionFooter>
+      </SafeAreaView>
     </View>
   );
 }
@@ -3454,17 +3896,83 @@ const styles = StyleSheet.create({
     backgroundColor: lightTheme.accentOrbSoft,
     opacity: 1,
   },
-  themeToggle: {
+  screenSafeArea: {
+    flex: 1,
+    width: "100%",
+  },
+  screenShell: {
+    flex: 1,
+    width: "100%",
+    position: "relative",
+    flexDirection: "column",
+  },
+  centeredScreenScroll: {
+    flexGrow: 1,
+    width: "100%",
+    alignItems: "center",
+    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
+    paddingBottom: 16,
+  },
+  centeredScrollInner: {
+    width: "100%",
+    alignItems: "center",
+  },
+  screenScrollFill: {
+    flex: 1,
+    width: "100%",
+  },
+  glassCard: {
+    borderRadius: 26,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    shadowColor: "#020617",
+    shadowOpacity: 0.32,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  glassCardLight: {
+    borderColor: lightTheme.borderSubtle,
+    backgroundColor: "rgba(255,255,255,0.97)",
+    shadowColor: lightTheme.textPrimary,
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  glassCardFullWidth: {
+    width: "100%",
+    alignSelf: "stretch",
+  },
+  glassBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  glassInner: {
+    width: "100%",
+    alignSelf: "stretch",
+    padding: 18,
+  },
+  glassInnerCompact: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  themeToggleFloating: {
     position: "absolute",
-    top: 48,
-    right: 16,
-    zIndex: 30,
+    zIndex: 40,
+    width: THEME_TOGGLE_WIDTH,
+    height: THEME_TOGGLE_HEIGHT,
+  },
+  themeToggle: {
+    flex: 1,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.28)",
     backgroundColor: "rgba(8,12,20,0.45)",
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    justifyContent: "center",
+    alignItems: "center",
     shadowColor: "#020617",
     shadowOpacity: 0.26,
     shadowRadius: 10,
@@ -3496,19 +4004,9 @@ const styles = StyleSheet.create({
     paddingBottom: 240,
   },
   authScrollLogin: {
-    flexGrow: 1,
-    padding: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 28,
     paddingBottom: 48,
   },
   authScrollRegister: {
-    flexGrow: 1,
-    padding: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 28,
     paddingBottom: 48,
   },
   authKeyboardFlex: {
@@ -3521,41 +4019,11 @@ const styles = StyleSheet.create({
   },
   brandWrap: {
     alignItems: "center",
+    alignSelf: "center",
     marginBottom: 18,
   },
   brandLogo: {
-    width: 220,
-    height: 110,
-  },
-  glassWrapper: {
-    width: "100%",
-    maxWidth: 520,
     alignSelf: "center",
-    borderRadius: 26,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    backgroundColor: "rgba(255,255,255,0.07)",
-    shadowColor: "#020617",
-    shadowOpacity: 0.34,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  glassWrapperLight: {
-    borderColor: lightTheme.borderSubtle,
-    backgroundColor: "rgba(255,255,255,0.97)",
-    shadowColor: lightTheme.textPrimary,
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8,
-  },
-  glassBlur: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  glassInner: {
-    padding: 18,
   },
   authTitle: {
     color: "#fff",
@@ -3643,6 +4111,7 @@ const styles = StyleSheet.create({
   primaryButton: {
     marginTop: 18,
     width: "100%",
+    alignSelf: "stretch",
     backgroundColor: "#c00",
     borderRadius: 16,
     borderWidth: 1,
@@ -3682,6 +4151,8 @@ const styles = StyleSheet.create({
     color: lightTheme.accent,
   },
   photoBox: {
+    width: "100%",
+    alignSelf: "stretch",
     marginTop: 6,
     borderRadius: 16,
     borderWidth: 1,
@@ -3694,6 +4165,16 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
+  photoBoxCompact: {
+    minHeight: 92,
+    padding: 8,
+    marginTop: 4,
+  },
+  photoActionRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 8,
+  },
   photoBoxLight: {
     borderColor: lightTheme.borderSubtle,
     backgroundColor: lightTheme.surfaceMuted,
@@ -3702,6 +4183,13 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 140,
     borderRadius: 12,
+  },
+  photoPreviewCompact: {
+    height: 88,
+  },
+  photoPlaceholderCompact: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   photoPreviewFull: {
     width: "100%",
@@ -3764,54 +4252,20 @@ const styles = StyleSheet.create({
   homeRootLight: {
     backgroundColor: lightTheme.canvas,
   },
-  homeScroll: {
-    flexGrow: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  homeGlassWrap: {
-    marginTop: 0,
-    width: "100%",
-    maxWidth: 520,
-    alignSelf: "center",
-    borderRadius: 26,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    overflow: "hidden",
-    position: "relative",
-    shadowColor: "#020617",
-    shadowOpacity: 0.32,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  homeGlassWrapLight: {
-    borderColor: lightTheme.borderSubtle,
-    backgroundColor: "rgba(255,255,255,0.97)",
-    shadowColor: lightTheme.textPrimary,
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8,
-  },
-  homeGlassBlur: {
-    ...StyleSheet.absoluteFillObject,
-  },
   homeGlassInner: {
-    padding: 18,
-    alignItems: "stretch",
+    width: "100%",
+    alignItems: "center",
   },
   homeHeroWrap: {
+    width: "100%",
+    alignSelf: "stretch",
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 4,
     paddingBottom: 10,
   },
   homeHeroPlate: {
     width: "100%",
+    alignSelf: "stretch",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 14,
@@ -3824,17 +4278,12 @@ const styles = StyleSheet.create({
   homeHeroPlateLight: {
     borderColor: lightTheme.borderSubtle,
     backgroundColor: lightTheme.surface,
-    shadowColor: lightTheme.textPrimary,
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
   },
   homeHeroImage: {
-    width: "92%",
+    width: "100%",
     height: 110,
     opacity: 1,
-    alignSelf: "center",
+    alignSelf: "stretch",
   },
   homeTitle: {
     color: "#fff",
@@ -3867,9 +4316,11 @@ const styles = StyleSheet.create({
     opacity: 0.98,
   },
   homeSub: {
+    width: "100%",
     color: "rgba(255,255,255,0.75)",
     fontWeight: "700",
     marginTop: 6,
+    textAlign: "center",
   },
   homeSubLight: {
     color: lightTheme.textMuted,
@@ -3877,29 +4328,31 @@ const styles = StyleSheet.create({
   homeActionCard: {
     marginTop: 12,
     width: "100%",
-    borderRadius: 18,
+    alignSelf: "stretch",
+    minHeight: 56,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.22)",
     backgroundColor: "rgba(30,41,59,0.86)",
-    padding: 14,
-    shadowColor: "#020617",
-    shadowOpacity: 0.22,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 0,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    justifyContent: "center",
+    alignItems: "center",
   },
   homeActionCardLight: {
     borderColor: lightTheme.borderSubtle,
     borderLeftWidth: 4,
     borderLeftColor: lightTheme.accent,
     backgroundColor: lightTheme.surface,
-    shadowColor: lightTheme.textPrimary,
-    shadowOpacity: 0.07,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+  },
+  homeActionCardDisabled: {
+    opacity: 0.42,
+  },
+  homeActionCardDisabledLight: {
+    borderLeftColor: lightTheme.borderSubtle,
   },
   homeActionTitle: {
+    width: "100%",
     color: "#fff",
     fontWeight: "900",
     fontSize: 16,
@@ -3908,8 +4361,15 @@ const styles = StyleSheet.create({
   homeActionTitleLight: {
     color: lightTheme.textPrimary,
   },
+  homeActionTitleDisabled: {
+    color: "rgba(255,255,255,0.55)",
+  },
+  homeActionTitleDisabledLight: {
+    color: lightTheme.textMuted,
+  },
   secondaryButton: {
     width: "100%",
+    alignSelf: "stretch",
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.22)",
@@ -3964,16 +4424,14 @@ const styles = StyleSheet.create({
   },
   formScrollView: {
     flex: 1,
-  },
-  formScroll: {
-    flexGrow: 1,
-    padding: 20,
-    paddingBottom: 12,
-    alignItems: "center",
-    justifyContent: "center",
+    width: "100%",
+    minHeight: 0,
   },
   formFooter: {
-    paddingHorizontal: 20,
+    width: "100%",
+    flexShrink: 0,
+    alignItems: "center",
+    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.12)",
@@ -4009,36 +4467,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: "center",
   },
-  formGlassWrap: {
-    width: "100%",
-    maxWidth: 520,
-    alignSelf: "center",
-    borderRadius: 26,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    backgroundColor: "rgba(255,255,255,0.07)",
-    position: "relative",
-    shadowColor: "#020617",
-    shadowOpacity: 0.32,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  formGlassWrapLight: {
-    borderColor: lightTheme.borderSubtle,
-    backgroundColor: "rgba(255,255,255,0.97)",
-    shadowColor: lightTheme.textPrimary,
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8,
-  },
-  formGlassBlur: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  formGlassInner: {
-    padding: 18,
+  ghostButtonLocationCompact: {
+    minWidth: 200,
+    paddingVertical: 10,
   },
   formTitle: {
     color: "#fff",
@@ -4061,6 +4492,7 @@ const styles = StyleSheet.create({
   },
   pickerShell: {
     width: "100%",
+    alignSelf: "stretch",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.18)",
     borderRadius: 14,

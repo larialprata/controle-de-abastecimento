@@ -43,3 +43,13 @@ export async function apiPatch(path: string, token: string, body?: unknown) {
   return json;
 }
 
+export async function apiDelete(path: string, token: string) {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}`, ...CLIENT_PLATFORM_HEADER },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+  return json;
+}
+

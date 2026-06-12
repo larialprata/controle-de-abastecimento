@@ -6,7 +6,7 @@ export default function DashboardLayout() {
   const location = useLocation();
 
   return (
-    <div className="relative flex min-h-screen overflow-x-hidden font-sans text-slate-900 dark:text-slate-100">
+    <div className="relative flex h-screen overflow-hidden font-sans text-slate-900 dark:text-slate-100">
       <div
         className="pointer-events-none fixed inset-0 -z-20 bg-gradient-to-br from-sky-100/95 via-violet-100/80 to-rose-100/70 dark:from-slate-950 dark:via-indigo-950 dark:to-slate-900"
         aria-hidden
@@ -16,8 +16,8 @@ export default function DashboardLayout() {
         aria-hidden
       />
       <Sidebar />
-      <main className="relative min-h-screen flex-1 overflow-x-auto p-6 lg:p-8">
-        <div className="mx-auto max-w-[1680px]">
+      <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-6 lg:p-8">
+        <div className="mx-auto w-full min-w-0 max-w-[1680px]">
           <ErrorBoundary key={location.pathname}>
             <Outlet />
           </ErrorBoundary>

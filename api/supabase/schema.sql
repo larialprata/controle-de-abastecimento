@@ -34,10 +34,22 @@ insert into public.obras (codigo, nome) values
 on conflict (codigo) do update
 set nome = excluded.nome;
 
--- Equipamentos (cadastro melosa)
+-- Equipamentos (tanque e melosa)
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'equipamento_tipo') then
+    create type public.equipamento_tipo as enum ('TANQUE', 'MELOSA');
+  end if;
+end $$;
+
 create table if not exists public.equipamentos (
   ativo text primary key,
-  nome text not null
+  nome text,
+  tipo public.equipamento_tipo not null default 'MELOSA',
+  obra_codigo int references public.obras (codigo),
+  constraint equipamentos_obra_tanque_chk check (
+    (tipo = 'MELOSA' and obra_codigo is null) or tipo = 'TANQUE'
+  )
 );
 
 -- Tipo de movimentação (MVP)

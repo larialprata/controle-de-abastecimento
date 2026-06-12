@@ -52,7 +52,7 @@ export default function Sidebar() {
     ].join(" ");
 
   return (
-    <aside className={`flex h-screen w-64 shrink-0 flex-col ${glassSidebar}`}>
+    <aside className={`flex h-full w-64 shrink-0 flex-col overflow-hidden ${glassSidebar}`}>
       <div className="flex items-start gap-2 border-b border-white/40 px-4 py-4 dark:border-white/10">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
           <FileText className="h-5 w-5" aria-hidden />

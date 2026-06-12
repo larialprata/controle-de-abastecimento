@@ -234,6 +234,7 @@ function municipioFromAddress(v: unknown): string {
 
 const PAGE_SIZE = 500;
 const TABLE_COL_COUNT = 11;
+const TABLE_SCROLL_MAX_HEIGHT = "min(28.5rem, 52vh)";
 
 const labelCls =
   "flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400";
@@ -485,8 +486,8 @@ export default function MelosaBIPage() {
   const authToken = token ?? "";
 
   return (
-    <div>
-      <header className={`mb-6 ${glassPanel} px-5 py-5 text-center md:text-left`}>
+    <div className="flex min-w-0 flex-col gap-5">
+      <header className={`${glassPanel} px-5 py-5 text-center md:text-left`}>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">BI — Melosa</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
           Quantidade (L): medidor final − medidor inicial (o final deve ser maior que o inicial). O Excel usa a
@@ -494,7 +495,7 @@ export default function MelosaBIPage() {
         </p>
       </header>
 
-      <div className={`mb-4 flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
+      <div className={`flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>Atualizar</span>
           <button
@@ -561,7 +562,7 @@ export default function MelosaBIPage() {
             onChange={(e) => setTicketFiltro(e.target.value)}
           />
         </div>
-        <div className="min-w-[200px] flex-1 flex-col gap-1 sm:min-w-[260px]">
+        <div className="flex min-w-[200px] flex-1 flex-col gap-1 sm:min-w-[260px]">
           <span className={labelCls}>Buscar</span>
           <input
             className={`${glassField} w-full`}
@@ -573,7 +574,7 @@ export default function MelosaBIPage() {
         </div>
       </div>
 
-      <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
+      <p className="text-sm text-slate-600 dark:text-slate-400">
         Mostrando <strong className="text-slate-900 dark:text-white">{filtradas.length}</strong> de{" "}
         <strong className="text-slate-900 dark:text-white">{raw.length}</strong> linhas
         {filtroTextoAtivo ? " (filtrado)" : ""} ·{" "}
@@ -581,43 +582,48 @@ export default function MelosaBIPage() {
       </p>
 
       {error ? (
-        <div className="mb-4 rounded-2xl border border-red-300/80 bg-red-50/90 px-4 py-3 text-sm font-semibold text-red-800 backdrop-blur-md dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-200">
+        <div className="rounded-2xl border border-red-300/80 bg-red-50/90 px-4 py-3 text-sm font-semibold text-red-800 backdrop-blur-md dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-200">
           {error}
         </div>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_minmax(300px,440px)] xl:grid-cols-[1fr_minmax(340px,480px)]">
-        <div className={`flex min-h-0 flex-col overflow-hidden ${glassPanel} p-0`}>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/40 px-4 py-3 dark:border-white/10">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">Movimentações Melosa</h2>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void openTicket()}
-                disabled={loading || selectedRows.length === 0}
-                className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Ticket{selectedRows.length > 0 ? ` (${selectedRows.length})` : ""}
-              </button>
-              <button
-                type="button"
-                onClick={openDeleteConfirm}
-                disabled={loading || selectedOperationIds.length === 0}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Excluir selecionadas
-              </button>
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                {filtradas.length} {filtradas.length === 1 ? "linha" : "linhas"} · {selectedOperationIds.length}{" "}
-                selecionada{selectedOperationIds.length === 1 ? "" : "s"}
-              </span>
-            </div>
-          </div>
-          <div className="max-h-[min(72vh,780px)] overflow-auto">
-            <table className="w-max min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="text-left align-middle">
-                  <th className={thCls}>
+      <div className={`flex flex-wrap items-center justify-between gap-2 ${glassPanel} px-4 py-3`}>
+        <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+          {filtradas.length} {filtradas.length === 1 ? "linha" : "linhas"} · {selectedOperationIds.length}{" "}
+          selecionada{selectedOperationIds.length === 1 ? "" : "s"}
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void openTicket()}
+            disabled={loading || selectedRows.length === 0}
+            className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Ticket{selectedRows.length > 0 ? ` (${selectedRows.length})` : ""}
+          </button>
+          <button
+            type="button"
+            onClick={openDeleteConfirm}
+            disabled={loading || selectedOperationIds.length === 0}
+            className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Excluir selecionadas
+          </button>
+        </div>
+      </div>
+
+      <div className={`flex min-w-0 flex-col overflow-hidden ${glassPanel} p-0`}>
+        <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
+          <h2 className="text-base font-bold text-slate-900 dark:text-white">Movimentações Melosa</h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Retiradas registradas no app — role horizontalmente se necessário
+          </p>
+        </div>
+        <div className="min-w-0 overflow-auto" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
+          <table className="w-full min-w-[1080px] border-collapse text-sm">
+            <thead>
+              <tr className="text-left align-middle">
+                <th className={`${thCls} w-10`}>
                     <input
                       type="checkbox"
                       checked={allVisibleSelected}
@@ -635,16 +641,16 @@ export default function MelosaBIPage() {
                       aria-label="Selecionar todas as movimentações visíveis"
                     />
                   </th>
-                  <th className={thCls}>Obra</th>
-                  <th className={thCls}>Data início</th>
-                  <th className={thCls}>Data fim</th>
-                  <th className={thCls}>Horário</th>
-                  <th className={thCls}>Ativo Melosa</th>
-                  <th className={thCls}>Ativo equipamento</th>
-                  <th className={thCls}>Insumo</th>
-                  <th className={thCls}>Quantidade (L)</th>
-                  <th className={thCls}>Foto operador</th>
-                  <th className={thCls}>Local</th>
+                  <th className={`${thCls} min-w-[150px]`}>Obra</th>
+                  <th className={`${thCls} min-w-[96px]`}>Data início</th>
+                  <th className={`${thCls} min-w-[96px]`}>Data fim</th>
+                  <th className={`${thCls} min-w-[72px]`}>Horário</th>
+                  <th className={`${thCls} min-w-[110px]`}>Ativo Melosa</th>
+                  <th className={`${thCls} min-w-[120px]`}>Ativo equipamento</th>
+                  <th className={`${thCls} min-w-[88px]`}>Insumo</th>
+                  <th className={`${thCls} min-w-[100px]`}>Quantidade (L)</th>
+                  <th className={`${thCls} min-w-[100px]`}>Foto operador</th>
+                  <th className={`${thCls} min-w-[180px]`}>Local</th>
                 </tr>
               </thead>
               <tbody>
@@ -679,18 +685,26 @@ export default function MelosaBIPage() {
                           aria-label="Selecionar movimentação"
                         />
                       </td>
-                      <td className={`${tdCls} max-w-[220px]`}>{fmtObra(m)}</td>
+                      <td className={`${tdCls} max-w-[200px] truncate`} title={fmtObra(m)}>
+                        {fmtObra(m)}
+                      </td>
                       <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
                       <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
                       <td className={`${tdCls} whitespace-nowrap`}>{fmtTimeOnly(m.data_hora)}</td>
-                      <td className={`${tdCls} max-w-[140px]`}>{fmtAtivoPlaca(m)}</td>
-                      <td className={`${tdCls} max-w-[140px]`}>{fmtAtivoEquipamento(m)}</td>
-                      <td className={`${tdCls} max-w-[140px]`}>{fmtInsumoMel(m)}</td>
+                      <td className={`${tdCls} max-w-[120px] truncate`} title={fmtAtivoPlaca(m)}>
+                        {fmtAtivoPlaca(m)}
+                      </td>
+                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtAtivoEquipamento(m)}>
+                        {fmtAtivoEquipamento(m)}
+                      </td>
+                      <td className={`${tdCls} whitespace-nowrap`}>{fmtInsumoMel(m)}</td>
                       <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
                       <td className={tdPhotoCls}>
                         {photo(storagePath(m, "melosa_equipamento_operador_storage_path"), "Operador")}
                       </td>
-                      <td className={`${tdCls} max-w-[220px]`}>{fmtLocal(m)}</td>
+                      <td className={`${tdCls} max-w-[220px] truncate`} title={fmtLocal(m)}>
+                        {fmtLocal(m)}
+                      </td>
                     </tr>
                   );
                 })}
@@ -703,16 +717,18 @@ export default function MelosaBIPage() {
                 ) : null}
               </tbody>
             </table>
-          </div>
         </div>
+      </div>
 
-        <div className={`flex min-h-0 flex-col overflow-hidden ${glassPanel} p-0`}>
-          <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">Mapa das localizações</h2>
-          </div>
-          <div className="relative min-h-[320px] flex-1 overflow-hidden rounded-b-2xl">
-            <MovementsMap points={mapPoints} />
-          </div>
+      <div className={`flex min-w-0 flex-col overflow-hidden ${glassPanel} p-0`}>
+        <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
+          <h2 className="text-base font-bold text-slate-900 dark:text-white">Mapa das localizações</h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Pontos GPS das movimentações filtradas
+          </p>
+        </div>
+        <div className="relative min-h-[360px] overflow-hidden rounded-b-2xl md:min-h-[420px]">
+          <MovementsMap points={mapPoints} />
         </div>
       </div>
 
