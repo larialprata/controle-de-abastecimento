@@ -1,0 +1,40 @@
+name: Deploy API (Backend)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'api/**'
+  workflow_dispatch:
+
+jobs:
+  deploy-api:
+    name: Deploy API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            set -e
+
+            cd ~/controle-de-abastecimento
+
+            echo "Puxando alterações do repositório..."
+            git pull origin main
+
+            echo "Reiniciando API via Docker Compose (sem cache)..."
+            docker-compose down
+            docker-compose build --no-cache
+            docker-compose up -d
+
+            echo "Aguardando API ficar saudável..."
+            timeout 60 bash -c 'until docker inspect --format="{{.State.Health.Status}}" controle-abastecimento-api | grep -q "healthy"; do sleep 3; done'
+
+            echo "Deploy da API concluído."

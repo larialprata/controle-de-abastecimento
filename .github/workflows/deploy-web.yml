@@ -1,0 +1,45 @@
+name: Deploy Web (Frontend)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+  workflow_dispatch:
+
+jobs:
+  deploy-web:
+    name: Deploy Web
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependências do web
+        run: npm ci --workspace=web
+
+      - name: Build do frontend
+        run: npm run build -w controle-abast-web
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+
+      - name: Enviar dist para VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: "web/dist/*"
+          target: "/var/www/combustivel/dist/"
+          strip_components: 2
