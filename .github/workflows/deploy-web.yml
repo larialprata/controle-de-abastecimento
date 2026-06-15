@@ -21,10 +21,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Instalar dependências do web
-        run: npm ci --workspace=web
+        working-directory: web
+        run: |
+          rm -f ../package-lock.json
+          npm install
 
       - name: Build do frontend
         run: npm run build -w controle-abast-web
