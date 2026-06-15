@@ -1,50 +1,107 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ArrowRightLeft,
-  ClipboardList,
+  CheckCircle2,
+  Download,
   Droplets,
-  FileText,
   Fuel,
   HardHat,
+  LayoutDashboard,
+  RefreshCw,
+  Trash2,
   TrendingDown,
-  TrendingUp,
 } from "lucide-react";
 import DashboardCard from "../components/dashboard/DashboardCard";
-import MelosaAtivoResumoModal from "../components/dashboard/MelosaAtivoResumoModal";
 import { useAuth } from "../state/AuthContext";
-import { apiGet } from "../lib/api";
+import { apiDelete, apiGet } from "../lib/api";
+import { fmtLitrosDashboard } from "../lib/combustivelControle";
 import {
-  aggregateCombustivelDashboard,
-  aggregateMelosaPorAtivo,
-  aggregateTanquePrincipal,
-  defaultPeriodoMesAtual,
-  listDashboardAtivosMelosa,
-  listDashboardTanques,
-  listDashboardUsuarios,
-  parseDateInputValue,
-  resolveDevolvidoTanque,
-  toDateInputValue,
-  type MovimentoMelosaRow,
-  type MovimentoTanqueRow,
-} from "../lib/aggregateCombustivelDashboard";
-import {
-  calcularCombustivelControle,
-  fmtLitrosDashboard,
-  fmtPctDashboard,
-} from "../lib/combustivelControle";
+  downloadDashboardCiclosExcel,
+  type DashboardCicloExcelRow,
+  type DashboardDesvioExcelRow,
+} from "../lib/dashboardCiclosExcel";
 import { glassField, glassPanel } from "../lib/glass";
-import { buildResumoAtivoMelosa } from "../lib/melosaAtivoResumo";
 
-type ObraRow = { codigo: number; nome: string };
+type MelosaCiclo = {
+  id: string;
+  ciclo_numero: number;
+  ativo_melosa_texto: string;
+  ciclo_anterior_numero: number | null;
+  data_hora: string;
+  litros_retirada: number;
+  litros_sobra_anterior: number;
+  litros_abastecidos: number;
+  litros_devolvidos: number;
+  litros_sobra_atual: number;
+  capacidade_litros: number | null;
+  volume_excedente: number;
+  status: "ok" | "suspeito";
+};
 
-const PAGE_SIZE = 500;
-const LIMITE_PADRAO_PCT = 3.5;
+type MedidorDesvio = {
+  operation_id: string;
+  data_hora: string;
+  ativo_melosa_texto: string;
+  ativo_equipamento_texto: string | null;
+  litros: number;
+  melosa_medidor_acumulado_inicial_numero: string | null;
+  melosa_medidor_acumulado_final_numero: string | null;
+  medidor_final_anterior: number | null;
+  medidor_desvio_litros: number | null;
+  medidor_continuidade_status: string | null;
+};
+
+type DeleteTarget =
+  | { kind: "ciclos"; ids: string[] }
+  | { kind: "desvio"; desvio: MedidorDesvio }
+  | { kind: "desvios"; operationIds: string[] };
 
 const labelCls =
   "text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400";
 
-function MetricCard({
+const thCls =
+  "sticky top-0 z-[1] whitespace-nowrap border-b border-white/30 bg-white/50 px-3 py-3 text-xs font-bold uppercase tracking-wide text-slate-600 backdrop-blur-md dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300";
+
+const tdCls =
+  "border-b border-white/25 px-3 py-2 align-middle text-slate-800 dark:border-white/5 dark:text-slate-200";
+
+function fmtDataBr(v: string): string {
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
+function SectionHeader({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="mb-4 flex items-start gap-3 border-b border-white/30 pb-4 dark:border-white/10">
+      <div className="rounded-lg bg-blue-600/10 p-2 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400">
+        <Icon className="h-5 w-5" />
+      </div>
+      <div>
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{title}</h2>
+        {description ? (
+          <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">{description}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({
   title,
   value,
   hint,
@@ -53,694 +110,674 @@ function MetricCard({
   title: string;
   value: string;
   hint?: string;
-  tone?: "neutral" | "in" | "out" | "warn" | "ok";
+  tone?: "neutral" | "warn" | "ok";
 }) {
   const toneCls =
-    tone === "in"
-      ? "border-emerald-300/60 bg-emerald-50/80 dark:border-emerald-800/50 dark:bg-emerald-950/30"
-      : tone === "out"
-        ? "border-amber-300/60 bg-amber-50/80 dark:border-amber-800/50 dark:bg-amber-950/30"
-        : tone === "warn"
-          ? "border-red-300/70 bg-red-50/85 dark:border-red-900/50 dark:bg-red-950/35"
-          : tone === "ok"
-            ? "border-sky-300/60 bg-sky-50/80 dark:border-sky-800/50 dark:bg-sky-950/30"
-            : "border-white/40 bg-white/40 dark:border-white/10 dark:bg-white/[0.04]";
+    tone === "warn"
+      ? "border-red-300/70 bg-red-50/85 dark:border-red-900/50 dark:bg-red-950/35"
+      : tone === "ok"
+        ? "border-emerald-300/60 bg-emerald-50/80 dark:border-emerald-800/50 dark:bg-emerald-950/30"
+        : "border-white/40 bg-white/40 dark:border-white/10 dark:bg-white/[0.04]";
 
   return (
     <div className={`rounded-xl border px-4 py-3 ${toneCls}`}>
       <p className={`${labelCls} mb-1`}>{title}</p>
-      <p className="text-xl font-bold tabular-nums text-slate-900 dark:text-white">{value}</p>
+      <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white">{value}</p>
       {hint ? <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{hint}</p> : null}
     </div>
   );
 }
 
-function MelosaDevolvidoSobraCard({
-  devolvidoLitros,
-  sobraLitros,
-  devolvidoHint,
-  recebido,
-  abastecido,
-}: {
-  devolvidoLitros: number;
-  sobraLitros: number;
-  devolvidoHint: string;
-  recebido: number;
-  abastecido: number;
-}) {
-  const sobraTone =
-    sobraLitros > 0
-      ? "border-amber-300/60 bg-amber-50/80 dark:border-amber-800/50 dark:bg-amber-950/30"
-      : "border-sky-300/60 bg-sky-50/80 dark:border-sky-800/50 dark:bg-sky-950/30";
-
+function StatusBadge({ status }: { status: "ok" | "suspeito" }) {
+  if (status === "suspeito") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800 dark:bg-red-950/50 dark:text-red-300">
+        <AlertTriangle className="h-3 w-3" />
+        Suspeito
+      </span>
+    );
+  }
   return (
-    <div className={`rounded-xl border px-4 py-4 sm:col-span-2 ${sobraTone}`}>
-      <p className={`${labelCls} mb-3`}>Devolvido ao tanque e saldo na melosa</p>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border border-white/50 bg-white/50 px-4 py-3 dark:border-white/10 dark:bg-black/20">
-          <p className={`${labelCls} mb-1 text-emerald-700 dark:text-emerald-400`}>Devolvido ao tanque</p>
-          <p className="text-2xl font-bold tabular-nums text-emerald-800 dark:text-emerald-300">
-            {fmtLitrosDashboard(devolvidoLitros)} L
-          </p>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{devolvidoHint}</p>
-        </div>
-        <div className="rounded-lg border border-white/50 bg-white/50 px-4 py-3 dark:border-white/10 dark:bg-black/20">
-          <p className={`${labelCls} mb-1`}>Sobra na melosa</p>
-          <p
-            className={`text-2xl font-bold tabular-nums ${
-              sobraLitros > 0 ? "text-amber-800 dark:text-amber-300" : "text-slate-900 dark:text-white"
-            }`}
-          >
-            {fmtLitrosDashboard(sobraLitros)} L
-          </p>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-            Recebido ({fmtLitrosDashboard(recebido)} L) − Abastec. ({fmtLitrosDashboard(abastecido)} L) −
-            Devolvido
-          </p>
-        </div>
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+      OK
+    </span>
   );
 }
 
 export default function HomePage() {
-  const { user, isAdmin, token, canAccessPage } = useAuth();
-  const email = user?.email ?? "";
-  const shortName = email ? email.split("@")[0] : "";
-  const greeting = isAdmin ? "Administrador" : shortName || "Utilizador";
-
-  const periodoInicial = defaultPeriodoMesAtual();
-  const [tanqueRows, setTanqueRows] = useState<MovimentoTanqueRow[]>([]);
-  const [melosaRows, setMelosaRows] = useState<MovimentoMelosaRow[]>([]);
-  const [obras, setObras] = useState<ObraRow[]>([]);
+  const { token, canAccessPage, isAdmin } = useAuth();
+  const [ciclos, setCiclos] = useState<MelosaCiclo[]>([]);
+  const [desviosMedidor, setDesviosMedidor] = useState<MedidorDesvio[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filtroAtivo, setFiltroAtivo] = useState("");
+  const [apenasSuspeitos, setApenasSuspeitos] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [selectedCicloIds, setSelectedCicloIds] = useState<string[]>([]);
+  const [selectedDesvioIds, setSelectedDesvioIds] = useState<string[]>([]);
 
-  const [dataDe, setDataDe] = useState(toDateInputValue(periodoInicial.de));
-  const [dataAte, setDataAte] = useState(toDateInputValue(periodoInicial.ate));
-  const [obraFiltro, setObraFiltro] = useState<string>("");
-  const [usuarioFiltro, setUsuarioFiltro] = useState<string>("");
-  const [ativoMelosaFiltro, setAtivoMelosaFiltro] = useState<string>("");
-  const [tanquePrincipalFiltro, setTanquePrincipalFiltro] = useState<string>("");
-  const [devolvidoManual, setDevolvidoManual] = useState("");
-  const [limitePct, setLimitePct] = useState(String(LIMITE_PADRAO_PCT));
-  const [resumoAtivoOpen, setResumoAtivoOpen] = useState(false);
-
-  const loadAll = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const fetchPaged = async (origem: "tanque" | "melosa") => {
-        const rows: Record<string, unknown>[] = [];
-        let offset = 0;
-        for (let i = 0; i < 200; i += 1) {
-          const res = await fetch(
-            `${import.meta.env.VITE_API_URL}/v1/movimentacoes?limit=${PAGE_SIZE}&offset=${offset}&origem=${origem}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-          );
-          const json = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            throw new Error(typeof json?.error === "string" ? json.error : `HTTP ${res.status}`);
-          }
-          const chunk = (json?.movimentacoes ?? []) as Record<string, unknown>[];
-          rows.push(...chunk);
-          if (chunk.length < PAGE_SIZE) break;
-          offset += PAGE_SIZE;
-        }
-        return rows;
-      };
+      const params = new URLSearchParams({ limit: "200" });
+      if (filtroAtivo.trim()) params.set("ativo", filtroAtivo.trim());
+      if (apenasSuspeitos) params.set("suspeitos", "1");
+      const desvioParams = new URLSearchParams({ limit: "100" });
+      if (filtroAtivo.trim()) desvioParams.set("ativo", filtroAtivo.trim());
 
-      const [tanque, melosa, obrasJson] = await Promise.all([
-        fetchPaged("tanque"),
-        fetchPaged("melosa"),
-        apiGet<{ obras: ObraRow[] }>("/v1/obras", token),
+      const [jsonCiclos, jsonDesvios] = await Promise.all([
+        apiGet<{ ciclos: MelosaCiclo[] }>(`/v1/melosa-ciclos?${params}`, token),
+        apiGet<{ desvios: MedidorDesvio[] }>(`/v1/melosa-medidor/desvios?${desvioParams}`, token).catch(
+          () => ({ desvios: [] as MedidorDesvio[] }),
+        ),
       ]);
-
-      setTanqueRows(tanque as MovimentoTanqueRow[]);
-      setMelosaRows(melosa as MovimentoMelosaRow[]);
-      setObras(obrasJson?.obras ?? []);
+      setCiclos(jsonCiclos?.ciclos ?? []);
+      setDesviosMedidor(jsonDesvios?.desvios ?? []);
+      setSelectedCicloIds([]);
+      setSelectedDesvioIds([]);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Erro ao carregar dados");
+      setError(err instanceof Error ? err.message : "Erro ao carregar ciclos.");
+      setCiclos([]);
+      setDesviosMedidor([]);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, filtroAtivo, apenasSuspeitos]);
+
+  const closeDeleteModal = useCallback(() => {
+    if (deleteSaving) return;
+    setDeleteTarget(null);
+    setDeleteError(null);
+  }, [deleteSaving]);
+
+  const executeDelete = useCallback(async () => {
+    if (!token || !deleteTarget) return;
+    setDeleteSaving(true);
+    setDeleteError(null);
+    try {
+      if (deleteTarget.kind === "ciclos") {
+        const idsOrdenados = [...deleteTarget.ids].sort((a, b) => {
+          const ca = ciclos.find((c) => c.id === a);
+          const cb = ciclos.find((c) => c.id === b);
+          return (ca?.ciclo_numero ?? 0) - (cb?.ciclo_numero ?? 0);
+        });
+        for (const id of idsOrdenados) {
+          await apiDelete(`/v1/melosa-ciclos/${id}`, token);
+        }
+      } else if (deleteTarget.kind === "desvios") {
+        await Promise.all(
+          deleteTarget.operationIds.map((operationId) =>
+            apiDelete(`/v1/melosa/movimentacoes/${encodeURIComponent(operationId)}`, token),
+          ),
+        );
+      } else {
+        await apiDelete(
+          `/v1/melosa/movimentacoes/${encodeURIComponent(deleteTarget.desvio.operation_id)}`,
+          token,
+        );
+      }
+      setDeleteTarget(null);
+      setSelectedCicloIds([]);
+      setSelectedDesvioIds([]);
+      await load();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Erro ao excluir registro.");
+    } finally {
+      setDeleteSaving(false);
+    }
+  }, [deleteTarget, load, token, ciclos]);
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    load();
+  }, [load]);
 
-  const filtros = useMemo(
-    () => ({
-      de: parseDateInputValue(dataDe),
-      ate: parseDateInputValue(dataAte),
-      obraCodigo: obraFiltro ? Number(obraFiltro) : null,
-      usuarioId: usuarioFiltro || null,
-    }),
-    [dataAte, dataDe, obraFiltro, usuarioFiltro],
+  const suspeitos = useMemo(() => ciclos.filter((c) => c.status === "suspeito"), [ciclos]);
+  const ativosUnicos = useMemo(
+    () => Array.from(new Set(ciclos.map((c) => c.ativo_melosa_texto))).sort(),
+    [ciclos],
   );
 
-  const usuariosOpcoes = useMemo(
-    () => listDashboardUsuarios(tanqueRows, melosaRows),
-    [tanqueRows, melosaRows],
-  );
+  const ciclosParaExportar = useMemo(() => {
+    if (selectedCicloIds.length > 0) {
+      return ciclos.filter((c) => selectedCicloIds.includes(c.id));
+    }
+    return ciclos;
+  }, [ciclos, selectedCicloIds]);
 
-  const ativosMelosaOpcoes = useMemo(
-    () => listDashboardAtivosMelosa(tanqueRows, melosaRows),
-    [tanqueRows, melosaRows],
-  );
+  const handleExportExcel = useCallback(async () => {
+    if (ciclosParaExportar.length === 0) {
+      window.alert("Não há ciclos para exportar.");
+      return;
+    }
+    setExporting(true);
+    try {
+      const cicloRows: DashboardCicloExcelRow[] = ciclosParaExportar.map((c) => ({
+        ciclo_numero: c.ciclo_numero,
+        ativo_melosa_texto: c.ativo_melosa_texto,
+        ciclo_anterior_numero: c.ciclo_anterior_numero,
+        data_hora: c.data_hora,
+        litros_retirada: c.litros_retirada,
+        litros_sobra_anterior: c.litros_sobra_anterior,
+        litros_abastecidos: c.litros_abastecidos,
+        litros_devolvidos: c.litros_devolvidos,
+        litros_sobra_atual: c.litros_sobra_atual,
+        capacidade_litros: c.capacidade_litros,
+        volume_excedente: c.volume_excedente,
+        status: c.status,
+      }));
+      const desvioRows: DashboardDesvioExcelRow[] = desviosMedidor.map((d) => ({
+        data_hora: d.data_hora,
+        ativo_melosa_texto: d.ativo_melosa_texto,
+        ativo_equipamento_texto: d.ativo_equipamento_texto,
+        litros: d.litros,
+        medidor_inicial: d.melosa_medidor_acumulado_inicial_numero,
+        medidor_final: d.melosa_medidor_acumulado_final_numero,
+        medidor_esperado: d.medidor_final_anterior,
+        desvio_litros: d.medidor_desvio_litros,
+      }));
+      await downloadDashboardCiclosExcel(cicloRows, desvioRows);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : "Erro ao exportar Excel.");
+    } finally {
+      setExporting(false);
+    }
+  }, [ciclosParaExportar, desviosMedidor]);
 
-  const resumoMelosaAtivo = useMemo(() => {
-    if (!ativoMelosaFiltro) return null;
-    return aggregateMelosaPorAtivo(tanqueRows, melosaRows, filtros, ativoMelosaFiltro);
-  }, [ativoMelosaFiltro, tanqueRows, melosaRows, filtros]);
+  const allCiclosSelected = ciclos.length > 0 && ciclos.every((c) => selectedCicloIds.includes(c.id));
+  const allDesviosSelected =
+    desviosMedidor.length > 0 && desviosMedidor.every((d) => selectedDesvioIds.includes(d.operation_id));
 
-  const devolvidoResumoMelosaAtivo = useMemo(() => {
-    if (!resumoMelosaAtivo) return null;
-    return resolveDevolvidoTanque(
-      resumoMelosaAtivo.devolvidoMelosaAutomatico,
-      devolvidoManual,
-      resumoMelosaAtivo.qtdDevolucoesMelosa,
+  const toggleCiclo = useCallback((id: string) => {
+    setSelectedCicloIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }, []);
+
+  const toggleAllCiclos = useCallback(() => {
+    setSelectedCicloIds((prev) => {
+      if (ciclos.length === 0) return prev;
+      if (ciclos.every((c) => prev.includes(c.id))) return prev.filter((id) => !ciclos.some((c) => c.id === id));
+      const merged = new Set(prev);
+      ciclos.forEach((c) => merged.add(c.id));
+      return Array.from(merged);
+    });
+  }, [ciclos]);
+
+  const toggleDesvio = useCallback((operationId: string) => {
+    setSelectedDesvioIds((prev) =>
+      prev.includes(operationId) ? prev.filter((x) => x !== operationId) : [...prev, operationId],
     );
-  }, [resumoMelosaAtivo, devolvidoManual]);
+  }, []);
 
-  const tanquesOpcoes = useMemo(() => listDashboardTanques(tanqueRows), [tanqueRows]);
+  const toggleAllDesvios = useCallback(() => {
+    setSelectedDesvioIds((prev) => {
+      if (desviosMedidor.length === 0) return prev;
+      if (desviosMedidor.every((d) => prev.includes(d.operation_id))) {
+        return prev.filter((id) => !desviosMedidor.some((d) => d.operation_id === id));
+      }
+      const merged = new Set(prev);
+      desviosMedidor.forEach((d) => merged.add(d.operation_id));
+      return Array.from(merged);
+    });
+  }, [desviosMedidor]);
 
-  const tanqueNumeroFiltro = useMemo((): 1 | 2 | null => {
-    if (tanquePrincipalFiltro === "1") return 1;
-    if (tanquePrincipalFiltro === "2") return 2;
-    return null;
-  }, [tanquePrincipalFiltro]);
-
-  const agregadoTanque = useMemo(
-    () => aggregateTanquePrincipal(tanqueRows, filtros, tanqueNumeroFiltro),
-    [tanqueRows, filtros, tanqueNumeroFiltro],
-  );
-
-  const agregadoTanqueGlobal = useMemo(
-    () => aggregateTanquePrincipal(tanqueRows, filtros, null),
-    [tanqueRows, filtros],
-  );
-
-  const agregado = useMemo(
-    () => aggregateCombustivelDashboard(tanqueRows, melosaRows, filtros),
-    [tanqueRows, melosaRows, filtros],
-  );
-
-  const devolvidoResumoGlobal = useMemo(
-    () =>
-      resolveDevolvidoTanque(
-        agregadoTanqueGlobal.devolvidoMelosaAutomatico,
-        devolvidoManual,
-        agregadoTanqueGlobal.qtdDevolucoesMelosa,
-      ),
-    [agregadoTanqueGlobal, devolvidoManual],
-  );
-
-  const devolvidoResumoTanque = useMemo(
-    () =>
-      resolveDevolvidoTanque(
-        agregadoTanque.devolvidoMelosaAutomatico,
-        devolvidoManual,
-        agregadoTanque.qtdDevolucoesMelosa,
-      ),
-    [agregadoTanque, devolvidoManual],
-  );
-
-  const limiteAceitavelPct = useMemo(() => {
-    const n = Number(limitePct.replace(",", ".").trim());
-    return Number.isFinite(n) && n >= 0 ? n : LIMITE_PADRAO_PCT;
-  }, [limitePct]);
-
-  const fechamentoInputs = useMemo(() => {
-    if (!resumoMelosaAtivo || !devolvidoResumoMelosaAtivo) return null;
-    return {
-      entradaTanque: agregado.entradaTanque,
-      retiradaMelosa: resumoMelosaAtivo.recebidoDoTanque,
-      abastecimentosEquipamentos: resumoMelosaAtivo.abastecimentosEquipamentos,
-      devolvidoTanque: devolvidoResumoMelosaAtivo.total,
-      limiteAceitavelPct,
-    };
-  }, [agregado.entradaTanque, devolvidoResumoMelosaAtivo, limiteAceitavelPct, resumoMelosaAtivo]);
-
-  const fechamento = useMemo(() => {
-    if (!fechamentoInputs) return null;
-    return calcularCombustivelControle(fechamentoInputs);
-  }, [fechamentoInputs]);
-
-  const melosaAtivoPronto = Boolean(ativoMelosaFiltro && resumoMelosaAtivo && devolvidoResumoMelosaAtivo && fechamento);
-
-  const sobraMelosaAtivo =
-    resumoMelosaAtivo && devolvidoResumoMelosaAtivo
-      ? resumoMelosaAtivo.recebidoDoTanque -
-        resumoMelosaAtivo.abastecimentosEquipamentos -
-        devolvidoResumoMelosaAtivo.total
-      : 0;
-
-  const resumoAtivoPayload = useMemo(() => {
-    if (!ativoMelosaFiltro || !resumoMelosaAtivo) return null;
-    const devolvidoAtivo = resolveDevolvidoTanque(
-      resumoMelosaAtivo.devolvidoMelosaAutomatico,
-      devolvidoManual,
-      resumoMelosaAtivo.qtdDevolucoesMelosa,
-    );
-    return buildResumoAtivoMelosa(
-      tanqueRows,
-      melosaRows,
-      filtros,
-      ativoMelosaFiltro,
-      obras,
-      devolvidoAtivo.total,
-      limiteAceitavelPct,
-    );
-  }, [
-    ativoMelosaFiltro,
-    devolvidoManual,
-    filtros,
-    limiteAceitavelPct,
-    melosaRows,
-    obras,
-    resumoMelosaAtivo,
-    tanqueRows,
-  ]);
-
-  const devolvidoMelosaHint =
-    devolvidoResumoMelosaAtivo?.usaManual
-      ? `Ajuste manual (automático: ${fmtLitrosDashboard(devolvidoResumoMelosaAtivo.automatico)} L)`
-      : devolvidoResumoMelosaAtivo && devolvidoResumoMelosaAtivo.qtdDevolucoes > 0
-        ? `${devolvidoResumoMelosaAtivo.qtdDevolucoes} entrada(s) no tanque com placa ${ativoMelosaFiltro}`
-        : `Entrada no tanque com placa ${ativoMelosaFiltro}`;
-
-  const saldoTanquePrincipal =
-    agregadoTanque.entradaTanque -
-    agregadoTanque.retiradaMelosa +
-    devolvidoResumoTanque.total;
-  const saidaLiquidaTanque = agregadoTanque.retiradaMelosa - devolvidoResumoTanque.total;
+  const temAlertas = suspeitos.length > 0 || desviosMedidor.length > 0;
 
   return (
-    <div>
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white md:text-3xl">
-            Dashboard — {greeting}
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
-            Controle de entrada e saída do tanque principal e da melosa. Os volumes vêm dos registos do app
-            (medidor do tanque nas retiradas; medidor acumulado da melosa nos abastecimentos).
-          </p>
+    <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+      {/* Cabeçalho */}
+      <header className={`${glassPanel} px-5 py-5`}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">
+              Controle de melosas
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-slate-400">
+              Cada retirada do tanque gera um ID global. O sistema compara a sobra do ciclo anterior com o novo
+              enchimento e alerta quando ultrapassa a capacidade. Abastecimentos são conferidos pelo medidor
+              acumulado.
+            </p>
+          </div>
+          <details className="max-w-xs text-sm text-slate-600 dark:text-slate-400">
+            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-200">
+              Como funciona
+            </summary>
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
+              <li>ID global sequencial por enchimento (retirada do tanque).</li>
+              <li>ID anterior = último ciclo da mesma melosa.</li>
+              <li>Sobra = enchimento anterior − abastecimentos − devoluções.</li>
+              <li>Alerta se sobra + enchimento &gt; capacidade.</li>
+              <li>Medidor inicial deve igualar o final anterior.</li>
+            </ul>
+          </details>
         </div>
-        <img
-          src="/dimensional-logo.png"
-          alt="Dimensional Engenharia"
-          className="h-20 w-auto object-contain"
-        />
       </header>
 
-      <div className={`mb-5 flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
-        <div className="flex flex-col gap-1">
-          <span className={labelCls}>De</span>
-          <input type="date" className={glassField} value={dataDe} onChange={(e) => setDataDe(e.target.value)} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className={labelCls}>Até</span>
-          <input type="date" className={glassField} value={dataAte} onChange={(e) => setDataAte(e.target.value)} />
-        </div>
-        <div className="flex min-w-[180px] flex-col gap-1">
-          <span className={labelCls}>Obra</span>
-          <select className={glassField} value={obraFiltro} onChange={(e) => setObraFiltro(e.target.value)}>
-            <option value="">Todas</option>
-            {obras.map((o) => (
-              <option key={o.codigo} value={String(o.codigo)}>
-                {o.codigo} — {o.nome}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex min-w-[200px] flex-col gap-1">
-          <span className={labelCls}>Utilizador</span>
-          <select
-            className={glassField}
-            value={usuarioFiltro}
-            onChange={(e) => setUsuarioFiltro(e.target.value)}
-          >
-            <option value="">Todos</option>
-            {usuariosOpcoes.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.nome}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex min-w-[160px] flex-col gap-1">
-          <span className={labelCls}>Ajuste devolvido (L)</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={glassField}
-            placeholder={
-              devolvidoResumoGlobal.automatico > 0
-                ? String(devolvidoResumoGlobal.automatico)
-                : "Automático"
-            }
-            value={devolvidoManual}
-            onChange={(e) => setDevolvidoManual(e.target.value)}
-            title="Deixe vazio para usar o automático: entradas no tanque com a mesma placa/ativo da retirada melosa"
+      {/* Resumo */}
+      <section>
+        <p className={`${labelCls} mb-3`}>Resumo</p>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <StatCard title="Ciclos" value={String(ciclos.length)} hint="Enchimentos listados" />
+          <StatCard
+            title="Capacidade"
+            value={String(suspeitos.length)}
+            hint="Acima do limite"
+            tone={suspeitos.length > 0 ? "warn" : "ok"}
+          />
+          <StatCard
+            title="Medidor"
+            value={String(desviosMedidor.length)}
+            hint="Continuidade quebrada"
+            tone={desviosMedidor.length > 0 ? "warn" : "ok"}
+          />
+          <StatCard title="Melosas" value={String(ativosUnicos.length)} hint="Ativos no período" />
+          <StatCard
+            title="Último ID"
+            value={ciclos[0] ? String(ciclos[0].ciclo_numero) : "—"}
+            hint={ciclos[0] ? ciclos[0].ativo_melosa_texto : undefined}
           />
         </div>
-        <div className="flex w-28 flex-col gap-1">
-          <span className={labelCls}>Limite %</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            className={glassField}
-            value={limitePct}
-            onChange={(e) => setLimitePct(e.target.value)}
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => loadAll()}
-          disabled={loading}
-          className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
-        >
-          {loading ? "A carregar…" : "Atualizar"}
-        </button>
-      </div>
+      </section>
 
-      {error ? (
-        <div className="mb-4 rounded-lg border border-red-300/80 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
-          {error}
-        </div>
-      ) : null}
+      {/* Alertas */}
+      <section className={`${glassPanel} p-4 md:p-5`}>
+        <SectionHeader
+          icon={AlertTriangle}
+          title="Alertas"
+          description={
+            temAlertas
+              ? "Registros que precisam de revisão."
+              : "Nenhuma irregularidade nos dados listados."
+          }
+        />
 
-      <div className="mb-6 grid gap-4 lg:grid-cols-2">
-        <section className={`p-5 ${glassPanel}`}>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Fuel className="h-5 w-5 text-emerald-600" aria-hidden />
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Tanque principal</h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <label htmlFor="filtro-tanque-principal" className={`${labelCls} sr-only`}>
-                Tanque
-              </label>
-              <select
-                id="filtro-tanque-principal"
-                className={`${glassField} min-w-[140px] py-1.5 text-sm`}
-                value={tanquePrincipalFiltro}
-                onChange={(e) => setTanquePrincipalFiltro(e.target.value)}
-                title="Filtrar entradas e saídas por tanque 1 ou 2"
-              >
-                <option value="">Todos os tanques</option>
-                {tanquesOpcoes.map((n) => (
-                  <option key={n} value={String(n)}>
-                    Tanque {n}
-                  </option>
-                ))}
-                {tanquesOpcoes.length === 0 ? (
-                  <>
-                    <option value="1">Tanque 1</option>
-                    <option value="2">Tanque 2</option>
-                  </>
-                ) : null}
-              </select>
-            </div>
+        {!temAlertas ? (
+          <div className="flex items-center gap-2 rounded-xl border border-emerald-300/50 bg-emerald-50/50 px-4 py-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <p className="text-sm text-slate-700 dark:text-slate-300">Tudo dentro do esperado no filtro atual.</p>
           </div>
-          {tanqueNumeroFiltro != null ? (
-            <p className="mb-3 text-xs text-slate-600 dark:text-slate-400">
-              A mostrar apenas movimentações do <strong>Tanque {tanqueNumeroFiltro}</strong> (campo{" "}
-              <code className="rounded bg-black/5 px-1 dark:bg-black/20">tanque_numero</code>).
-            </p>
-          ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <MetricCard
-              title="Entrada no tanque"
-              value={`${fmtLitrosDashboard(agregadoTanque.entradaTanque)} L`}
-              hint={`${agregadoTanque.qtdEntradas} entrada(s) de combustível (exclui devolução melosa)`}
-              tone="in"
-            />
-            <MetricCard
-              title="Saída p/ melosa"
-              value={`${fmtLitrosDashboard(agregadoTanque.retiradaMelosa)} L`}
-              hint={`${agregadoTanque.qtdRetiradasTanque} retirada(s) — medidor final − inicial`}
-              tone="out"
-            />
-            <MetricCard
-              title="Devolvido pela melosa"
-              value={`${fmtLitrosDashboard(devolvidoResumoTanque.total)} L`}
-              hint={
-                devolvidoResumoTanque.usaManual
-                  ? `Ajuste manual (auto: ${fmtLitrosDashboard(devolvidoResumoTanque.automatico)} L)`
-                  : devolvidoResumoTanque.qtdDevolucoes > 0
-                    ? `${devolvidoResumoTanque.qtdDevolucoes} entrada(s) com placa da retirada melosa`
-                    : "Mesma placa/ativo da retirada do tanque na entrada"
-              }
-              tone="in"
-            />
-            <MetricCard
-              title="Saldo no tanque"
-              value={`${fmtLitrosDashboard(saldoTanquePrincipal)} L`}
-              hint="(Entrada − Saída melosa) + Devolvido"
-              tone="ok"
-            />
-          </div>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            Saída líquida do tanque no período: <strong>{fmtLitrosDashboard(saidaLiquidaTanque)} L</strong>
-          </p>
-        </section>
+        ) : (
+          <div className="space-y-6">
+            {suspeitos.length > 0 ? (
+              <div>
+                <h3 className="mb-2 text-sm font-bold text-red-800 dark:text-red-300">
+                  Capacidade ultrapassada ({suspeitos.length})
+                </h3>
+                <div className="overflow-auto rounded-xl border border-red-200/60 dark:border-red-900/40">
+                  <table className="w-full min-w-[640px] border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-red-50/80 text-left text-xs font-bold uppercase text-red-900 dark:bg-red-950/40 dark:text-red-200">
+                        <th className="px-3 py-2">ID</th>
+                        <th className="px-3 py-2">Melosa</th>
+                        <th className="px-3 py-2">Excedente (L)</th>
+                        <th className="px-3 py-2">Sobra ant. + Enchimento</th>
+                        <th className="px-3 py-2">Capacidade (L)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {suspeitos.map((c) => (
+                        <tr key={c.id} className="border-t border-red-100 dark:border-red-900/30">
+                          <td className="px-3 py-2 font-bold">{c.ciclo_numero}</td>
+                          <td className="px-3 py-2">{c.ativo_melosa_texto}</td>
+                          <td className="px-3 py-2 font-semibold text-red-700 dark:text-red-400">
+                            {fmtLitrosDashboard(c.volume_excedente)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {fmtLitrosDashboard(c.litros_sobra_anterior)} +{" "}
+                            {fmtLitrosDashboard(c.litros_retirada)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {c.capacidade_litros != null ? fmtLitrosDashboard(c.capacidade_litros) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
 
-        <section className={`p-5 ${glassPanel}`}>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Droplets className="h-5 w-5 text-sky-600" aria-hidden />
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Melosa (caminhão)</h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <label htmlFor="filtro-ativo-melosa" className={`${labelCls} sr-only`}>
-                Ativo / placa
-              </label>
-              <select
-                id="filtro-ativo-melosa"
-                className={`${glassField} min-w-[160px] py-1.5 text-sm`}
-                value={ativoMelosaFiltro}
-                onChange={(e) => {
-                  setAtivoMelosaFiltro(e.target.value);
-                  setResumoAtivoOpen(false);
-                }}
-                title="Selecione o ativo/placa da melosa para ver os dados"
-              >
-                <option value="">Selecione ativo/placa</option>
-                {ativosMelosaOpcoes.map((placa) => (
-                  <option key={placa} value={placa}>
-                    {placa}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {desviosMedidor.length > 0 ? (
+              <div>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                    Medidor acumulado ({desviosMedidor.length})
+                  </h3>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget({ kind: "desvios", operationIds: selectedDesvioIds })}
+                      disabled={selectedDesvioIds.length === 0}
+                      className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Excluir ({selectedDesvioIds.length})
+                    </button>
+                  ) : null}
+                </div>
+                <div className="overflow-auto rounded-xl border border-amber-200/60 dark:border-amber-900/40">
+                  <table className="w-full min-w-[720px] border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-amber-50/80 text-left text-xs font-bold uppercase text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                        {isAdmin ? (
+                          <th className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              checked={allDesviosSelected}
+                              onChange={toggleAllDesvios}
+                              aria-label="Selecionar todos os alertas de medidor"
+                            />
+                          </th>
+                        ) : null}
+                        <th className="px-3 py-2">Data/hora</th>
+                        <th className="px-3 py-2">Melosa</th>
+                        <th className="px-3 py-2">Equipamento</th>
+                        <th className="px-3 py-2">Inicial</th>
+                        <th className="px-3 py-2">Esperado</th>
+                        <th className="px-3 py-2">Desvio (L)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {desviosMedidor.map((d) => {
+                        const desvio = d.medidor_desvio_litros ?? 0;
+                        return (
+                          <tr
+                            key={d.operation_id}
+                            className="border-t border-amber-100 dark:border-amber-900/30"
+                          >
+                            {isAdmin ? (
+                              <td className="px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedDesvioIds.includes(d.operation_id)}
+                                  onChange={() => toggleDesvio(d.operation_id)}
+                                />
+                              </td>
+                            ) : null}
+                            <td className="px-3 py-2 whitespace-nowrap">{fmtDataBr(d.data_hora)}</td>
+                            <td className="px-3 py-2">{d.ativo_melosa_texto}</td>
+                            <td className="px-3 py-2">{d.ativo_equipamento_texto ?? "—"}</td>
+                            <td className="px-3 py-2">{d.melosa_medidor_acumulado_inicial_numero ?? "—"}</td>
+                            <td className="px-3 py-2">{d.medidor_final_anterior ?? "—"}</td>
+                            <td className="px-3 py-2 font-semibold text-amber-800 dark:text-amber-300">
+                              {desvio > 0 ? "+" : ""}
+                              {fmtLitrosDashboard(desvio)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
           </div>
+        )}
+      </section>
 
-          {!ativoMelosaFiltro ? (
-            <p className="rounded-xl border border-dashed border-slate-300/80 bg-slate-50/80 px-4 py-10 text-center text-sm text-slate-600 dark:border-white/15 dark:bg-white/[0.03] dark:text-slate-400">
-              Selecione o <strong>ativo/placa</strong> da melosa para ver recebimento, abastecimentos,
-              devolução ao tanque, sobra e fechamento.
-            </p>
-          ) : resumoMelosaAtivo && devolvidoResumoMelosaAtivo ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <MetricCard
-                title="Recebido do tanque"
-                value={`${fmtLitrosDashboard(resumoMelosaAtivo.recebidoDoTanque)} L`}
-                hint={`${resumoMelosaAtivo.qtdRetiradasTanque} retirada(s) do tanque — placa ${ativoMelosaFiltro}`}
-                tone="in"
+      {/* Tabela principal — Ciclos */}
+      <section className={`${glassPanel} p-4 md:p-5`}>
+        <SectionHeader
+          icon={LayoutDashboard}
+          title="Ciclos de enchimento"
+          description="Retiradas do tanque que abriram ciclo na melosa."
+        />
+
+        <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex min-w-[160px] flex-col gap-1">
+              <span className={labelCls}>Filtrar melosa</span>
+              <input
+                className={glassField}
+                placeholder="Ex.: CCL1999"
+                value={filtroAtivo}
+                onChange={(e) => setFiltroAtivo(e.target.value)}
               />
-              <MetricCard
-                title="Abastec. equipamentos"
-                value={`${fmtLitrosDashboard(resumoMelosaAtivo.abastecimentosEquipamentos)} L`}
-                hint={`${resumoMelosaAtivo.qtdAbastecimentosMelosa} retirada(s) melosa — medidor acumulado`}
-                tone="out"
+            </label>
+            <label className="flex items-center gap-2 pb-2 text-sm text-slate-700 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={apenasSuspeitos}
+                onChange={(e) => setApenasSuspeitos(e.target.checked)}
               />
-              <MelosaDevolvidoSobraCard
-                devolvidoLitros={devolvidoResumoMelosaAtivo.total}
-                sobraLitros={sobraMelosaAtivo}
-                devolvidoHint={devolvidoMelosaHint}
-                recebido={resumoMelosaAtivo.recebidoDoTanque}
-                abastecido={resumoMelosaAtivo.abastecimentosEquipamentos}
-              />
-            </div>
-          ) : null}
-        </section>
-      </div>
-
-      {melosaAtivoPronto && fechamento && fechamentoInputs ? (
-      <section
-        className={`mb-6 p-5 ${glassPanel} ${
-          fechamento.status === "suspeita"
-            ? "ring-2 ring-red-400/50 dark:ring-red-600/40"
-            : fechamento.status === "ok"
-              ? "ring-1 ring-emerald-400/30"
-              : ""
-        }`}
-      >
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <ArrowRightLeft className="h-5 w-5 text-slate-700 dark:text-slate-300" aria-hidden />
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Fechamento caminhão-melosa</h2>
-            <span className="rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-black/20 dark:text-slate-300">
-              Ativo {ativoMelosaFiltro}
-            </span>
+              Somente suspeitos
+            </label>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {fechamento.status === "suspeita" ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-3 py-1 text-xs font-bold uppercase text-white">
-                <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-                Suspeita de desvio
-              </span>
-            ) : fechamento.status === "ok" ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold uppercase text-white">
-                <TrendingUp className="h-3.5 w-3.5" aria-hidden />
-                Dentro do aceitável
-              </span>
-            ) : (
-              <span className="rounded-full bg-slate-500 px-3 py-1 text-xs font-bold uppercase text-white">
-                Sem retirada no período
-              </span>
-            )}
+
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setResumoAtivoOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-3 py-1.5 text-sm font-semibold text-white shadow-md shadow-accent/20 transition hover:bg-accent-hover"
-              title="Abrir resumo detalhado: retiradas, abastecimentos, devoluções e análise por evento"
+              onClick={() => void load()}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-60 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
             >
-              <ClipboardList className="h-4 w-4" aria-hidden />
-              Gerar resumo
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              {loading ? "Atualizando…" : "Atualizar"}
             </button>
+            <button
+              type="button"
+              onClick={() => void handleExportExcel()}
+              disabled={exporting || ciclos.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Exportando…" : "Exportar Excel"}
+            </button>
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={() => setDeleteTarget({ kind: "ciclos", ids: selectedCicloIds })}
+                disabled={selectedCicloIds.length === 0 || loading}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Excluir ({selectedCicloIds.length})
+              </button>
+            ) : null}
           </div>
         </div>
 
-        <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">
-          Compara o que saiu do tanque para a melosa ({ativoMelosaFiltro}) com o que foi justificado
-          (abastecimentos + devolução). Acima de {limiteAceitavelPct}% pode indicar desvio; a margem cobre{" "}
-          <strong>deslocamento do caminhão</strong> e <strong>fundo de tanque</strong> (volume mínimo no medidor).
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+          {ciclos.length} {ciclos.length === 1 ? "ciclo" : "ciclos"}
+          {selectedCicloIds.length > 0
+            ? ` · ${selectedCicloIds.length} selecionado${selectedCicloIds.length === 1 ? "" : "s"} (exportação usa seleção)`
+            : " · exportação inclui todos visíveis"}
         </p>
 
-        <div className="mb-4 grid gap-3 sm:grid-cols-3">
-          <MetricCard
-            title="Retirada melosa (entrada)"
-            value={`${fmtLitrosDashboard(fechamentoInputs.retiradaMelosa)} L`}
-            hint="Volume que saiu do tanque para a(s) melosa(s)"
-            tone="out"
-          />
-          <MetricCard
-            title="Abastecimentos"
-            value={`${fmtLitrosDashboard(fechamentoInputs.abastecimentosEquipamentos)} L`}
-            hint="Soma das retiradas melosa (equipamentos)"
-            tone="neutral"
-          />
-          <MetricCard
-            title="Devolvido ao tanque"
-            value={`${fmtLitrosDashboard(fechamentoInputs.devolvidoTanque)} L`}
-            hint="Entradas no tanque com placa de retirada"
-            tone="in"
-          />
-        </div>
+        {error ? (
+          <p className="mb-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+            {error}
+            {error.includes("melosa_ciclos") || error.includes("does not exist") ? (
+              <span className="mt-1 block">
+                Execute a migration <code className="text-xs">migration_melosa_ciclos.sql</code> no Supabase.
+              </span>
+            ) : null}
+          </p>
+        ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard
-            title="Volume justificado"
-            value={`${fmtLitrosDashboard(fechamento.volumeJustificado)} L`}
-            hint="Abastecimentos + Devolvido"
-          />
-          <MetricCard
-            title="Diferença total"
-            value={`${fmtLitrosDashboard(fechamento.diferencaLitros)} L`}
-            hint={fmtPctDashboard(fechamento.diferencaPct)}
-            tone={fechamento.diferencaLitros > fechamento.margemOperacionalLitros ? "warn" : "neutral"}
-          />
-          <MetricCard
-            title="Margem operacional"
-            value={`${fmtLitrosDashboard(fechamento.margemOperacionalLitros)} L`}
-            hint={`Até ${limiteAceitavelPct}% da retirada`}
-          />
-          <MetricCard
-            title="Volume suspeito"
-            value={`${fmtLitrosDashboard(fechamento.volumeSuspeito)} L`}
-            hint={
-              fechamento.status === "suspeita"
-                ? "Acima da margem aceitável"
-                : "—"
-            }
-            tone={fechamento.volumeSuspeito > 0 ? "warn" : "ok"}
-          />
+        <div className="overflow-auto rounded-xl border border-white/30 dark:border-white/10" style={{ maxHeight: "min(32rem, 60vh)" }}>
+          <table className="w-max min-w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                {isAdmin ? (
+                  <th className={thCls}>
+                    <input
+                      type="checkbox"
+                      checked={allCiclosSelected}
+                      onChange={toggleAllCiclos}
+                      disabled={ciclos.length === 0}
+                      aria-label="Selecionar todos os ciclos"
+                    />
+                  </th>
+                ) : null}
+                <th className={thCls}>ID</th>
+                <th className={thCls}>Melosa</th>
+                <th className={thCls}>ID anterior</th>
+                <th className={thCls}>Data/hora</th>
+                <th className={thCls}>Enchimento (L)</th>
+                <th className={thCls}>Sobra ant. (L)</th>
+                <th className={thCls}>Abastecido (L)</th>
+                <th className={thCls}>Sobra atual (L)</th>
+                <th className={thCls}>Capacidade (L)</th>
+                <th className={thCls}>Excedente (L)</th>
+                <th className={thCls}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ciclos.map((c, idx) => {
+                const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
+                const selected = selectedCicloIds.includes(c.id);
+                return (
+                  <tr key={c.id} className={`${zebra} ${selected ? "bg-blue-50/50 dark:bg-blue-950/20" : ""}`}>
+                    {isAdmin ? (
+                      <td className={tdCls}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleCiclo(c.id)}
+                          aria-label={`Selecionar ciclo ID ${c.ciclo_numero}`}
+                        />
+                      </td>
+                    ) : null}
+                    <td className={`${tdCls} font-bold`}>{c.ciclo_numero}</td>
+                    <td className={tdCls}>{c.ativo_melosa_texto}</td>
+                    <td className={tdCls}>{c.ciclo_anterior_numero ?? "—"}</td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{fmtDataBr(c.data_hora)}</td>
+                    <td className={tdCls}>{fmtLitrosDashboard(c.litros_retirada)}</td>
+                    <td className={tdCls}>{fmtLitrosDashboard(c.litros_sobra_anterior)}</td>
+                    <td className={tdCls}>{fmtLitrosDashboard(c.litros_abastecidos)}</td>
+                    <td className={tdCls}>{fmtLitrosDashboard(c.litros_sobra_atual)}</td>
+                    <td className={tdCls}>
+                      {c.capacidade_litros != null ? fmtLitrosDashboard(c.capacidade_litros) : "—"}
+                    </td>
+                    <td
+                      className={`${tdCls} ${c.volume_excedente > 0 ? "font-semibold text-red-700 dark:text-red-400" : ""}`}
+                    >
+                      {c.volume_excedente > 0 ? fmtLitrosDashboard(c.volume_excedente) : "—"}
+                    </td>
+                    <td className={tdCls}>
+                      <StatusBadge status={c.status} />
+                    </td>
+                  </tr>
+                );
+              })}
+              {ciclos.length === 0 && !loading ? (
+                <tr>
+                  <td colSpan={isAdmin ? 12 : 11} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                    Nenhum ciclo registrado. As retiradas do tanque passam a gerar ID automaticamente.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
-
-        <details className="mt-4 text-sm text-slate-600 dark:text-slate-400">
-          <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-200">
-            Como os números são calculados
-          </summary>
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>
-              <strong>Retirada melosa</strong> = soma das retiradas de tanque (medidor tanque final − inicial).
-            </li>
-            <li>
-              <strong>Abastecimentos</strong> = soma das retiradas melosa (medidor acumulado ini − fin).
-            </li>
-            <li>
-              <strong>Devolvido</strong> = entradas no tanque da obra com a mesma placa/ativo usada numa
-              retirada do tanque (melosa a devolver). Pode ajustar manualmente no filtro.
-            </li>
-            <li>
-              <strong>Entrada no tanque</strong> = demais entradas (combustível novo), sem essa placa de
-              retirada.
-            </li>
-            <li>Volume justificado = Abastecimentos + Devolvido.</li>
-            <li>Diferença = Retirada melosa − Volume justificado.</li>
-          </ul>
-        </details>
       </section>
-      ) : null}
 
-      {resumoAtivoOpen && resumoAtivoPayload ? (
-        <MelosaAtivoResumoModal
-          resumo={resumoAtivoPayload}
-          limitePct={limiteAceitavelPct}
-          onClose={() => setResumoAtivoOpen(false)}
-        />
-      ) : null}
+      {/* Atalhos */}
+      <section>
+        <p className={`${labelCls} mb-3`}>Atalhos</p>
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {canAccessPage("bi_tanque") ? (
+            <DashboardCard
+              to="/bi"
+              title="BI Tanque"
+              description="Retiradas e entradas no tanque."
+              icon={TrendingDown}
+            />
+          ) : null}
+          {canAccessPage("bi_melosa") ? (
+            <DashboardCard
+              to="/bi/melosa"
+              title="BI Melosa"
+              description="Abastecimentos de equipamentos."
+              icon={Droplets}
+            />
+          ) : null}
+          {canAccessPage("melosas") ? (
+            <DashboardCard
+              to="/melosas"
+              title="Melosas"
+              description="Cadastro de melosas e capacidade em litros."
+              icon={Fuel}
+            />
+          ) : null}
+          {canAccessPage("equipamentos") ? (
+            <DashboardCard
+              to="/equipamentos"
+              title="Equipamentos"
+              description="Máquinas e veículos abastecidos."
+              icon={HardHat}
+            />
+          ) : null}
+          {canAccessPage("contratos") ? (
+            <DashboardCard
+              to="/contratos"
+              title="Contratos"
+              description="Contratos e empresas."
+              icon={HardHat}
+            />
+          ) : null}
+        </div>
+      </section>
 
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {canAccessPage("bi_tanque") ? (
-          <DashboardCard
-            to="/bi"
-            title="BI Tanque"
-            description="Movimentações, mapa, exportação Descarbonize e tickets."
-            icon={TrendingDown}
-          />
-        ) : null}
-        {canAccessPage("bi_melosa") ? (
-          <DashboardCard
-            to="/bi/melosa"
-            title="BI Melosa"
-            description="Retiradas melosa, fotos, lacre e Excel."
-            icon={Droplets}
-          />
-        ) : null}
-        {canAccessPage("contratos") ? (
-          <DashboardCard
-            to="/contratos"
-            title="Contratos"
-            description="Obras cadastradas para abastecimento."
-            icon={FileText}
-          />
-        ) : null}
-        {canAccessPage("equipamentos") ? (
-          <DashboardCard
-            to="/equipamentos"
-            title="Equipamentos"
-            description="Ativos e equipamentos cadastrados para abastecimento melosa."
-            icon={HardHat}
-          />
-        ) : null}
-      </div>
+      {deleteTarget ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-dashboard-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeDeleteModal();
+          }}
+        >
+          <div className={`max-w-md rounded-2xl p-6 shadow-xl ${glassPanel}`}>
+            <h2 id="delete-dashboard-title" className="text-lg font-bold text-slate-900 dark:text-white">
+              Confirmar exclusão
+            </h2>
+            {deleteTarget.kind === "ciclos" ? (
+              <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
+                Excluir <strong>{deleteTarget.ids.length}</strong> ciclo
+                {deleteTarget.ids.length === 1 ? "" : "s"}? Remove a retirada do tanque vinculada e reencadeia o ID
+                anterior dos ciclos seguintes.
+              </p>
+            ) : deleteTarget.kind === "desvios" ? (
+              <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
+                Excluir <strong>{deleteTarget.operationIds.length}</strong> abastecimento
+                {deleteTarget.operationIds.length === 1 ? "" : "s"} selecionado
+                {deleteTarget.operationIds.length === 1 ? "" : "s"}?
+              </p>
+            ) : (
+              <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
+                Excluir abastecimento de <strong>{deleteTarget.desvio.ativo_equipamento_texto ?? "—"}</strong>?
+              </p>
+            )}
+            {deleteError ? (
+              <p className="mt-3 text-sm font-semibold text-red-700 dark:text-red-300">{deleteError}</p>
+            ) : null}
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deleteSaving}
+                className="rounded-lg border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void executeDelete()}
+                disabled={deleteSaving}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteSaving ? "Excluindo…" : "Excluir"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

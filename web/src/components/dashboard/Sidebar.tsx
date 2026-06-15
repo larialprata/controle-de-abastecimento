@@ -3,6 +3,7 @@ import {
   BarChart3,
   Droplets,
   FileText,
+  Fuel,
   HardHat,
   LayoutDashboard,
   LogOut,
@@ -28,6 +29,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/contratos", label: "Contratos", icon: FileText },
+  { to: "/melosas", label: "Melosas", icon: Fuel },
   { to: "/equipamentos", label: "Equipamentos", icon: HardHat },
   { to: "/usuarios", label: "Usuários", icon: Users, adminOnly: true },
   { to: "/bi", label: "BI Tanque", icon: BarChart3, end: true },

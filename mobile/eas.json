@@ -18,7 +18,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "http://212.85.13.183:3010",
         "EXPO_PUBLIC_SUPABASE_URL": "https://ybysqdjbywomxwenqmgz.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlieXNxZGpieXdvbXh3ZW5xbWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMTg4NDMsImV4cCI6MjA5NTg5NDg0M30.h6egb8xy7-WwIDOkPd4PQELBqc3_HrFeA7kWiSTj-Ks"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlieXNxZGpieXdvbXh3ZW5xbWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMTg4NDMsImV4cCI6MjA5NTg5NDg0M30.h6egb8xy7-WwIDOkPd4PQELBqc3_HrFeA7kWiSTj-Ks",
+        "EAS_BUILD_DISABLE_MAVEN_CACHE": "1"
       },
       "android": {
         "buildType": "apk"
@@ -30,7 +31,8 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "http://212.85.13.183:3010",
         "EXPO_PUBLIC_SUPABASE_URL": "https://ybysqdjbywomxwenqmgz.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlieXNxZGpieXdvbXh3ZW5xbWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMTg4NDMsImV4cCI6MjA5NTg5NDg0M30.h6egb8xy7-WwIDOkPd4PQELBqc3_HrFeA7kWiSTj-Ks"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlieXNxZGpieXdvbXh3ZW5xbWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMTg4NDMsImV4cCI6MjA5NTg5NDg0M30.h6egb8xy7-WwIDOkPd4PQELBqc3_HrFeA7kWiSTj-Ks",
+        "EAS_BUILD_DISABLE_MAVEN_CACHE": "1"
       },
       "android": {
         "buildType": "app-bundle"

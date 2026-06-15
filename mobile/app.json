@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Controle-Combustível",
-    "slug": "controle-combustivel",
+    "slug": "mobileapp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,7 +16,6 @@
     },
     "android": {
       "softwareKeyboardLayoutMode": "resize",
-      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -36,6 +35,8 @@
       ],
       "./plugins/withAndroidSdkLocalProperties.js",
       "./plugins/withExpoAutolinkingProjectRoot.js",
+      "./plugins/withReactNativeMonorepoGradle.js",
+      "./plugins/withGradleJitpackFix.js",
       "./plugins/withWindowsNativeCmakeShortPaths.js"
     ],
     "web": {

@@ -223,7 +223,6 @@ function buildTanqueTicketRow(m: LinhaTanque): TanqueTicketRow {
 }
 
 const PAGE_SIZE = 500;
-const TABLE_COL_COUNT = 25;
 /** Altura visível ≈ 10 linhas + cabeçalho; o restante rola na barra lateral */
 const TABLE_SCROLL_MAX_HEIGHT = "min(28.5rem, 52vh)";
 
@@ -239,9 +238,12 @@ const tdCls =
 const tdPhotoCls =
   "border-b border-white/25 px-2 py-2 text-center align-middle dark:border-white/5";
 
+type TanqueTableVariant = "entrada" | "retirada";
+
 type TanqueTableProps = {
   title: string;
   subtitle: string;
+  variant: TanqueTableVariant;
   rows: LinhaTanque[];
   loading: boolean;
   emptyMessage: string;
@@ -255,6 +257,7 @@ type TanqueTableProps = {
 function TanqueBiScrollTable({
   title,
   subtitle,
+  variant,
   rows,
   loading,
   emptyMessage,
@@ -264,6 +267,9 @@ function TanqueBiScrollTable({
   rowKey,
   onOpenPhoto,
 }: TanqueTableProps) {
+  const isRetiradaTable = variant === "retirada";
+  const isEntradaTable = variant === "entrada";
+  const colCount = isRetiradaTable ? 20 : 13;
   const visibleKeys = useMemo(() => rows.map((m) => rowKey(m)), [rows, rowKey]);
   const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selectedKeys.includes(k));
 
@@ -299,22 +305,33 @@ function TanqueBiScrollTable({
               <th className={thCls}>Usuário</th>
               <th className={thCls}>Litros</th>
               <th className={thCls}>Insumo</th>
-              <th className={thCls}>Nº nota</th>
-              <th className={thCls}>Foto nota</th>
-              <th className={thCls}>Valor unit. (L)</th>
+              {isEntradaTable ? (
+                <>
+                  <th className={thCls}>Nº nota</th>
+                  <th className={thCls}>Foto nota</th>
+                  <th className={thCls}>Valor unit. (L)</th>
+                </>
+              ) : null}
               <th className={thCls}>Patrimônio</th>
-              <th className={thCls}>Equipamento</th>
-              <th className={thCls}>Horímetro</th>
+              {isRetiradaTable ? <th className={thCls}>Horímetro</th> : null}
               <th className={thCls}>Tanque</th>
-              <th className={thCls}>Lacre tanque</th>
-              <th className={thCls}>Foto lacre T.</th>
-              <th className={thCls}>Lacre melosa</th>
-              <th className={thCls}>Foto lacre M.</th>
-              <th className={thCls}>Med. ini.</th>
-              <th className={thCls}>Foto med. ini.</th>
-              <th className={thCls}>Med. fin.</th>
-              <th className={thCls}>Foto med. fin.</th>
-              <th className={thCls}>Confirmação</th>
+              {isRetiradaTable ? (
+                <>
+                  <th className={thCls}>Lacre tanque</th>
+                  <th className={thCls}>Foto lacre T.</th>
+                  <th className={thCls}>Lacre melosa</th>
+                  <th className={thCls}>Foto lacre M.</th>
+                </>
+              ) : null}
+              {isRetiradaTable ? (
+                <>
+                  <th className={thCls}>Med. ini.</th>
+                  <th className={thCls}>Foto med. ini.</th>
+                  <th className={thCls}>Med. fin.</th>
+                  <th className={thCls}>Foto med. fin.</th>
+                  <th className={thCls}>Confirmação</th>
+                </>
+              ) : null}
               <th className={thCls}>Local</th>
               <th className={thCls}>Obs</th>
             </tr>
@@ -326,8 +343,6 @@ function TanqueBiScrollTable({
                 isEntradaTanque(m) && m.valor_unitario != null && m.valor_unitario !== ""
                   ? fmt(m.valor_unitario)
                   : "—";
-              const ret = isRetiradaTanque(m);
-              const ent = isEntradaTanque(m);
               const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
               const k = rowKey(m);
               const checked = selectedKeys.includes(k);
@@ -364,42 +379,41 @@ function TanqueBiScrollTable({
                   <td className={`${tdCls} max-w-[200px]`}>{usuarioCell}</td>
                   <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
                   <td className={`${tdCls} max-w-[120px]`}>{insumo}</td>
-                  <td className={`${tdCls} max-w-[100px]`}>{ent ? fmt(m.nota_numero) : "—"}</td>
-                  <td className={tdPhotoCls}>{ent ? photo(storagePath(m, "nota_storage_path"), "Nota") : "—"}</td>
-                  <td className={`${tdCls} max-w-[120px]`}>{valorUnit}</td>
+                  {isEntradaTable ? (
+                    <>
+                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.nota_numero)}</td>
+                      <td className={tdPhotoCls}>{photo(storagePath(m, "nota_storage_path"), "Nota")}</td>
+                      <td className={`${tdCls} max-w-[120px]`}>{valorUnit}</td>
+                    </>
+                  ) : null}
                   <td className={`${tdCls} max-w-[120px]`}>{fmtPatrimonioRow(m)}</td>
-                  <td className={`${tdCls} max-w-[160px]`}>{fmtEquipamentoRow(m)}</td>
-                  <td className={`${tdCls} max-w-[120px]`}>{fmtHorimetroRow(m)}</td>
+                  {isRetiradaTable ? (
+                    <td className={`${tdCls} max-w-[120px]`}>{fmtHorimetroRow(m)}</td>
+                  ) : null}
                   <td className={`${tdCls} max-w-[72px]`}>{fmtTanqueNumRow(m)}</td>
-                  <td className={`${tdCls} max-w-[100px]`}>{ret ? fmt(m.lacre_tanque_numero) : "—"}</td>
-                  <td className={tdPhotoCls}>
-                    {ret ? photo(storagePath(m, "lacre_tanque_storage_path"), "Lacre T.") : "—"}
-                  </td>
-                  <td className={`${tdCls} max-w-[100px]`}>{ret ? fmt(m.lacre_melosa_numero) : "—"}</td>
-                  <td className={tdPhotoCls}>
-                    {ret ? photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.") : "—"}
-                  </td>
-                  <td className={`${tdCls} max-w-[100px]`}>
-                    {ret ? fmt(m.medidor_tanque_numero_inicial) : "—"}
-                  </td>
-                  <td className={tdPhotoCls}>
-                    {ret
-                      ? photo(storagePath(m, "medidor_tanque_foto_inicial_storage_path"), "Med. ini.")
-                      : "—"}
-                  </td>
-                  <td className={`${tdCls} max-w-[100px]`}>
-                    {ret ? fmt(m.medidor_tanque_numero_final) : "—"}
-                  </td>
-                  <td className={tdPhotoCls}>
-                    {ret
-                      ? photo(storagePath(m, "medidor_tanque_foto_final_storage_path"), "Med. fin.")
-                      : "—"}
-                  </td>
-                  <td className={tdPhotoCls}>
-                    {ret
-                      ? photo(storagePath(m, "confirmacao_abastecimento_foto_storage_path"), "Confirm.")
-                      : "—"}
-                  </td>
+                  {isRetiradaTable ? (
+                    <>
+                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.lacre_tanque_numero)}</td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "lacre_tanque_storage_path"), "Lacre T.")}
+                      </td>
+                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.lacre_melosa_numero)}</td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.")}
+                      </td>
+                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.medidor_tanque_numero_inicial)}</td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "medidor_tanque_foto_inicial_storage_path"), "Med. ini.")}
+                      </td>
+                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.medidor_tanque_numero_final)}</td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "medidor_tanque_foto_final_storage_path"), "Med. fin.")}
+                      </td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "confirmacao_abastecimento_foto_storage_path"), "Confirm.")}
+                      </td>
+                    </>
+                  ) : null}
                   <td className={`${tdCls} max-w-[200px]`}>{fmtLocal(m)}</td>
                   <td className={`${tdCls} max-w-[200px]`}>{fmt(m.obs)}</td>
                 </tr>
@@ -407,7 +421,7 @@ function TanqueBiScrollTable({
             })}
             {rows.length === 0 && !loading ? (
               <tr>
-                <td colSpan={TABLE_COL_COUNT} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                <td colSpan={colCount} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
                   {emptyMessage}
                 </td>
               </tr>
@@ -521,9 +535,8 @@ export default function TanqueBIPage() {
 
   const filtroTextoAtivo = Boolean(busca.trim() || contratoFiltro || empresaFiltro || ticketFiltro.trim());
 
-  const aberturasFiltradas = useMemo(() => filtradas.filter(isRetiradaTanque), [filtradas]);
+  const retiradasFiltradas = useMemo(() => filtradas.filter(isRetiradaTanque), [filtradas]);
   const entradasFiltradas = useMemo(() => filtradas.filter(isEntradaTanque), [filtradas]);
-  const retiradasFiltradas = aberturasFiltradas;
 
   const rowKey = useCallback((m: LinhaTanque) => biMovementRowKey(m), []);
 
@@ -850,8 +863,8 @@ export default function TanqueBIPage() {
       </div>
 
       <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
-        <strong className="text-slate-900 dark:text-white">{aberturasFiltradas.length}</strong> abertura
-        {aberturasFiltradas.length === 1 ? "" : "s"} ·{" "}
+        <strong className="text-slate-900 dark:text-white">{retiradasFiltradas.length}</strong> retirada
+        {retiradasFiltradas.length === 1 ? "" : "s"} ·{" "}
         <strong className="text-slate-900 dark:text-white">{entradasFiltradas.length}</strong> entrada
         {entradasFiltradas.length === 1 ? "" : "s"}
         {filtroTextoAtivo ? " (filtrado)" : ""} ·{" "}
@@ -898,11 +911,12 @@ export default function TanqueBIPage() {
       <div className="flex flex-col gap-5">
         <div className="grid gap-5 xl:grid-cols-2">
           <TanqueBiScrollTable
-            title="Abertura"
+            title="Retirada do tanque"
             subtitle="Retiradas do tanque (saída para abastecimento)"
-            rows={aberturasFiltradas}
+            variant="retirada"
+            rows={retiradasFiltradas}
             loading={loading}
-            emptyMessage="Nenhuma abertura registrada."
+            emptyMessage="Nenhuma retirada registrada."
             authToken={authToken}
             selectedKeys={selectedKeys}
             setSelectedKeys={setSelectedKeys}
@@ -912,6 +926,7 @@ export default function TanqueBIPage() {
           <TanqueBiScrollTable
             title="Entrada"
             subtitle="Entradas de combustível no tanque da obra"
+            variant="entrada"
             rows={entradasFiltradas}
             loading={loading}
             emptyMessage="Nenhuma entrada registrada."
@@ -927,7 +942,7 @@ export default function TanqueBIPage() {
           <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
             <h2 className="text-base font-bold text-slate-900 dark:text-white">Mapa das localizações</h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Aberturas e entradas com coordenadas GPS
+              Retiradas e entradas com coordenadas GPS
             </p>
           </div>
           <div className="relative min-h-[360px] overflow-hidden rounded-b-2xl md:min-h-[420px]">

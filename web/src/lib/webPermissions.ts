@@ -1,6 +1,7 @@
 export const WEB_PAGES = [
   { key: "dashboard", label: "Dashboard", path: "/" },
   { key: "contratos", label: "Contratos", path: "/contratos" },
+  { key: "melosas", label: "Melosas", path: "/melosas" },
   { key: "equipamentos", label: "Equipamentos", path: "/equipamentos" },
   { key: "bi_tanque", label: "BI Tanque", path: "/bi" },
   { key: "bi_melosa", label: "BI Melosa", path: "/bi/melosa" },
@@ -38,6 +39,7 @@ export function canAccessWebPage(
 export function pathnameToPageKey(pathname: string): WebPageKey {
   if (pathname === "/" || pathname === "") return "dashboard";
   if (pathname.startsWith("/contratos")) return "contratos";
+  if (pathname.startsWith("/melosas")) return "melosas";
   if (pathname.startsWith("/equipamentos")) return "equipamentos";
   if (pathname.startsWith("/bi/melosa")) return "bi_melosa";
   if (pathname.startsWith("/bi")) return "bi_tanque";
@@ -47,6 +49,7 @@ export function pathnameToPageKey(pathname: string): WebPageKey {
 export function navItemToPageKey(to: string): WebPageKey {
   if (to === "/") return "dashboard";
   if (to === "/contratos") return "contratos";
+  if (to === "/melosas") return "melosas";
   if (to === "/equipamentos") return "equipamentos";
   if (to === "/bi/melosa") return "bi_melosa";
   if (to === "/bi") return "bi_tanque";

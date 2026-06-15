@@ -9,6 +9,7 @@ import MelosaBIPage from "./pages/MelosaBIPage";
 import TanqueBIPage from "./pages/TanqueBIPage";
 import UsersPage from "./pages/UsersPage";
 import ContratosPage from "./pages/ContratosPage";
+import MelosasPage from "./pages/MelosasPage";
 import EquipamentosPage from "./pages/EquipamentosPage";
 import type { WebPageKey } from "./lib/webPermissions";
 
@@ -104,6 +105,14 @@ function AppRoutes() {
           element={
             <RequirePage page="contratos">
               <ContratosPage />
+            </RequirePage>
+          }
+        />
+        <Route
+          path="melosas"
+          element={
+            <RequirePage page="melosas">
+              <MelosasPage />
             </RequirePage>
           }
         />

@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
+import { criarCicloRetiradaTanque, vincularAbastecimentoAoCicloAberto } from "../lib/melosaCiclo";
+import {
+  avaliarContinuidadeAbastecimentoMelosa,
+  parseMedidorNumero,
+} from "../lib/melosaMedidorContinuidade";
 import { envValidated } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 
@@ -35,10 +40,7 @@ async function storageObjectExists(
 }
 
 function parseMedidorMelosaNumero(value: string | null | undefined): number | null {
-  const raw = String(value ?? "").trim().replace(/\s/g, "").replace(",", ".");
-  if (!raw) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+  return parseMedidorNumero(value);
 }
 
 /** Retirada do tanque: medidor acumulado sobe — litros = final − inicial. */
@@ -78,6 +80,7 @@ const movimentoSchema = z.object({
   medidor_tanque_numero_final: z.string().optional().nullable(),
   medidor_tanque_foto_final_storage_path: z.string().optional().nullable(),
   confirmacao_abastecimento_foto_storage_path: z.string().optional().nullable(),
+  retirada_horimetro_foto_storage_path: z.string().optional().nullable(),
 
   melosa_km_registro: z.number().min(0).optional().nullable(),
   melosa_litros_registro: z.number().min(0).optional().nullable(),
@@ -135,6 +138,7 @@ const melosaUpdateSchema = z
     medidor_tanque_numero_final: z.string().optional().nullable(),
     medidor_tanque_foto_final_storage_path: z.string().optional().nullable(),
     confirmacao_abastecimento_foto_storage_path: z.string().optional().nullable(),
+  retirada_horimetro_foto_storage_path: z.string().optional().nullable(),
     obs: z.string().optional().nullable(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
@@ -189,6 +193,9 @@ const MELOSA_DB_COLUMN_KEYS = [
   "local_longitude",
   "local_address",
   "obs",
+  "medidor_final_anterior",
+  "medidor_desvio_litros",
+  "medidor_continuidade_status",
 ] as const;
 
 function mapMelosaAtivoFields<T extends Record<string, unknown>>(row: T): T {
@@ -570,7 +577,7 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       if (!placaNorm) {
         return res.status(400).json({ error: "placa_texto é obrigatório" });
       }
-      if (!fornecedorNorm) {
+      if (payload.tipo !== "RETIRADA_TANQUE" && !fornecedorNorm) {
         return res.status(400).json({ error: "fornecedor_texto é obrigatório" });
       }
       if (tanqueNum !== 1 && tanqueNum !== 2) {
@@ -598,6 +605,12 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     }
 
     if (payload.tipo === "RETIRADA_TANQUE") {
+      if (!payload.tanque_texto?.trim()) {
+        return res.status(400).json({ error: "tanque_texto (horímetro) é obrigatório" });
+      }
+      if (!payload.retirada_horimetro_foto_storage_path?.trim()) {
+        return res.status(400).json({ error: "retirada_horimetro_foto_storage_path é obrigatório" });
+      }
       if (!payload.lacre_tanque_numero?.trim()) {
         return res.status(400).json({ error: "lacre_tanque_numero é obrigatório" });
       }
@@ -624,6 +637,13 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       }
       if (!payload.confirmacao_abastecimento_foto_storage_path?.trim()) {
         return res.status(400).json({ error: "confirmacao_abastecimento_foto_storage_path é obrigatório" });
+      }
+
+      const { data: horimetroFotoExists } = await service.storage
+        .from(envValidated.RETIRADA_HORIMETRO_BUCKET)
+        .exists(payload.retirada_horimetro_foto_storage_path);
+      if (horimetroFotoExists !== true) {
+        return res.status(400).json({ error: "Foto do horímetro não encontrada no Storage" });
       }
 
       const { data: lacreTanqueExists } = await service.storage
@@ -658,7 +678,7 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         .from(envValidated.CONFIRMACAO_ABASTECIMENTO_BUCKET)
         .exists(payload.confirmacao_abastecimento_foto_storage_path);
       if (confirmacaoExists !== true) {
-        return res.status(400).json({ error: "Foto de confirmação do abastecimento não encontrada no Storage" });
+        return res.status(400).json({ error: "Foto junto ao tanque não encontrada no Storage" });
       }
     }
 
@@ -744,6 +764,18 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         });
       }
       const litrosMelosaCalculados = medidorFinal - medidorInicial;
+
+      let medidorContinuidade: Awaited<ReturnType<typeof avaliarContinuidadeAbastecimentoMelosa>> | null = null;
+      try {
+        medidorContinuidade = await avaliarContinuidadeAbastecimentoMelosa(service, {
+          ativoMelosa: placaNorm ?? "",
+          medidorInicialInformado: medidorInicial,
+          excludeOperationId: payload.operation_id,
+        });
+      } catch (contErr: unknown) {
+        console.warn("[melosa_medidor] continuidade:", contErr);
+      }
+
       if (!payload.melosa_medidor_acumulado_final_storage_path?.trim()) {
         return res.status(400).json({ error: "melosa_medidor_acumulado_final_storage_path é obrigatório" });
       }
@@ -792,6 +824,10 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         local_longitude: payload.local_longitude ?? null,
         local_address: payload.local_address ?? null,
         obs: payload.obs ?? null,
+
+        medidor_final_anterior: medidorContinuidade?.medidor_final_anterior ?? null,
+        medidor_desvio_litros: medidorContinuidade?.medidor_desvio_litros ?? null,
+        medidor_continuidade_status: medidorContinuidade?.status ?? null,
       };
 
       const { error } = await service
@@ -801,7 +837,29 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         });
 
       if (error) return res.status(400).json({ error: error.message });
-      return res.json({ ok: true, operation_id: payload.operation_id });
+
+      try {
+        await vincularAbastecimentoAoCicloAberto(service, {
+          operationId: payload.operation_id,
+          ativoMelosa: placaNorm ?? "",
+          litrosAbastecidos: litrosMelosaCalculados,
+        });
+      } catch (cicloErr: unknown) {
+        console.warn("[melosa_ciclo] vincular abastecimento:", cicloErr);
+      }
+
+      return res.json({
+        ok: true,
+        operation_id: payload.operation_id,
+        medidor_continuidade: medidorContinuidade
+          ? {
+              status: medidorContinuidade.status,
+              medidor_esperado: medidorContinuidade.medidor_esperado,
+              medidor_informado: medidorContinuidade.medidor_informado,
+              medidor_desvio_litros: medidorContinuidade.medidor_desvio_litros,
+            }
+          : null,
+      });
     }
 
     const placaCaminhaoRow =
@@ -841,9 +899,11 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       medidor_tanque_numero_final: payload.medidor_tanque_numero_final ?? null,
       medidor_tanque_foto_final_storage_path: payload.medidor_tanque_foto_final_storage_path ?? null,
       confirmacao_abastecimento_foto_storage_path: payload.confirmacao_abastecimento_foto_storage_path ?? null,
+      retirada_horimetro_foto_storage_path: payload.retirada_horimetro_foto_storage_path ?? null,
 
       placa_texto: needsVeiculoMeta ? placaNorm : null,
-      fornecedor_texto: needsVeiculoMeta ? fornecedorNorm : null,
+      fornecedor_texto:
+        payload.tipo === "RETIRADA_TANQUE" ? null : needsVeiculoMeta ? fornecedorNorm : null,
       tanque_numero: needsVeiculoMeta ? tanqueNum : null,
       local_latitude: payload.local_latitude ?? null,
       local_longitude: payload.local_longitude ?? null,
@@ -856,6 +916,27 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       .upsert(insertRow as any, { onConflict: "operation_id" });
 
     if (error) return res.status(400).json({ error: error.message });
+
+    if (payload.tipo === "RETIRADA_TANQUE" && placaNorm) {
+      const dataHoraIso = insertRow.data_hora as string;
+      const ciclo = await criarCicloRetiradaTanque(service, {
+        operationId: payload.operation_id,
+        ativoMelosa: placaNorm,
+        obraCodigo: payload.obra_codigo,
+        dataHora: dataHoraIso,
+        litrosRetirada: litrosGravados,
+      });
+      return res.json({
+        ok: true,
+        operation_id: payload.operation_id,
+        ciclo_numero: ciclo.ciclo_numero,
+        ciclo_anterior_numero: ciclo.ciclo_anterior_numero,
+        ciclo_status: ciclo.status,
+        volume_excedente: ciclo.volume_excedente,
+        litros_sobra_anterior: ciclo.litros_sobra_anterior,
+      });
+    }
+
     return res.json({ ok: true, operation_id: payload.operation_id });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });

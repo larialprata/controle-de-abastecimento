@@ -1,6 +1,7 @@
 export const WEB_PAGE_KEYS = [
   "dashboard",
   "contratos",
+  "melosas",
   "equipamentos",
   "bi_tanque",
   "bi_melosa",

@@ -26,6 +26,7 @@ export type MovimentacaoPayload = {
   medidor_tanque_numero_final?: string | null;
   medidor_tanque_foto_final_storage_path?: string | null;
   confirmacao_abastecimento_foto_storage_path?: string | null;
+  retirada_horimetro_foto_storage_path?: string | null;
 
   melosa_km_registro?: number | null;
   melosa_litros_registro?: number | null;

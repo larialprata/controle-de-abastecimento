@@ -514,6 +514,8 @@ export default function App() {
   const [melosaEquipamentoOperadorFotoUri, setMelosaEquipamentoOperadorFotoUri] = useState<string | null>(null);
   const [melosaMedidorAcumuladoFinalNumero, setMelosaMedidorAcumuladoFinalNumero] = useState("");
   const [melosaMedidorAcumuladoFinalFotoUri, setMelosaMedidorAcumuladoFinalFotoUri] = useState<string | null>(null);
+  const [melosaMedidorEsperado, setMelosaMedidorEsperado] = useState<number | null>(null);
+  const [melosaMedidorUltimoEquipamento, setMelosaMedidorUltimoEquipamento] = useState<string | null>(null);
 
   const [melosaWdrKmText, setMelosaWdrKmText] = useState("");
   const [melosaWdrLitrosText, setMelosaWdrLitrosText] = useState("");
@@ -533,6 +535,7 @@ export default function App() {
   const [fornecedorTexto, setFornecedorTexto] = useState("");
   const [equipamentoTexto, setEquipamentoTexto] = useState("");
   const [horimetroHodometroTexto, setHorimetroHodometroTexto] = useState("");
+  const [horimetroFotoUri, setHorimetroFotoUri] = useState<string | null>(null);
   const [numeroLacreTanque, setNumeroLacreTanque] = useState("");
   const [numeroLacreMelosa, setNumeroLacreMelosa] = useState("");
   const [lacreTanqueFotoUri, setLacreTanqueFotoUri] = useState<string | null>(null);
@@ -630,6 +633,42 @@ export default function App() {
   }, [session?.access_token]);
 
   useEffect(() => {
+    if (screen.name !== "melosa" || screen.step !== "medidor_acumulado") return;
+    if (!session?.access_token || !melosaPlacaTexto.trim()) {
+      setMelosaMedidorEsperado(null);
+      setMelosaMedidorUltimoEquipamento(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const json = await apiGet<{
+          medidor_esperado: number | null;
+          ultimo_abastecimento?: { ativo_equipamento: string | null } | null;
+        }>(
+          `/v1/melosa-medidor/esperado?ativo=${encodeURIComponent(melosaPlacaTexto.trim())}`,
+          session.access_token,
+        );
+        if (cancelled) return;
+        setMelosaMedidorEsperado(json.medidor_esperado);
+        setMelosaMedidorUltimoEquipamento(json.ultimo_abastecimento?.ativo_equipamento ?? null);
+        if (json.medidor_esperado != null) {
+          const sugerido = String(json.medidor_esperado).replace(".", ",");
+          setMelosaMedidorAcumuladoInicialNumero((prev) => (prev.trim() ? prev : sugerido));
+        }
+      } catch {
+        if (!cancelled) {
+          setMelosaMedidorEsperado(null);
+          setMelosaMedidorUltimoEquipamento(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [screen, session?.access_token, melosaPlacaTexto]);
+
+  useEffect(() => {
     if (!session?.access_token) return;
     if (!isOnline) return;
     if (pending <= 0) return;
@@ -654,6 +693,7 @@ export default function App() {
     setFornecedorTexto("");
     setEquipamentoTexto("");
     setHorimetroHodometroTexto("");
+    setHorimetroFotoUri(null);
     setNumeroLacreTanque("");
     setNumeroLacreMelosa("");
     setLacreTanqueFotoUri(null);
@@ -701,6 +741,8 @@ export default function App() {
     setMelosaEquipamentoOperadorFotoUri(null);
     setMelosaMedidorAcumuladoFinalNumero("");
     setMelosaMedidorAcumuladoFinalFotoUri(null);
+    setMelosaMedidorEsperado(null);
+    setMelosaMedidorUltimoEquipamento(null);
 
     setMelosaWdrKmText("");
     setMelosaWdrLitrosText("");
@@ -970,6 +1012,40 @@ export default function App() {
     const asset = result.assets?.[0];
     if (!asset?.uri) return;
     setLacreMelosaFotoUri(asset.uri);
+  }
+
+  async function pickHorimetroFotoFromLibrary() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do horímetro.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: false,
+      quality: 0.85,
+    });
+    if (result.canceled) return;
+    const asset = result.assets?.[0];
+    if (!asset?.uri) return;
+    setHorimetroFotoUri(asset.uri);
+  }
+
+  async function pickHorimetroFotoFromCamera() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do horímetro.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      allowsEditing: false,
+      quality: 0.85,
+    });
+    if (result.canceled) return;
+    const asset = result.assets?.[0];
+    if (!asset?.uri) return;
+    setHorimetroFotoUri(asset.uri);
   }
 
   async function pickMedidorTanqueFotoInicialFromLibrary() {
@@ -1640,15 +1716,15 @@ export default function App() {
 
   function continueRetiradaTanqueDados() {
     if (!placaTexto.trim()) {
-      Alert.alert("Patrimônio obrigatório", "Informe o patrimônio (placa/ativo).");
-      return;
-    }
-    if (!equipamentoTexto.trim()) {
-      Alert.alert("Equipamento obrigatório", "Informe o nome do equipamento.");
+      Alert.alert("Patrimônio obrigatório", "Selecione o patrimônio (melosa).");
       return;
     }
     if (!horimetroHodometroTexto.trim()) {
-      Alert.alert("Horímetro/Hodômetro obrigatório", "Informe o horímetro/hodômetro.");
+      Alert.alert("Horímetro obrigatório", "Informe o horímetro.");
+      return;
+    }
+    if (!horimetroFotoUri) {
+      Alert.alert("Foto obrigatória", "Selecione a foto do horímetro.");
       return;
     }
     if (!obraCombustivelTipo.trim()) {
@@ -1693,6 +1769,11 @@ export default function App() {
       Alert.alert("Foto obrigatória", "Selecione a foto inicial do medidor do tanque.");
       return;
     }
+    setMessage(null);
+    setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "confirmacao" });
+  }
+
+  function continueRetiradaTanqueConfirmacao() {
     if (!numeroFinalMedidorTanque.trim()) {
       Alert.alert("Medidor obrigatório", "Informe o número final do medidor do tanque.");
       return;
@@ -1701,8 +1782,16 @@ export default function App() {
       Alert.alert("Foto obrigatória", "Selecione a foto final do medidor do tanque.");
       return;
     }
+    if (!confirmacaoAbastecimentoFotoUri) {
+      Alert.alert("Foto obrigatória", "Selecione a foto junto ao tanque.");
+      return;
+    }
+    if (!isOnline) {
+      Alert.alert("Requer internet", "Para enviar as fotos, você precisa estar online.");
+      return;
+    }
     setMessage(null);
-    setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "confirmacao" });
+    void submitMovement();
   }
 
   async function submitMovement() {
@@ -1779,15 +1868,15 @@ export default function App() {
     }
     if (isRetiradaTanque) {
       if (!placaTexto.trim()) {
-        Alert.alert("Patrimônio obrigatório", "Informe o patrimônio (placa/ativo).");
-        return;
-      }
-      if (!equipamentoTexto.trim()) {
-        Alert.alert("Equipamento obrigatório", "Informe o nome do equipamento.");
+        Alert.alert("Patrimônio obrigatório", "Selecione o patrimônio (melosa).");
         return;
       }
       if (!horimetroHodometroTexto.trim()) {
-        Alert.alert("Horímetro/Hodômetro obrigatório", "Informe o horímetro/hodômetro.");
+        Alert.alert("Horímetro obrigatório", "Informe o horímetro.");
+        return;
+      }
+      if (!horimetroFotoUri) {
+        Alert.alert("Foto obrigatória", "Selecione a foto do horímetro.");
         return;
       }
       if (!obraCombustivelTipo.trim()) {
@@ -1806,16 +1895,16 @@ export default function App() {
         Alert.alert("Foto obrigatória", "Selecione a foto inicial do medidor do tanque.");
         return;
       }
+      if (!confirmacaoAbastecimentoFotoUri) {
+        Alert.alert("Foto obrigatória", "Selecione a foto junto ao tanque.");
+        return;
+      }
       if (!numeroFinalMedidorTanque.trim()) {
         Alert.alert("Medidor obrigatório", "Informe o número final do medidor do tanque.");
         return;
       }
       if (!medidorTanqueFotoFinalUri) {
         Alert.alert("Foto obrigatória", "Selecione a foto final do medidor do tanque.");
-        return;
-      }
-      if (!confirmacaoAbastecimentoFotoUri) {
-        Alert.alert("Foto obrigatória", "Tire a foto de confirmação do abastecimento.");
         return;
       }
       const medidorInicialTanque = parseMelosaMedidorNumero(numeroInicialMedidorTanque);
@@ -1835,7 +1924,7 @@ export default function App() {
       }
       litros = medidorFinalTanque - medidorInicialTanque;
       if (!isOnline) {
-        Alert.alert("Requer internet", "Para enviar fotos dos lacres e medidor, você precisa estar online.");
+        Alert.alert("Requer internet", "Para enviar fotos, você precisa estar online.");
         return;
       }
     }
@@ -1863,6 +1952,7 @@ export default function App() {
     let medidorTanqueFotoInicialStoragePath: string | null = null;
     let medidorTanqueFotoFinalStoragePath: string | null = null;
     let confirmacaoAbastecimentoFotoStoragePath: string | null = null;
+    let retiradaHorimetroFotoStoragePath: string | null = null;
 
     if (isEntradaTanqueObra) {
       const NOTA_BUCKET = "notas";
@@ -1889,6 +1979,7 @@ export default function App() {
       const LACRE_MELOSA_BUCKET = "lacre_melosa";
       const MEDIDOR_TANQUE_BUCKET = "medidor_tanque";
       const CONFIRMACAO_ABASTECIMENTO_BUCKET = "confirmacao_abastecimento";
+      const RETIRADA_HORIMETRO_BUCKET = "retirada_horimetro";
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
       if (!userId) throw new Error("Usuário não encontrado para upload das fotos dos lacres.");
@@ -1899,17 +1990,22 @@ export default function App() {
         return ext === "png" ? "png" : "jpg";
       }
 
+      const horimetroExt = extFromUri(horimetroFotoUri as string);
       const tanqueExt = extFromUri(lacreTanqueFotoUri as string);
       const melosaExt = extFromUri(lacreMelosaFotoUri as string);
       const medidorInicialExt = extFromUri(medidorTanqueFotoInicialUri as string);
       const medidorFinalExt = extFromUri(medidorTanqueFotoFinalUri as string);
       const confirmacaoExt = extFromUri(confirmacaoAbastecimentoFotoUri as string);
+      const horimetroPath = `${userId}/horimetro/${operationId}.${horimetroExt}`;
       const tanquePath = `${userId}/lacres/tanque/${operationId}.${tanqueExt}`;
       const melosaPath = `${userId}/lacres/melosa/${operationId}.${melosaExt}`;
       const medidorInicialPath = `${userId}/medidor/inicial/${operationId}.${medidorInicialExt}`;
       const medidorFinalPath = `${userId}/medidor/final/${operationId}.${medidorFinalExt}`;
-      const confirmacaoPath = `${userId}/confirmacao/${operationId}.${confirmacaoExt}`;
+      const confirmacaoPath = `${userId}/junto_tanque/${operationId}.${confirmacaoExt}`;
 
+      const { arrayBuffer: horimetroBytes, contentType: horimetroContentType } = await readImageUriAsArrayBuffer(
+        horimetroFotoUri as string
+      );
       const { arrayBuffer: tanqueBytes, contentType: tanqueContentType } = await readImageUriAsArrayBuffer(lacreTanqueFotoUri as string);
       const { arrayBuffer: melosaBytes, contentType: melosaContentType } = await readImageUriAsArrayBuffer(lacreMelosaFotoUri as string);
       const { arrayBuffer: medidorInicialBytes, contentType: medidorInicialContentType } = await readImageUriAsArrayBuffer(
@@ -1922,6 +2018,10 @@ export default function App() {
         confirmacaoAbastecimentoFotoUri as string
       );
       await Promise.all([
+        supabase.storage.from(RETIRADA_HORIMETRO_BUCKET).upload(horimetroPath, horimetroBytes, {
+          contentType: horimetroContentType,
+          upsert: false,
+        }),
         supabase.storage.from(LACRE_TANQUE_BUCKET).upload(tanquePath, tanqueBytes, {
           contentType: tanqueContentType,
           upsert: false,
@@ -1943,6 +2043,7 @@ export default function App() {
           upsert: false,
         }),
       ]);
+      retiradaHorimetroFotoStoragePath = horimetroPath;
       lacreTanqueStoragePath = tanquePath;
       lacreMelosaStoragePath = melosaPath;
       medidorTanqueFotoInicialStoragePath = medidorInicialPath;
@@ -1962,7 +2063,7 @@ export default function App() {
           ? tanqueTexto.trim()
           : null,
       placa_texto: placaTexto.trim(),
-      fornecedor_texto: isRetiradaTanque ? equipamentoTexto.trim() : fornecedorTexto.trim(),
+      fornecedor_texto: isRetiradaTanque ? null : fornecedorTexto.trim(),
       tanque_numero: tanqueNumero,
 
       combustivel_tipo: isTanqueObra ? obraCombustivelTipo.trim() : null,
@@ -1979,6 +2080,7 @@ export default function App() {
       medidor_tanque_numero_final: isRetiradaTanque ? numeroFinalMedidorTanque.trim() : null,
       medidor_tanque_foto_final_storage_path: isRetiradaTanque ? medidorTanqueFotoFinalStoragePath : null,
       confirmacao_abastecimento_foto_storage_path: isRetiradaTanque ? confirmacaoAbastecimentoFotoStoragePath : null,
+      retirada_horimetro_foto_storage_path: isRetiradaTanque ? retiradaHorimetroFotoStoragePath : null,
 
       local_latitude: localLatitude,
       local_longitude: localLongitude,
@@ -2226,6 +2328,18 @@ export default function App() {
       syncedOk = r.synced > 0;
       if (syncedOk) {
         setMessage(`Sincronizado: ${r.synced} registro(s).`);
+        const desvio = r.medidorDesvios?.[0];
+        if (desvio) {
+          const litros = Math.abs(desvio.desvio_litros);
+          const direcao =
+            desvio.desvio_litros > 0
+              ? `${litros} L não foram contabilizados no abastecimento anterior.`
+              : `${litros} L a mais do que o esperado no medidor.`;
+          Alert.alert(
+            "Atenção — medidor da melosa",
+            `O acumulado inicial informado (${desvio.medidor_informado} L) não bate com o final do abastecimento anterior (${desvio.medidor_esperado ?? "—"} L).\n\n${direcao}\n\nO registro foi salvo, mas o sistema marcou este abastecimento para revisão.`,
+          );
+        }
       } else {
         throw new Error("O servidor não confirmou o registro. Tente sincronizar novamente na tela inicial.");
       }
@@ -2617,21 +2731,18 @@ export default function App() {
 
               {!isMelosaUser ? (
                 <TouchableOpacity
-                  style={[
-                    styles.homeActionCard,
-                    styles.homeActionCardDisabled,
-                    !isDarkMode ? styles.homeActionCardLight : null,
-                    !isDarkMode ? styles.homeActionCardDisabledLight : null,
-                  ]}
-                  disabled
-                  activeOpacity={1}
+                  style={[styles.homeActionCard, !isDarkMode ? styles.homeActionCardLight : null]}
+                  onPress={() => {
+                    resetForm();
+                    setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "dados" });
+                  }}
                 >
                   <AdaptiveCardText
-                    style={[styles.homeActionTitle, styles.homeActionTitleDisabled, { fontSize: layout.actionTitleFontSize }]}
-                    lightStyle={styles.homeActionTitleDisabledLight}
+                    style={[styles.homeActionTitle, { fontSize: layout.actionTitleFontSize }]}
+                    lightStyle={styles.homeActionTitleLight}
                     isDarkMode={isDarkMode}
                   >
-                    Registrar entrada no tanque da obra
+                    Registrar retirada do tanque
                   </AdaptiveCardText>
                 </TouchableOpacity>
               ) : null}
@@ -2652,7 +2763,7 @@ export default function App() {
                     lightStyle={styles.homeActionTitleDisabledLight}
                     isDarkMode={isDarkMode}
                   >
-                    Registrar retirada do tanque
+                    Registrar entrada no tanque da obra
                   </AdaptiveCardText>
                 </TouchableOpacity>
               ) : null}
@@ -2910,6 +3021,32 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     keyboardType="decimal-pad"
                   />
+                  {melosaMedidorEsperado != null ? (
+                    <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
+                      Último acumulado final: {String(melosaMedidorEsperado).replace(".", ",")} L
+                      {melosaMedidorUltimoEquipamento ? ` (após abastecer ${melosaMedidorUltimoEquipamento})` : ""}.
+                      O inicial deste abastecimento deve ser igual.
+                    </Text>
+                  ) : null}
+                  {melosaMedidorEsperado != null &&
+                  melosaMedidorAcumuladoInicialNumero.trim() &&
+                  parseMelosaMedidorNumero(melosaMedidorAcumuladoInicialNumero) != null &&
+                  Math.abs(
+                    parseMelosaMedidorNumero(melosaMedidorAcumuladoInicialNumero)! - melosaMedidorEsperado,
+                  ) >= 0.001 ? (
+                    <Text
+                      style={[
+                        styles.authMessage,
+                        { marginTop: 6, color: "#b91c1c", fontWeight: "600" },
+                      ]}
+                    >
+                      Desvio de{" "}
+                      {Math.abs(
+                        parseMelosaMedidorNumero(melosaMedidorAcumuladoInicialNumero)! - melosaMedidorEsperado,
+                      ).toLocaleString("pt-BR")}{" "}
+                      L em relação ao último final. O sistema registrará um alerta.
+                    </Text>
+                  ) : null}
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
                     Foto Inicial Acumulado do Medidor da Melosa
                   </Text>
@@ -3157,15 +3294,6 @@ export default function App() {
     const isRetiradaDetalhes = isRetiradaTanque && retiradaStep === "detalhes";
     const isRetiradaMedidor = isRetiradaTanque && retiradaStep === "medidor";
     const isRetiradaConfirmacao = isRetiradaTanque && retiradaStep === "confirmacao";
-    const obraNome = OBRAS.find((o) => o.codigo === obraCodigo)?.nome ?? "";
-    const insumoLabel =
-      obraCombustivelTipo === "DIESEL_S10"
-        ? "Diesel/S10 Aditivado"
-        : obraCombustivelTipo === "GASOLINA"
-          ? "Gasolina"
-          : obraCombustivelTipo === "ALCOOL"
-            ? "Álcool"
-            : obraCombustivelTipo;
     const title = isEntradaTanqueObra ? "Entrada no tanque da obra" : "Retirada do tanque";
     const subtitle = isRetiradaDados
       ? "Dados da retirada"
@@ -3174,7 +3302,7 @@ export default function App() {
         : isRetiradaMedidor
           ? "Medidor do tanque"
           : isRetiradaConfirmacao
-            ? "Confirmação do abastecimento"
+            ? "Medidor final e foto"
         : title;
 
     const tanqueActionFooter = (
@@ -3229,6 +3357,14 @@ export default function App() {
             >
               <Text style={styles.primaryButtonText}>Próximo</Text>
             </TouchableOpacity>
+          ) : isRetiradaConfirmacao ? (
+            <TouchableOpacity
+              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
+              disabled={busy}
+              onPress={continueRetiradaTanqueConfirmacao}
+            >
+              <Text style={styles.primaryButtonText}>{busy ? "Salvando..." : "Salvar"}</Text>
+            </TouchableOpacity>
           ) : (
             <TouchableOpacity
               style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy || (isEntradaTanqueObra && !isOnline) ? { opacity: 0.7 } : null]}
@@ -3259,57 +3395,148 @@ export default function App() {
                 {subtitle}
               </Text>
 
-              {isEntradaTanqueObra || isRetiradaDados ? (
+              {isRetiradaDados ? (
                 <>
-                  {isEntradaTanqueObra ? (
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Obra</Text>
+                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                    <Picker
+                      selectedValue={obraCodigo}
+                      onValueChange={(v) => setObraCodigo(Number(v))}
+                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                    >
+                      {OBRAS.map((o) => (
+                        <Picker.Item key={o.codigo} label={`${o.codigo} - ${o.nome}`} value={o.codigo} />
+                      ))}
+                    </Picker>
+                  </View>
+
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Tanque</Text>
+                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                    <Picker
+                      selectedValue={tanqueNumero}
+                      onValueChange={(v) => setTanqueNumero(Number(v) === 2 ? 2 : 1)}
+                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                    >
+                      <Picker.Item label="Tanque 1" value={1} />
+                      <Picker.Item label="Tanque 2" value={2} />
+                    </Picker>
+                  </View>
+
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Insumo</Text>
+                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                    <Picker
+                      selectedValue={obraCombustivelTipo}
+                      onValueChange={(v) => setObraCombustivelTipo(String(v))}
+                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                    >
+                      <Picker.Item label="Diesel/S10 Aditivado" value="DIESEL_S10" />
+                      <Picker.Item label="Gasolina" value="GASOLINA" />
+                      <Picker.Item label="Álcool" value="ALCOOL" />
+                    </Picker>
+                  </View>
+
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Patrimônio (Placa/Ativo)</Text>
+                  {melosasCadastradas.length > 0 ? (
+                    <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                      <Picker
+                        selectedValue={placaTexto}
+                        onValueChange={(v) => setPlacaTexto(String(v))}
+                        style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                      >
+                        <Picker.Item label="Selecione o patrimônio (melosa)" value="" />
+                        {melosasCadastradas.map((m) => (
+                          <Picker.Item
+                            key={m.ativo}
+                            label={m.nome && m.nome !== m.ativo ? `${m.ativo} - ${m.nome}` : m.ativo}
+                            value={m.ativo}
+                          />
+                        ))}
+                      </Picker>
+                    </View>
+                  ) : (
                     <>
-                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Motorista (usuário)</Text>
                       <TextInput
-                        value={driverFullName || "—"}
-                        editable={false}
-                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null, { opacity: 0.88 }]}
+                        value={placaTexto}
+                        onChangeText={setPlacaTexto}
+                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                        placeholder="Ex.: CCL1999"
+                        placeholderTextColor={inputPlaceholderColor}
+                        autoCapitalize="characters"
                       />
+                      <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
+                        Nenhuma melosa cadastrada. Peça ao administrador para cadastrar em Equipamentos na web.
+                      </Text>
                     </>
-                  ) : null}
+                  )}
 
-              <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Obra</Text>
-              <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                <Picker
-                  selectedValue={obraCodigo}
-                  onValueChange={(v) => setObraCodigo(Number(v))}
-                  style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                >
-                  {OBRAS.map((o) => (
-                    <Picker.Item key={o.codigo} label={`${o.codigo} - ${o.nome}`} value={o.codigo} />
-                  ))}
-                </Picker>
-              </View>
-
-              <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>
-                {isRetiradaTanque ? "Patrimônio (Placa/Ativo)" : "Placa"}
-              </Text>
-              <TextInput
-                value={placaTexto}
-                onChangeText={setPlacaTexto}
-                style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                placeholder={isRetiradaTanque ? "Ex.: ABC1D23 ou patrimônio" : "Ex.: ABC1D23"}
-                placeholderTextColor={inputPlaceholderColor}
-                autoCapitalize="characters"
-              />
-
-              {isRetiradaTanque ? (
-                <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Equipamento</Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Horímetro</Text>
                   <TextInput
-                    value={equipamentoTexto}
-                    onChangeText={setEquipamentoTexto}
+                    value={horimetroHodometroTexto}
+                    onChangeText={setHorimetroHodometroTexto}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Nome do equipamento"
+                    placeholder="Ex.: 1542,3 h"
                     placeholderTextColor={inputPlaceholderColor}
+                    keyboardType="decimal-pad"
                   />
+
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto do horímetro</Text>
+                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
+                    {horimetroFotoUri ? (
+                      <>
+                        <Image source={{ uri: horimetroFotoUri }} style={styles.photoPreviewFull} />
+                        <TouchableOpacity style={styles.photoRemove} onPress={() => setHorimetroFotoUri(null)} disabled={busy}>
+                          <Text style={styles.photoRemoveText}>Remover</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
+                        Selecione a foto do horímetro
+                      </Text>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
+                    <TouchableOpacity style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]} onPress={pickHorimetroFotoFromLibrary} disabled={busy}>
+                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]} onPress={pickHorimetroFotoFromCamera} disabled={busy}>
+                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
+                    </TouchableOpacity>
+                  </View>
                 </>
-              ) : (
+              ) : null}
+
+              {isEntradaTanqueObra ? (
                 <>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Motorista (usuário)</Text>
+                  <TextInput
+                    value={driverFullName || "—"}
+                    editable={false}
+                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null, { opacity: 0.88 }]}
+                  />
+
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Obra</Text>
+                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                    <Picker
+                      selectedValue={obraCodigo}
+                      onValueChange={(v) => setObraCodigo(Number(v))}
+                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                    >
+                      {OBRAS.map((o) => (
+                        <Picker.Item key={o.codigo} label={`${o.codigo} - ${o.nome}`} value={o.codigo} />
+                      ))}
+                    </Picker>
+                  </View>
+
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Placa</Text>
+                  <TextInput
+                    value={placaTexto}
+                    onChangeText={setPlacaTexto}
+                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                    placeholder="Ex.: ABC1D23"
+                    placeholderTextColor={inputPlaceholderColor}
+                    autoCapitalize="characters"
+                  />
+
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Fornecedor</Text>
                   <TextInput
                     value={fornecedorTexto}
@@ -3318,63 +3545,37 @@ export default function App() {
                     placeholder="Nome do fornecedor"
                     placeholderTextColor={inputPlaceholderColor}
                   />
-                </>
-              )}
 
-              {isRetiradaTanque ? (
-                <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Horímetro/Hodômetro</Text>
-                  <TextInput
-                    value={horimetroHodometroTexto}
-                    onChangeText={setHorimetroHodometroTexto}
-                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: 1542,3 h ou 85620 km"
-                    placeholderTextColor={inputPlaceholderColor}
-                    keyboardType="decimal-pad"
-                  />
-                </>
-              ) : null}
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Tanque</Text>
+                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                    <Picker
+                      selectedValue={tanqueNumero}
+                      onValueChange={(v) => setTanqueNumero(Number(v) === 2 ? 2 : 1)}
+                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                    >
+                      <Picker.Item label="Tanque 1" value={1} />
+                      <Picker.Item label="Tanque 2" value={2} />
+                    </Picker>
+                  </View>
 
-              <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Tanque</Text>
-              <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                <Picker
-                  selectedValue={tanqueNumero}
-                  onValueChange={(v) => setTanqueNumero(Number(v) === 2 ? 2 : 1)}
-                  style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                >
-                  <Picker.Item label="Tanque 1" value={1} />
-                  <Picker.Item label="Tanque 2" value={2} />
-                </Picker>
-              </View>
-
-              <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Insumo</Text>
-              <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                <Picker
-                  selectedValue={obraCombustivelTipo}
-                  onValueChange={(v) => setObraCombustivelTipo(String(v))}
-                  style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                >
-                  <Picker.Item label="Diesel/S10 Aditivado" value="DIESEL_S10" />
-                  <Picker.Item label="Gasolina" value="GASOLINA" />
-                  <Picker.Item label="Álcool" value="ALCOOL" />
-                </Picker>
-              </View>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Insumo</Text>
+                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                    <Picker
+                      selectedValue={obraCombustivelTipo}
+                      onValueChange={(v) => setObraCombustivelTipo(String(v))}
+                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                    >
+                      <Picker.Item label="Diesel/S10 Aditivado" value="DIESEL_S10" />
+                      <Picker.Item label="Gasolina" value="GASOLINA" />
+                      <Picker.Item label="Álcool" value="ALCOOL" />
+                    </Picker>
+                  </View>
                 </>
               ) : null}
 
               {isRetiradaDetalhes ? (
                 <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>Resumo</Text>
-                  <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { textAlign: "left", marginTop: 4 }]}>
-                    Obra: {obraCodigo} - {obraNome}
-                    {"\n"}Patrimônio: {placaTexto.trim()}
-                    {"\n"}Equipamento: {equipamentoTexto.trim()}
-                    {"\n"}Horímetro/Hodômetro: {horimetroHodometroTexto.trim()}
-                    {"\n"}Tanque: {tanqueNumero}
-                    {"\n"}Insumo: {insumoLabel}
-                  </Text>
-
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Número do Lacre do Tanque</Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>Número do Lacre do Tanque</Text>
                   <TextInput
                     value={numeroLacreTanque}
                     onChangeText={setNumeroLacreTanque}
@@ -3446,17 +3647,7 @@ export default function App() {
 
               {isRetiradaMedidor ? (
                 <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>Resumo</Text>
-                  <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { textAlign: "left", marginTop: 4 }]}>
-                    Obra: {obraCodigo} - {obraNome}
-                    {"\n"}Patrimônio: {placaTexto.trim()}
-                    {"\n"}Equipamento: {equipamentoTexto.trim()}
-                    {"\n"}Horímetro/Hodômetro: {horimetroHodometroTexto.trim()}
-                    {"\n"}Tanque: {tanqueNumero}
-                    {"\n"}Insumo: {insumoLabel}
-                  </Text>
-
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Número Inicial do Medidor do Tanque</Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>Número Inicial do Medidor do Tanque</Text>
                   <TextInput
                     value={numeroInicialMedidorTanque}
                     onChangeText={setNumeroInicialMedidorTanque}
@@ -3497,8 +3688,12 @@ export default function App() {
                       <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
                     </TouchableOpacity>
                   </View>
+                </>
+              ) : null}
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Número Final do Medidor do Tanque</Text>
+              {isRetiradaConfirmacao ? (
+                <>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>Número Final do Medidor do Tanque</Text>
                   <TextInput
                     value={numeroFinalMedidorTanque}
                     onChangeText={setNumeroFinalMedidorTanque}
@@ -3539,14 +3734,8 @@ export default function App() {
                       <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
                     </TouchableOpacity>
                   </View>
-                </>
-              ) : null}
 
-              {isRetiradaConfirmacao ? (
-                <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
-                    Retirar foto de confirmação do abastecimento
-                  </Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Foto junto ao tanque</Text>
                   <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
                     {confirmacaoAbastecimentoFotoUri ? (
                       <>
@@ -3557,7 +3746,7 @@ export default function App() {
                       </>
                     ) : (
                       <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
-                        Tire ou selecione a foto de confirmação do abastecimento
+                        Selecione a foto junto ao tanque
                       </Text>
                     )}
                   </View>
@@ -3618,7 +3807,7 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaTanqueObra || isRetiradaDetalhes ? (
+              {isEntradaTanqueObra ? (
                 <GpsLocationBlock
                   isDarkMode={isDarkMode}
                   busy={busy}
@@ -3659,7 +3848,7 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaTanqueObra || isRetiradaDetalhes ? (
+              {isEntradaTanqueObra ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>OBS</Text>
                   <TextInput
