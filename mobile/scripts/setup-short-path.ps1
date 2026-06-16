@@ -40,8 +40,8 @@ if (-not (Test-Path $MobileDest)) {
   throw "Destino incompleto: $MobileDest"
 }
 
-Write-Host "npm install em $MobileDest ..."
-Set-Location $MobileDest
+Write-Host "npm install na raiz do monorepo (workspaces)..."
+Set-Location $Dest
 npm install
 
 Write-Host ""

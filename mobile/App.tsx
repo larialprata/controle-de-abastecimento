@@ -294,6 +294,7 @@ function CenteredScrollView({
   keyboardPadding = 0,
   preferCenter = true,
   viewportHeightOverride,
+  keyboardDismissMode = "on-drag",
 }: {
   children: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
@@ -301,6 +302,7 @@ function CenteredScrollView({
   keyboardPadding?: number;
   preferCenter?: boolean;
   viewportHeightOverride?: number;
+  keyboardDismissMode?: "none" | "on-drag" | "interactive";
 }) {
   const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
@@ -325,7 +327,7 @@ function CenteredScrollView({
         keyboardPadding > 0 ? { paddingBottom: keyboardPadding + paddingBottom } : null,
       ]}
       keyboardShouldPersistTaps="always"
-      keyboardDismissMode="on-drag"
+      keyboardDismissMode={keyboardDismissMode}
       nestedScrollEnabled
       showsVerticalScrollIndicator
       automaticallyAdjustKeyboardInsets
@@ -345,11 +347,13 @@ function FormScreenScroll({
   contentContainerStyle,
   preferCenter = true,
   layoutKey,
+  keyboardDismissMode = "on-drag",
 }: {
   children: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
   preferCenter?: boolean;
   layoutKey?: string;
+  keyboardDismissMode?: "none" | "on-drag" | "interactive";
 }) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [scrollAreaHeight, setScrollAreaHeight] = useState(0);
@@ -376,8 +380,9 @@ function FormScreenScroll({
       <CenteredScrollView
         contentContainerStyle={contentContainerStyle}
         keyboardPadding={keyboardHeight}
-        preferCenter={preferCenter}
+        preferCenter={preferCenter && keyboardHeight === 0}
         viewportHeightOverride={scrollAreaHeight}
+        keyboardDismissMode={keyboardDismissMode}
       >
         {children}
       </CenteredScrollView>
@@ -480,6 +485,8 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
+  const loginEmailRef = useRef<TextInput | null>(null);
+  const loginPasswordRef = useRef<TextInput | null>(null);
   const [regPasswordVisible, setRegPasswordVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -510,12 +517,11 @@ export default function App() {
   const [melosaMedidorAcumuladoInicialFotoUri, setMelosaMedidorAcumuladoInicialFotoUri] = useState<string | null>(null);
   const [melosaHorimetroEquipamentoNumero, setMelosaHorimetroEquipamentoNumero] = useState("");
   const [melosaHorimetroEquipamentoFotoUri, setMelosaHorimetroEquipamentoFotoUri] = useState<string | null>(null);
+  const [melosaNaoTenhoHorimetro, setMelosaNaoTenhoHorimetro] = useState(true);
   const [melosaMotoristaEquipamentoTexto, setMelosaMotoristaEquipamentoTexto] = useState("");
   const [melosaEquipamentoOperadorFotoUri, setMelosaEquipamentoOperadorFotoUri] = useState<string | null>(null);
   const [melosaMedidorAcumuladoFinalNumero, setMelosaMedidorAcumuladoFinalNumero] = useState("");
   const [melosaMedidorAcumuladoFinalFotoUri, setMelosaMedidorAcumuladoFinalFotoUri] = useState<string | null>(null);
-  const [melosaMedidorEsperado, setMelosaMedidorEsperado] = useState<number | null>(null);
-  const [melosaMedidorUltimoEquipamento, setMelosaMedidorUltimoEquipamento] = useState<string | null>(null);
 
   const [melosaWdrKmText, setMelosaWdrKmText] = useState("");
   const [melosaWdrLitrosText, setMelosaWdrLitrosText] = useState("");
@@ -633,42 +639,6 @@ export default function App() {
   }, [session?.access_token]);
 
   useEffect(() => {
-    if (screen.name !== "melosa" || screen.step !== "medidor_acumulado") return;
-    if (!session?.access_token || !melosaPlacaTexto.trim()) {
-      setMelosaMedidorEsperado(null);
-      setMelosaMedidorUltimoEquipamento(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const json = await apiGet<{
-          medidor_esperado: number | null;
-          ultimo_abastecimento?: { ativo_equipamento: string | null } | null;
-        }>(
-          `/v1/melosa-medidor/esperado?ativo=${encodeURIComponent(melosaPlacaTexto.trim())}`,
-          session.access_token,
-        );
-        if (cancelled) return;
-        setMelosaMedidorEsperado(json.medidor_esperado);
-        setMelosaMedidorUltimoEquipamento(json.ultimo_abastecimento?.ativo_equipamento ?? null);
-        if (json.medidor_esperado != null) {
-          const sugerido = String(json.medidor_esperado).replace(".", ",");
-          setMelosaMedidorAcumuladoInicialNumero((prev) => (prev.trim() ? prev : sugerido));
-        }
-      } catch {
-        if (!cancelled) {
-          setMelosaMedidorEsperado(null);
-          setMelosaMedidorUltimoEquipamento(null);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [screen, session?.access_token, melosaPlacaTexto]);
-
-  useEffect(() => {
     if (!session?.access_token) return;
     if (!isOnline) return;
     if (pending <= 0) return;
@@ -735,14 +705,13 @@ export default function App() {
     setMelosaComprovanteFotoUri(null);
     setMelosaMedidorAcumuladoInicialNumero("");
     setMelosaMedidorAcumuladoInicialFotoUri(null);
+    setMelosaNaoTenhoHorimetro(true);
     setMelosaHorimetroEquipamentoNumero("");
     setMelosaHorimetroEquipamentoFotoUri(null);
     setMelosaMotoristaEquipamentoTexto("");
     setMelosaEquipamentoOperadorFotoUri(null);
     setMelosaMedidorAcumuladoFinalNumero("");
     setMelosaMedidorAcumuladoFinalFotoUri(null);
-    setMelosaMedidorEsperado(null);
-    setMelosaMedidorUltimoEquipamento(null);
 
     setMelosaWdrKmText("");
     setMelosaWdrLitrosText("");
@@ -1719,14 +1688,6 @@ export default function App() {
       Alert.alert("Patrimônio obrigatório", "Selecione o patrimônio (melosa).");
       return;
     }
-    if (!horimetroHodometroTexto.trim()) {
-      Alert.alert("Horímetro obrigatório", "Informe o horímetro.");
-      return;
-    }
-    if (!horimetroFotoUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto do horímetro.");
-      return;
-    }
     if (!obraCombustivelTipo.trim()) {
       Alert.alert("Insumo obrigatório", "Selecione o tipo de insumo.");
       return;
@@ -1871,14 +1832,6 @@ export default function App() {
         Alert.alert("Patrimônio obrigatório", "Selecione o patrimônio (melosa).");
         return;
       }
-      if (!horimetroHodometroTexto.trim()) {
-        Alert.alert("Horímetro obrigatório", "Informe o horímetro.");
-        return;
-      }
-      if (!horimetroFotoUri) {
-        Alert.alert("Foto obrigatória", "Selecione a foto do horímetro.");
-        return;
-      }
       if (!obraCombustivelTipo.trim()) {
         Alert.alert("Insumo obrigatório", "Selecione o tipo de insumo.");
         return;
@@ -1990,22 +1943,29 @@ export default function App() {
         return ext === "png" ? "png" : "jpg";
       }
 
-      const horimetroExt = extFromUri(horimetroFotoUri as string);
       const tanqueExt = extFromUri(lacreTanqueFotoUri as string);
       const melosaExt = extFromUri(lacreMelosaFotoUri as string);
       const medidorInicialExt = extFromUri(medidorTanqueFotoInicialUri as string);
       const medidorFinalExt = extFromUri(medidorTanqueFotoFinalUri as string);
       const confirmacaoExt = extFromUri(confirmacaoAbastecimentoFotoUri as string);
-      const horimetroPath = `${userId}/horimetro/${operationId}.${horimetroExt}`;
       const tanquePath = `${userId}/lacres/tanque/${operationId}.${tanqueExt}`;
       const melosaPath = `${userId}/lacres/melosa/${operationId}.${melosaExt}`;
       const medidorInicialPath = `${userId}/medidor/inicial/${operationId}.${medidorInicialExt}`;
       const medidorFinalPath = `${userId}/medidor/final/${operationId}.${medidorFinalExt}`;
       const confirmacaoPath = `${userId}/junto_tanque/${operationId}.${confirmacaoExt}`;
 
-      const { arrayBuffer: horimetroBytes, contentType: horimetroContentType } = await readImageUriAsArrayBuffer(
-        horimetroFotoUri as string
-      );
+      const hasHorimetroFoto = !!horimetroFotoUri;
+      let horimetroPath: string | null = null;
+      let horimetroBytes: ArrayBuffer | null = null;
+      let horimetroContentType: string | null = null;
+      if (hasHorimetroFoto) {
+        const horimetroExt = extFromUri(horimetroFotoUri as string);
+        horimetroPath = `${userId}/horimetro/${operationId}.${horimetroExt}`;
+        const tmp = await readImageUriAsArrayBuffer(horimetroFotoUri as string);
+        horimetroBytes = tmp.arrayBuffer;
+        horimetroContentType = tmp.contentType;
+      }
+
       const { arrayBuffer: tanqueBytes, contentType: tanqueContentType } = await readImageUriAsArrayBuffer(lacreTanqueFotoUri as string);
       const { arrayBuffer: melosaBytes, contentType: melosaContentType } = await readImageUriAsArrayBuffer(lacreMelosaFotoUri as string);
       const { arrayBuffer: medidorInicialBytes, contentType: medidorInicialContentType } = await readImageUriAsArrayBuffer(
@@ -2017,11 +1977,8 @@ export default function App() {
       const { arrayBuffer: confirmacaoBytes, contentType: confirmacaoContentType } = await readImageUriAsArrayBuffer(
         confirmacaoAbastecimentoFotoUri as string
       );
-      await Promise.all([
-        supabase.storage.from(RETIRADA_HORIMETRO_BUCKET).upload(horimetroPath, horimetroBytes, {
-          contentType: horimetroContentType,
-          upsert: false,
-        }),
+
+      const uploads = [
         supabase.storage.from(LACRE_TANQUE_BUCKET).upload(tanquePath, tanqueBytes, {
           contentType: tanqueContentType,
           upsert: false,
@@ -2042,8 +1999,22 @@ export default function App() {
           contentType: confirmacaoContentType,
           upsert: false,
         }),
-      ]);
-      retiradaHorimetroFotoStoragePath = horimetroPath;
+      ];
+
+      if (hasHorimetroFoto && horimetroPath && horimetroBytes && horimetroContentType) {
+        uploads.unshift(
+          supabase.storage.from(RETIRADA_HORIMETRO_BUCKET).upload(horimetroPath, horimetroBytes, {
+            contentType: horimetroContentType,
+            upsert: false,
+          }),
+        );
+      }
+
+      await Promise.all(uploads);
+
+      if (hasHorimetroFoto && horimetroPath) {
+        retiradaHorimetroFotoStoragePath = horimetroPath;
+      }
       lacreTanqueStoragePath = tanquePath;
       lacreMelosaStoragePath = melosaPath;
       medidorTanqueFotoInicialStoragePath = medidorInicialPath;
@@ -2141,14 +2112,6 @@ export default function App() {
       Alert.alert("Foto obrigatória", "Selecione a foto inicial acumulada do medidor da melosa.");
       return;
     }
-    if (!melosaHorimetroEquipamentoNumero.trim()) {
-      Alert.alert("Horímetro obrigatório", "Informe o número do horímetro do equipamento abastecido.");
-      return;
-    }
-    if (!melosaHorimetroEquipamentoFotoUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto do hodômetro do equipamento abastecido.");
-      return;
-    }
     if (!melosaMotoristaEquipamentoTexto.trim()) {
       Alert.alert("Motorista obrigatório", "Informe o motorista do equipamento abastecido.");
       return;
@@ -2241,21 +2204,27 @@ export default function App() {
     }
 
     const extMedidor = extFromUri(melosaMedidorAcumuladoInicialFotoUri as string);
-    const extHorimetro = extFromUri(melosaHorimetroEquipamentoFotoUri as string);
     const extOperador = extFromUri(melosaEquipamentoOperadorFotoUri as string);
     const extMedidorFinal = extFromUri(melosaMedidorAcumuladoFinalFotoUri as string);
 
     const medidorInicialPath = `${userId}/melosa/medidor/inicial/${operationId}.${extMedidor}`;
     const medidorFinalPath = `${userId}/melosa/medidor/final/${operationId}.${extMedidorFinal}`;
-    const horimetroPath = `${userId}/melosa/horimetro/${operationId}.${extHorimetro}`;
     const operadorPath = `${userId}/melosa/equipamento-operador/${operationId}.${extOperador}`;
+
+    const incluirHorimetro = !melosaNaoTenhoHorimetro;
+    const hasMelosaHorimetroFoto = incluirHorimetro && !!melosaHorimetroEquipamentoFotoUri;
+    let horimetroPath: string | null = null;
+    if (hasMelosaHorimetroFoto) {
+      const extHorimetro = extFromUri(melosaHorimetroEquipamentoFotoUri as string);
+      horimetroPath = `${userId}/melosa/horimetro/${operationId}.${extHorimetro}`;
+    }
 
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData.session?.access_token) {
       throw new Error("Sessão expirada. Faça login novamente antes de enviar as fotos.");
     }
 
-    await Promise.all([
+    const uploads = [
       uploadToBucket(
         MELOSA_MEDIDOR_BUCKET,
         medidorInicialPath,
@@ -2268,19 +2237,25 @@ export default function App() {
         melosaMedidorAcumuladoFinalFotoUri as string,
         "foto final do medidor da melosa"
       ),
-      uploadToBucket(
-        MELOSA_HORIMETRO_BUCKET,
-        horimetroPath,
-        melosaHorimetroEquipamentoFotoUri as string,
-        "foto do hodômetro"
-      ),
+      ...(hasMelosaHorimetroFoto && horimetroPath
+        ? [
+            uploadToBucket(
+              MELOSA_HORIMETRO_BUCKET,
+              horimetroPath,
+              melosaHorimetroEquipamentoFotoUri as string,
+              "foto do hodômetro"
+            ),
+          ]
+        : []),
       uploadToBucket(
         MELOSA_EQUIPAMENTO_OPERADOR_BUCKET,
         operadorPath,
         melosaEquipamentoOperadorFotoUri as string,
         "foto do equipamento com operador/motorista"
       ),
-    ]);
+    ];
+
+    await Promise.all(uploads);
 
     const payload: MovimentacaoPayload = {
       operation_id: operationId,
@@ -2299,8 +2274,11 @@ export default function App() {
       melosa_comprovante_storage_path: null,
       melosa_medidor_acumulado_inicial_numero: melosaMedidorAcumuladoInicialNumero.trim(),
       melosa_medidor_acumulado_inicial_storage_path: medidorInicialPath,
-      melosa_horimetro_equipamento_abastecido_numero: melosaHorimetroEquipamentoNumero.trim(),
-      melosa_horimetro_equipamento_abastecido_storage_path: horimetroPath,
+      melosa_horimetro_equipamento_abastecido_numero:
+        incluirHorimetro && melosaHorimetroEquipamentoNumero.trim()
+          ? melosaHorimetroEquipamentoNumero.trim()
+          : null,
+      melosa_horimetro_equipamento_abastecido_storage_path: incluirHorimetro ? horimetroPath ?? null : null,
       melosa_motorista_equipamento_abastecido: melosaMotoristaEquipamentoTexto.trim(),
       melosa_equipamento_operador_storage_path: operadorPath,
       melosa_lacre_numero: null,
@@ -2328,18 +2306,6 @@ export default function App() {
       syncedOk = r.synced > 0;
       if (syncedOk) {
         setMessage(`Sincronizado: ${r.synced} registro(s).`);
-        const desvio = r.medidorDesvios?.[0];
-        if (desvio) {
-          const litros = Math.abs(desvio.desvio_litros);
-          const direcao =
-            desvio.desvio_litros > 0
-              ? `${litros} L não foram contabilizados no abastecimento anterior.`
-              : `${litros} L a mais do que o esperado no medidor.`;
-          Alert.alert(
-            "Atenção — medidor da melosa",
-            `O acumulado inicial informado (${desvio.medidor_informado} L) não bate com o final do abastecimento anterior (${desvio.medidor_esperado ?? "—"} L).\n\n${direcao}\n\nO registro foi salvo, mas o sistema marcou este abastecimento para revisão.`,
-          );
-        }
       } else {
         throw new Error("O servidor não confirmou o registro. Tente sincronizar novamente na tela inicial.");
       }
@@ -2392,18 +2358,11 @@ export default function App() {
       return;
     }
     setMessage(null);
+    setMelosaNaoTenhoHorimetro(true);
     setScreen({ name: "melosa", step: "horimetro" });
   }
 
   function continueMelosaHorimetro() {
-    if (!melosaHorimetroEquipamentoNumero.trim()) {
-      Alert.alert("Horímetro/Hodômetro obrigatório", "Informe o número do horímetro/hodômetro.");
-      return;
-    }
-    if (!melosaHorimetroEquipamentoFotoUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto do hodômetro do equipamento abastecido.");
-      return;
-    }
     if (!melosaMotoristaEquipamentoTexto.trim()) {
       Alert.alert("Motorista obrigatório", "Informe o motorista do equipamento abastecido.");
       return;
@@ -2440,47 +2399,60 @@ export default function App() {
 
         <SafeAreaView style={styles.screenSafeArea}>
           <View style={styles.screenShell}>
-            <KeyboardAvoidingView
-              style={styles.authKeyboardFlex}
-              behavior={Platform.OS === "ios" ? "padding" : undefined}
-              keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
+            <FormScreenScroll
+              contentContainerStyle={styles.authScrollLogin}
+              layoutKey="login"
+              keyboardDismissMode="none"
             >
-              <CenteredScrollView contentContainerStyle={styles.authScrollLogin}>
-                <CardMeasuredWrap layout={layout} isDarkMode={isDarkMode} onBoundsChange={setCardBounds}>
-                <View style={styles.brandWrap}>
+              <CardMeasuredWrap layout={layout} isDarkMode={isDarkMode} onBoundsChange={setCardBounds}>
+                <View style={{ flexDirection: "column" }}>
+                  <View style={styles.brandWrap}>
                   <Image
                     source={require("./assets/logo_compacto.png")}
                     style={[styles.brandLogo, layout.brandLogoSize]}
                     resizeMode="contain"
                   />
-                </View>
+                    </View>
 
                 <Text style={[styles.authTitle, !isDarkMode ? styles.authTitleLight : null]}>Entrar</Text>
 
                 <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Email</Text>
-                <TextInput
-                  value={email}
-                  onChangeText={setEmail}
-                  style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                  placeholder="seuemail@exemplo.com"
-                  placeholderTextColor={inputPlaceholderColor}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
+                    <TextInput
+                      ref={(r) => {
+                        loginEmailRef.current = r;
+                      }}
+                      value={email}
+                      onChangeText={setEmail}
+                      style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                      placeholder="seuemail@exemplo.com"
+                      placeholderTextColor={inputPlaceholderColor}
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                      returnKeyType="next"
+                      onSubmitEditing={() => {
+                        loginPasswordRef.current?.focus();
+                      }}
+                      blurOnSubmit={false}
+                    />
 
                 <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Senha</Text>
                 <View style={[styles.authPasswordRow, !isDarkMode ? styles.authPasswordRowLight : null]}>
-                  <TextInput
-                    value={password}
-                    onChangeText={setPassword}
-                    style={[styles.authPasswordInput, !isDarkMode ? styles.authPasswordInputLight : null]}
-                    placeholder="Sua senha"
-                    placeholderTextColor={inputPlaceholderColor}
-                    secureTextEntry={!loginPasswordVisible}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    underlineColorAndroid="transparent"
-                  />
+                      <TextInput
+                        ref={(r) => {
+                          loginPasswordRef.current = r;
+                        }}
+                        value={password}
+                        onChangeText={setPassword}
+                        style={[styles.authPasswordInput, !isDarkMode ? styles.authPasswordInputLight : null]}
+                        placeholder="Sua senha"
+                        placeholderTextColor={inputPlaceholderColor}
+                        secureTextEntry={!loginPasswordVisible}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        underlineColorAndroid="transparent"
+                        returnKeyType="done"
+                        onSubmitEditing={onLogin}
+                      />
                   <TouchableOpacity
                     style={styles.authPasswordToggle}
                     onPress={() => setLoginPasswordVisible((v) => !v)}
@@ -2491,20 +2463,28 @@ export default function App() {
                       {loginPasswordVisible ? "Ocultar" : "Mostrar"}
                     </Text>
                   </TouchableOpacity>
+                    </View>
+
+                    {message ? (
+                      <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>
+                        {message}
+                      </Text>
+                    ) : null}
+
+                    <TouchableOpacity
+                      style={[
+                        styles.primaryButton,
+                        !isDarkMode ? styles.primaryButtonLight : null,
+                        busy ? { opacity: 0.7 } : null,
+                      ]}
+                      disabled={busy}
+                      onPress={onLogin}
+                    >
+                      <Text style={styles.primaryButtonText}>{busy ? "Entrando..." : "Entrar"}</Text>
+                    </TouchableOpacity>
                 </View>
-
-                {message ? <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>{message}</Text> : null}
-
-                <TouchableOpacity
-                  style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, busy ? { opacity: 0.7 } : null]}
-                  disabled={busy}
-                  onPress={onLogin}
-                >
-                  <Text style={styles.primaryButtonText}>{busy ? "Entrando..." : "Entrar"}</Text>
-                </TouchableOpacity>
-                </CardMeasuredWrap>
-              </CenteredScrollView>
-            </KeyboardAvoidingView>
+              </CardMeasuredWrap>
+            </FormScreenScroll>
             {themeToggleOverlay}
           </View>
         </SafeAreaView>
@@ -2925,14 +2905,8 @@ export default function App() {
                 onBoundsChange={setCardBounds}
                 innerStyle={isLacreMedidor || isMedidorAcumulado || isHorimetro ? styles.glassInnerCompact : undefined}
               >
-              <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>Melosa</Text>
-              <Text
-                style={[styles.formSubtitle, !isDarkMode ? styles.formSubtitleLight : null]}
-                adjustsFontSizeToFit
-                numberOfLines={2}
-                minimumFontScale={0.8}
-              >
-                {melosaSubtitle}
+              <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>
+                Retirada tanque melosa
               </Text>
 
               {isRegister ? (
@@ -3021,32 +2995,6 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     keyboardType="decimal-pad"
                   />
-                  {melosaMedidorEsperado != null ? (
-                    <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
-                      Último acumulado final: {String(melosaMedidorEsperado).replace(".", ",")} L
-                      {melosaMedidorUltimoEquipamento ? ` (após abastecer ${melosaMedidorUltimoEquipamento})` : ""}.
-                      O inicial deste abastecimento deve ser igual.
-                    </Text>
-                  ) : null}
-                  {melosaMedidorEsperado != null &&
-                  melosaMedidorAcumuladoInicialNumero.trim() &&
-                  parseMelosaMedidorNumero(melosaMedidorAcumuladoInicialNumero) != null &&
-                  Math.abs(
-                    parseMelosaMedidorNumero(melosaMedidorAcumuladoInicialNumero)! - melosaMedidorEsperado,
-                  ) >= 0.001 ? (
-                    <Text
-                      style={[
-                        styles.authMessage,
-                        { marginTop: 6, color: "#b91c1c", fontWeight: "600" },
-                      ]}
-                    >
-                      Desvio de{" "}
-                      {Math.abs(
-                        parseMelosaMedidorNumero(melosaMedidorAcumuladoInicialNumero)! - melosaMedidorEsperado,
-                      ).toLocaleString("pt-BR")}{" "}
-                      L em relação ao último final. O sistema registrará um alerta.
-                    </Text>
-                  ) : null}
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
                     Foto Inicial Acumulado do Medidor da Melosa
                   </Text>
@@ -3094,59 +3042,101 @@ export default function App() {
 
               {isHorimetro ? (
                 <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
+                    Horímetro / hodômetro (opcional)
+                  </Text>
+                  <View style={{ alignItems: "center", marginTop: 6, marginBottom: 6 }}>
+                    <TouchableOpacity
+                      accessibilityRole="switch"
+                      accessibilityLabel="Registrar horímetro ou hodômetro"
+                      accessibilityState={{ checked: !melosaNaoTenhoHorimetro }}
+                      disabled={busy}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        const semHorimetro = !melosaNaoTenhoHorimetro;
+                        setMelosaNaoTenhoHorimetro(semHorimetro);
+                        if (semHorimetro) {
+                          setMelosaHorimetroEquipamentoNumero("");
+                          setMelosaHorimetroEquipamentoFotoUri(null);
+                        }
+                      }}
+                      style={[
+                        styles.toggleSwitchTrack,
+                        !melosaNaoTenhoHorimetro ? styles.toggleSwitchTrackOn : styles.toggleSwitchTrackOff,
+                        !isDarkMode && melosaNaoTenhoHorimetro ? styles.toggleSwitchTrackLightOff : null,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.toggleSwitchKnob,
+                          { transform: [{ translateX: melosaNaoTenhoHorimetro ? 0 : 22 }] },
+                        ]}
+                      />
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>
                     Número do Horímetro/Hodômetro
                   </Text>
-                  <TextInput
-                    value={melosaHorimetroEquipamentoNumero}
-                    onChangeText={setMelosaHorimetroEquipamentoNumero}
-                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: 12540"
-                    placeholderTextColor={inputPlaceholderColor}
-                    keyboardType="decimal-pad"
-                  />
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
-                    Foto do Hodômetro do Equipamento Abastecido
-                  </Text>
-                  <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
-                    {melosaHorimetroEquipamentoFotoUri ? (
-                      <>
-                        <Image
-                          source={{ uri: melosaHorimetroEquipamentoFotoUri }}
-                          style={[styles.photoPreview, styles.photoPreviewCompact]}
-                        />
+
+                  {!melosaNaoTenhoHorimetro ? (
+                    <>
+                      <TextInput
+                        value={melosaHorimetroEquipamentoNumero}
+                        onChangeText={setMelosaHorimetroEquipamentoNumero}
+                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                        placeholder="Ex.: 12540"
+                        placeholderTextColor={inputPlaceholderColor}
+                        keyboardType="decimal-pad"
+                      />
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
+                        Foto do Hodômetro do Equipamento Abastecido
+                      </Text>
+                      <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
+                        {melosaHorimetroEquipamentoFotoUri ? (
+                          <>
+                            <Image
+                              source={{ uri: melosaHorimetroEquipamentoFotoUri }}
+                              style={[styles.photoPreview, styles.photoPreviewCompact]}
+                            />
+                            <TouchableOpacity
+                              style={styles.photoRemove}
+                              onPress={() => setMelosaHorimetroEquipamentoFotoUri(null)}
+                              disabled={busy}
+                            >
+                              <Text style={styles.photoRemoveText}>Remover</Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : (
+                          <Text
+                            style={[
+                              styles.photoPlaceholder,
+                              styles.photoPlaceholderCompact,
+                              !isDarkMode ? styles.photoPlaceholderLight : null,
+                            ]}
+                          >
+                            Selecione a foto do hodômetro do equipamento abastecido
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.photoActionRow}>
                         <TouchableOpacity
-                          style={styles.photoRemove}
-                          onPress={() => setMelosaHorimetroEquipamentoFotoUri(null)}
+                          style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
+                          onPress={pickMelosaHorimetroEquipamentoFromLibrary}
                           disabled={busy}
                         >
-                          <Text style={styles.photoRemoveText}>Remover</Text>
+                          <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
                         </TouchableOpacity>
-                      </>
-                    ) : (
-                      <Text
-                        style={[styles.photoPlaceholder, styles.photoPlaceholderCompact, !isDarkMode ? styles.photoPlaceholderLight : null]}
-                      >
-                        Selecione a foto do hodômetro do equipamento abastecido
-                      </Text>
-                    )}
-                  </View>
-                  <View style={styles.photoActionRow}>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMelosaHorimetroEquipamentoFromLibrary}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMelosaHorimetroEquipamentoFromCamera}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
-                    </TouchableOpacity>
-                  </View>
+                        <TouchableOpacity
+                          style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
+                          onPress={pickMelosaHorimetroEquipamentoFromCamera}
+                          disabled={busy}
+                        >
+                          <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : null}
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
                     Motorista do equipamento abastecido
@@ -4193,7 +4183,7 @@ const styles = StyleSheet.create({
     paddingBottom: 240,
   },
   authScrollLogin: {
-    paddingBottom: 48,
+    paddingBottom: 120,
   },
   authScrollRegister: {
     paddingBottom: 48,
@@ -4431,6 +4421,73 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   ghostButtonTextLight: {
+    color: lightTheme.textSecondary,
+  },
+
+  toggleSideLabel: {
+    color: "rgba(255,255,255,0.75)",
+    fontWeight: "800",
+    fontSize: 13,
+    marginRight: 10,
+  },
+  toggleSideLabelLight: {
+    color: lightTheme.textSecondary,
+  },
+  toggleSwitchTrack: {
+    width: 56,
+    height: 32,
+    borderRadius: 999,
+    padding: 0,
+    position: "relative",
+    justifyContent: "center",
+  },
+  toggleSwitchTrackOn: {
+    backgroundColor: "#22c55e",
+  },
+  toggleSwitchTrackOff: {
+    backgroundColor: "rgba(255,255,255,0.25)",
+  },
+  toggleSwitchTrackLightOff: {
+    backgroundColor: "#e5e7eb",
+  },
+  toggleSwitchKnob: {
+    position: "absolute",
+    top: 5,
+    left: 5,
+    width: 22,
+    height: 22,
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
+
+  melosaHorimetroToggleButton: {
+    flex: 0,
+    width: "auto",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  melosaHorimetroToggleButtonLight: {
+    borderColor: lightTheme.border,
+    backgroundColor: lightTheme.surface,
+    shadowColor: lightTheme.textPrimary,
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  melosaHorimetroToggleButtonText: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 14,
+    textAlign: "center",
+  },
+  melosaHorimetroToggleButtonTextLight: {
     color: lightTheme.textSecondary,
   },
 

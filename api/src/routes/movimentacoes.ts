@@ -605,12 +605,6 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     }
 
     if (payload.tipo === "RETIRADA_TANQUE") {
-      if (!payload.tanque_texto?.trim()) {
-        return res.status(400).json({ error: "tanque_texto (horímetro) é obrigatório" });
-      }
-      if (!payload.retirada_horimetro_foto_storage_path?.trim()) {
-        return res.status(400).json({ error: "retirada_horimetro_foto_storage_path é obrigatório" });
-      }
       if (!payload.lacre_tanque_numero?.trim()) {
         return res.status(400).json({ error: "lacre_tanque_numero é obrigatório" });
       }
@@ -639,11 +633,14 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         return res.status(400).json({ error: "confirmacao_abastecimento_foto_storage_path é obrigatório" });
       }
 
-      const { data: horimetroFotoExists } = await service.storage
-        .from(envValidated.RETIRADA_HORIMETRO_BUCKET)
-        .exists(payload.retirada_horimetro_foto_storage_path);
-      if (horimetroFotoExists !== true) {
-        return res.status(400).json({ error: "Foto do horímetro não encontrada no Storage" });
+      const retiradaHorimetroFotoPath = payload.retirada_horimetro_foto_storage_path?.trim();
+      if (retiradaHorimetroFotoPath) {
+        const { data: horimetroFotoExists } = await service.storage
+          .from(envValidated.RETIRADA_HORIMETRO_BUCKET)
+          .exists(retiradaHorimetroFotoPath);
+        if (horimetroFotoExists !== true) {
+          return res.status(400).json({ error: "Foto do horímetro não encontrada no Storage" });
+        }
       }
 
       const { data: lacreTanqueExists } = await service.storage
@@ -706,19 +703,16 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         });
       }
 
-      if (!payload.melosa_horimetro_equipamento_abastecido_numero?.trim()) {
-        return res.status(400).json({ error: "melosa_horimetro_equipamento_abastecido_numero é obrigatório" });
-      }
-      if (!payload.melosa_horimetro_equipamento_abastecido_storage_path?.trim()) {
-        return res.status(400).json({ error: "melosa_horimetro_equipamento_abastecido_storage_path é obrigatório" });
-      }
-      const horimetroOk = await storageObjectExists(
-        service,
-        envValidated.MELOSA_HORIMETRO_EQUIPAMENTO_ABASTECIDO_BUCKET,
-        payload.melosa_horimetro_equipamento_abastecido_storage_path
-      );
-      if (!horimetroOk) {
-        return res.status(400).json({ error: "Foto do hodômetro do equipamento abastecido não encontrada no Storage" });
+      const melosaHorimetroFotoPath = payload.melosa_horimetro_equipamento_abastecido_storage_path?.trim();
+      if (melosaHorimetroFotoPath) {
+        const horimetroOk = await storageObjectExists(
+          service,
+          envValidated.MELOSA_HORIMETRO_EQUIPAMENTO_ABASTECIDO_BUCKET,
+          melosaHorimetroFotoPath
+        );
+        if (!horimetroOk) {
+          return res.status(400).json({ error: "Foto do hodômetro do equipamento abastecido não encontrada no Storage" });
+        }
       }
 
       if (!payload.melosa_motorista_equipamento_abastecido?.trim()) {

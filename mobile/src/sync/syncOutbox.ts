@@ -15,6 +15,14 @@ export async function syncOutbox(token: string) {
   for (const row of pending) {
     const payload = JSON.parse(row.payload_json) as MovimentacaoPayload;
     payload.operation_id = row.operation_id;
+    if (payload.tipo === "RETIRADA_MELOSA") {
+      const horimetroNumero = String(payload.melosa_horimetro_equipamento_abastecido_numero ?? "").trim();
+      const horimetroPath = String(payload.melosa_horimetro_equipamento_abastecido_storage_path ?? "").trim();
+      if (!horimetroNumero && !horimetroPath) {
+        payload.melosa_horimetro_equipamento_abastecido_numero = null;
+        payload.melosa_horimetro_equipamento_abastecido_storage_path = null;
+      }
+    }
 
     try {
       const resp = await apiPost<{
