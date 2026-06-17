@@ -1,6 +1,8 @@
 import * as XLSX from "xlsx";
 
 import { resolveMobilidadeEquipamento, type EquipamentoMobilidade } from "./equipamentoMobilidade";
+import { parseEquipamentoEmpresa, type EquipamentoEmpresa } from "./equipamentoEmpresa";
+import { parseObraReferencia } from "./obraCodigo";
 
 export type EquipamentoImportRow = {
   linha: number;
@@ -9,6 +11,7 @@ export type EquipamentoImportRow = {
   obra_codigo?: number | null;
   obra_nome?: string;
   mobilidade?: EquipamentoMobilidade | null;
+  empresa?: EquipamentoEmpresa;
 };
 
 export type EquipamentoImportParseError = {
@@ -41,6 +44,10 @@ const HEADER_ALIASES: Record<string, string> = {
   tipo_mobilidade: "mobilidade",
   estacionario_movel: "mobilidade",
   fixo_movel: "mobilidade",
+
+  empresa: "empresa",
+  proprietario: "empresa",
+  proprietário: "empresa",
 };
 
 function normalizeHeader(h: string): string {
@@ -138,16 +145,9 @@ function mapRow(
 
   const nome = cellStr(raw.nome) || undefined;
   const obraRaw = cellStr(raw.obra_codigo) || cellStr(raw.obra);
-  let obra_codigo: number | null | undefined;
-  let obra_nome: string | undefined;
-
-  if (obraRaw) {
-    if (/^\d+$/.test(obraRaw)) {
-      obra_codigo = Number(obraRaw);
-    } else {
-      obra_nome = obraRaw;
-    }
-  }
+  const obraRef = obraRaw ? parseObraReferencia(obraRaw) : {};
+  const obra_codigo = obraRef.obra_codigo;
+  const obra_nome = obraRef.obra_nome;
 
   const mobilidadeExplicit = parseMobilidade(raw.mobilidade);
   if (raw.mobilidade != null && cellStr(raw.mobilidade) && mobilidadeExplicit == null) {
@@ -158,6 +158,8 @@ function mapRow(
       },
     };
   }
+
+  const empresa = parseEquipamentoEmpresa(raw.empresa);
 
   const nomeFinal = nome || ativo;
   const mobilidade = resolveMobilidadeEquipamento(nomeFinal, mobilidadeExplicit);
@@ -170,6 +172,7 @@ function mapRow(
       obra_codigo,
       obra_nome,
       mobilidade,
+      empresa,
     },
   };
 }
@@ -224,9 +227,9 @@ export async function parseEquipamentosImportFile(
 export function downloadEquipamentosImportTemplate(): void {
   const wb = XLSX.utils.book_new();
   const data = [
-    ["ativo", "descricao", "obra_codigo", "mobilidade"],
-    ["ASD123", "Escavadeira CAT 320", "101", "Móvel"],
-    ["GER-01", "Gerador obra central", "", "Estacionário"],
+    ["ativo", "descricao", "obra_codigo", "mobilidade", "empresa"],
+    ["ASD123", "Escavadeira CAT 320", "00.230", "Móvel", "Dimensional"],
+    ["GER-01", "Gerador obra central", "", "Estacionário", ""],
   ];
   const sheet = XLSX.utils.aoa_to_sheet(data);
   XLSX.utils.book_append_sheet(wb, sheet, "Equipamentos");

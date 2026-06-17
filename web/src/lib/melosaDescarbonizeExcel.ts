@@ -13,7 +13,7 @@ export {
 } from "./descarbonizeExcel";
 
 import type { DescarbonizeExcelRowInput } from "./descarbonizeExcel";
-import { calcQuantidadeLitrosFromMedidores, downloadDescarbonizeExcel } from "./descarbonizeExcel";
+import { downloadDescarbonizeExcel } from "./descarbonizeExcel";
 
 export type MelosaExcelRowInput = {
   obraCodigo?: number;
@@ -22,8 +22,7 @@ export type MelosaExcelRowInput = {
   dataHora?: string;
   insumoRetirada?: string | null;
   insumoRegistro?: string | null;
-  medidorInicial?: string | null;
-  medidorFinal?: string | null;
+  quantidadeAbastecida?: string | null;
   placaTexto?: string | null;
 };
 
@@ -32,18 +31,26 @@ function toDescarbonizeRow(row: MelosaExcelRowInput): DescarbonizeExcelRowInput 
     row.insumoRetirada != null && String(row.insumoRetirada).trim()
       ? row.insumoRetirada
       : row.insumoRegistro;
-  const quantidadeLitros = calcQuantidadeLitrosFromMedidores(row.medidorInicial, row.medidorFinal);
+  const quantidadeLitros = parseLitrosFromText(row.quantidadeAbastecida);
   return {
     obraCodigo: row.obraCodigo,
     obraNome: row.obraNome,
     categoriaDados: row.melosaCategoria,
     dataHora: row.dataHora,
     insumo,
-    medidorInicial: row.medidorInicial,
-    medidorFinal: row.medidorFinal,
+    medidorInicial: row.quantidadeAbastecida,
+    medidorFinal: null,
     quantidadeLitros,
     placaTexto: row.placaTexto,
   };
+}
+
+function parseLitrosFromText(value: string | null | undefined): number | null {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed.replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 export async function downloadMelosaDescarbonizeExcel(

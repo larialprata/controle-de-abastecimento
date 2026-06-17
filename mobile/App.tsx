@@ -37,13 +37,22 @@ import { v4 as uuidv4 } from "uuid";
 import { apiGet, apiPost, registerCredentials } from "./src/lib/api";
 import { readImageUriAsArrayBuffer } from "./src/lib/readImageUri";
 import { lightTheme } from "./src/theme/light";
+import EquipamentoQrScanner from "./src/components/EquipamentoQrScanner";
+import MelosaSignaturePad from "./src/components/MelosaSignaturePad";
+import {
+  EQUIPAMENTO_EMPRESAS,
+  EQUIPAMENTO_EMPRESA_LABEL,
+  type EquipamentoEmpresa,
+} from "./src/lib/equipamentoEmpresa";
+import { normalizeEquipamentoQrScan, parseAbastEquipamentoQrAtivo } from "./src/lib/equipamentoQr";
+import { base64ToArrayBuffer, parseBase64DataUrl } from "./src/lib/signatureImage";
 
 type Screen =
   | { name: "login" }
   | { name: "registro" }
   | { name: "home" }
   | { name: "form"; tipo: MovimentoTipo; retiradaStep?: "dados" | "detalhes" | "medidor" | "confirmacao" }
-  | { name: "melosa"; step: "register" | "medidor_acumulado" | "horimetro" | "lacre_medidor" };
+  | { name: "melosa"; step: "register" | "quantidade_abastecida" | "horimetro" | "resumo" };
 
 /** Espaço reservado no scroll para o rodapé fixo (Salvar/Cancelar) + barra do sistema. */
 const FORM_SCROLL_FOOTER_SPACE = 100;
@@ -60,6 +69,12 @@ const THEME_TOGGLE_POS_FILE = FileSystem.documentDirectory
 
 type CardBounds = { x: number; y: number; width: number; height: number };
 type ThemeTogglePosition = { x: number; y: number };
+
+function isMeaningfulSignatureDataUrl(dataUrl: string | null | undefined): boolean {
+  if (!dataUrl?.trim()) return false;
+  const { base64 } = parseBase64DataUrl(dataUrl);
+  return base64.length > 800;
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -295,6 +310,7 @@ function CenteredScrollView({
   preferCenter = true,
   viewportHeightOverride,
   keyboardDismissMode = "on-drag",
+  scrollEnabled = true,
 }: {
   children: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
@@ -303,6 +319,7 @@ function CenteredScrollView({
   preferCenter?: boolean;
   viewportHeightOverride?: number;
   keyboardDismissMode?: "none" | "on-drag" | "interactive";
+  scrollEnabled?: boolean;
 }) {
   const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
@@ -328,8 +345,10 @@ function CenteredScrollView({
       ]}
       keyboardShouldPersistTaps="always"
       keyboardDismissMode={keyboardDismissMode}
-      nestedScrollEnabled
-      showsVerticalScrollIndicator
+      nestedScrollEnabled={scrollEnabled}
+      scrollEnabled={scrollEnabled}
+      bounces={scrollEnabled}
+      showsVerticalScrollIndicator={scrollEnabled}
       automaticallyAdjustKeyboardInsets
     >
       <View
@@ -348,12 +367,14 @@ function FormScreenScroll({
   preferCenter = true,
   layoutKey,
   keyboardDismissMode = "on-drag",
+  scrollEnabled = true,
 }: {
   children: ReactNode;
   contentContainerStyle?: StyleProp<ViewStyle>;
   preferCenter?: boolean;
   layoutKey?: string;
   keyboardDismissMode?: "none" | "on-drag" | "interactive";
+  scrollEnabled?: boolean;
 }) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [scrollAreaHeight, setScrollAreaHeight] = useState(0);
@@ -383,6 +404,7 @@ function FormScreenScroll({
         preferCenter={preferCenter && keyboardHeight === 0}
         viewportHeightOverride={scrollAreaHeight}
         keyboardDismissMode={keyboardDismissMode}
+        scrollEnabled={scrollEnabled}
       >
         {children}
       </CenteredScrollView>
@@ -508,21 +530,24 @@ export default function App() {
   const [melosaObraCodigo, setMelosaObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
   const [melosaPlacaTexto, setMelosaPlacaTexto] = useState("");
   const [melosaFornecedorTexto, setMelosaFornecedorTexto] = useState("");
+  const [melosaEquipamentoNomeTexto, setMelosaEquipamentoNomeTexto] = useState("");
+  const [melosaEquipamentoEmpresa, setMelosaEquipamentoEmpresa] = useState<"" | EquipamentoEmpresa>("");
+  const [melosaEquipamentoQrOpen, setMelosaEquipamentoQrOpen] = useState(false);
+  const [melosaEquipamentoQrLoading, setMelosaEquipamentoQrLoading] = useState(false);
   const [melosaTanqueNumero, setMelosaTanqueNumero] = useState<1 | 2>(1);
   const [melosaRegKmText, setMelosaRegKmText] = useState("");
   const [melosaRegLitrosText, setMelosaRegLitrosText] = useState("");
   const [melosaRegCombustivelTipo, setMelosaRegCombustivelTipo] = useState("DIESEL_S10");
   const [melosaComprovanteFotoUri, setMelosaComprovanteFotoUri] = useState<string | null>(null);
-  const [melosaMedidorAcumuladoInicialNumero, setMelosaMedidorAcumuladoInicialNumero] = useState("");
-  const [melosaMedidorAcumuladoInicialFotoUri, setMelosaMedidorAcumuladoInicialFotoUri] = useState<string | null>(null);
+  const [melosaQuantidadeAbastecidaTexto, setMelosaQuantidadeAbastecidaTexto] = useState("");
+  const [melosaQuantidadeAbastecidaFotoUri, setMelosaQuantidadeAbastecidaFotoUri] = useState<string | null>(null);
   const [melosaHorimetroEquipamentoNumero, setMelosaHorimetroEquipamentoNumero] = useState("");
   const [melosaHorimetroEquipamentoFotoUri, setMelosaHorimetroEquipamentoFotoUri] = useState<string | null>(null);
   const [melosaNaoTenhoHorimetro, setMelosaNaoTenhoHorimetro] = useState(true);
   const [melosaMotoristaEquipamentoTexto, setMelosaMotoristaEquipamentoTexto] = useState("");
   const [melosaEquipamentoOperadorFotoUri, setMelosaEquipamentoOperadorFotoUri] = useState<string | null>(null);
-  const [melosaMedidorAcumuladoFinalNumero, setMelosaMedidorAcumuladoFinalNumero] = useState("");
-  const [melosaMedidorAcumuladoFinalFotoUri, setMelosaMedidorAcumuladoFinalFotoUri] = useState<string | null>(null);
-
+  const [melosaAssinaturaOperadorDataUrl, setMelosaAssinaturaOperadorDataUrl] = useState<string | null>(null);
+  const [melosaAssinaturaMotoristaDataUrl, setMelosaAssinaturaMotoristaDataUrl] = useState<string | null>(null);
   const [melosaWdrKmText, setMelosaWdrKmText] = useState("");
   const [melosaWdrLitrosText, setMelosaWdrLitrosText] = useState("");
   const [melosaWdrCombustivelTipo, setMelosaWdrCombustivelTipo] = useState("DIESEL");
@@ -572,7 +597,7 @@ export default function App() {
       }
       return;
     }
-    if (screen.name === "melosa" && screen.step === "lacre_medidor") {
+    if (screen.name === "melosa" && screen.step === "resumo") {
       safeCaptureLocationAndAddress();
     }
   }, [screen]);
@@ -698,21 +723,24 @@ export default function App() {
     setMelosaObraCodigo(OBRAS[0]?.codigo ?? 229);
     setMelosaPlacaTexto("");
     setMelosaFornecedorTexto("");
+    setMelosaEquipamentoNomeTexto("");
+    setMelosaEquipamentoEmpresa("");
+    setMelosaEquipamentoQrOpen(false);
+    setMelosaEquipamentoQrLoading(false);
     setMelosaTanqueNumero(1);
     setMelosaRegKmText("");
     setMelosaRegLitrosText("");
     setMelosaRegCombustivelTipo("DIESEL_S10");
     setMelosaComprovanteFotoUri(null);
-    setMelosaMedidorAcumuladoInicialNumero("");
-    setMelosaMedidorAcumuladoInicialFotoUri(null);
+    setMelosaQuantidadeAbastecidaTexto("");
+    setMelosaQuantidadeAbastecidaFotoUri(null);
     setMelosaNaoTenhoHorimetro(true);
     setMelosaHorimetroEquipamentoNumero("");
     setMelosaHorimetroEquipamentoFotoUri(null);
     setMelosaMotoristaEquipamentoTexto("");
     setMelosaEquipamentoOperadorFotoUri(null);
-    setMelosaMedidorAcumuladoFinalNumero("");
-    setMelosaMedidorAcumuladoFinalFotoUri(null);
-
+    setMelosaAssinaturaOperadorDataUrl(null);
+    setMelosaAssinaturaMotoristaDataUrl(null);
     setMelosaWdrKmText("");
     setMelosaWdrLitrosText("");
     setMelosaWdrCombustivelTipo("DIESEL");
@@ -720,6 +748,62 @@ export default function App() {
     setLocalLatitude(null);
     setLocalLongitude(null);
     setLocalAddress(null);
+  }
+
+  async function handleMelosaEquipamentoQrScanned(qrData: string) {
+    if (!session?.access_token) {
+      Alert.alert("Sem sessão", "Faça login antes de ler o QR code.");
+      setMelosaEquipamentoQrOpen(false);
+      return;
+    }
+    if (!isOnline) {
+      Alert.alert("Sem internet", "A leitura do QR code precisa de conexão para buscar os dados do equipamento.");
+      setMelosaEquipamentoQrOpen(false);
+      return;
+    }
+
+    setMelosaEquipamentoQrLoading(true);
+    try {
+      const qrNormalized = normalizeEquipamentoQrScan(qrData);
+      const { equipamento } = await apiPost<{
+        equipamento: { ativo: string; nome: string | null; empresa: EquipamentoEmpresa; source: string };
+      }>("/v1/equipamentos/qr/lookup", session.access_token, {
+        qr: qrNormalized || qrData.trim(),
+        obra_codigo: melosaObraCodigo,
+      });
+      setMelosaFornecedorTexto(equipamento.ativo);
+      setMelosaEquipamentoNomeTexto(equipamento.nome?.trim() || "");
+      setMelosaEquipamentoEmpresa(equipamento.empresa);
+      setMelosaEquipamentoQrOpen(false);
+      const origem =
+        equipamento.source === "externo"
+          ? "Controle de Equipamentos"
+          : equipamento.source === "abast"
+            ? "Controle Abast"
+            : "cadastro local";
+      const nome = equipamento.nome && equipamento.nome !== equipamento.ativo ? `\n${equipamento.nome}` : "";
+      Alert.alert(
+        "Equipamento identificado",
+        `Ativo: ${equipamento.ativo}\nEmpresa: ${EQUIPAMENTO_EMPRESA_LABEL[equipamento.empresa]}${nome}\n\nFonte: ${origem}`,
+      );
+    } catch (e: unknown) {
+      const ativoLocal = parseAbastEquipamentoQrAtivo(qrData);
+      if (ativoLocal) {
+        setMelosaFornecedorTexto(ativoLocal);
+        setMelosaEquipamentoNomeTexto("");
+        setMelosaEquipamentoEmpresa("TERCEIRIZADO");
+        setMelosaEquipamentoQrOpen(false);
+        Alert.alert(
+          "Equipamento identificado (QR interno)",
+          `Ativo: ${ativoLocal}\n\nOs dados completos não puderam ser carregados da API. Confira o ativo e a empresa antes de salvar.`,
+        );
+        return;
+      }
+      setMelosaEquipamentoQrOpen(false);
+      Alert.alert("QR não reconhecido", e instanceof Error ? e.message : "Não foi possível identificar o equipamento.");
+    } finally {
+      setMelosaEquipamentoQrLoading(false);
+    }
   }
 
   type EnsureProfilePayload = {
@@ -1157,10 +1241,10 @@ export default function App() {
     setMelosaComprovanteFotoUri(asset.uri);
   }
 
-  async function pickMelosaMedidorAcumuladoInicialFromLibrary() {
+  async function pickMelosaQuantidadeAbastecidaFromLibrary() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto inicial acumulada do medidor da melosa.");
+      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto da quantidade abastecida.");
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1171,7 +1255,7 @@ export default function App() {
     if (result.canceled) return;
     const asset = result.assets?.[0];
     if (!asset?.uri) return;
-    setMelosaMedidorAcumuladoInicialFotoUri(asset.uri);
+    setMelosaQuantidadeAbastecidaFotoUri(asset.uri);
   }
 
   async function pickMelosaHorimetroEquipamentoFromLibrary() {
@@ -1242,27 +1326,10 @@ export default function App() {
     setMelosaEquipamentoOperadorFotoUri(asset.uri);
   }
 
-  async function pickMelosaMedidorAcumuladoFinalFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto final acumulada do medidor da melosa.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaMedidorAcumuladoFinalFotoUri(asset.uri);
-  }
-
-  async function pickMelosaMedidorAcumuladoFinalFromCamera() {
+  async function pickMelosaQuantidadeAbastecidaFromCamera() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto final acumulada do medidor da melosa.");
+      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto da quantidade abastecida.");
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -1273,24 +1340,7 @@ export default function App() {
     if (result.canceled) return;
     const asset = result.assets?.[0];
     if (!asset?.uri) return;
-    setMelosaMedidorAcumuladoFinalFotoUri(asset.uri);
-  }
-
-  async function pickMelosaMedidorAcumuladoInicialFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto inicial acumulada do medidor da melosa.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaMedidorAcumuladoInicialFotoUri(asset.uri);
+    setMelosaQuantidadeAbastecidaFotoUri(asset.uri);
   }
 
   async function pickMelosaTanqueFromLibrary() {
@@ -2104,12 +2154,12 @@ export default function App() {
       Alert.alert("Insumo obrigatório", "Selecione o insumo (Diesel ou Gasolina).");
       return;
     }
-    if (!melosaMedidorAcumuladoInicialNumero.trim()) {
-      Alert.alert("Medidor obrigatório", "Informe o número inicial acumulado do medidor da melosa.");
+    if (!melosaQuantidadeAbastecidaTexto.trim()) {
+      Alert.alert("Quantidade obrigatória", "Informe a quantidade abastecida em litros.");
       return;
     }
-    if (!melosaMedidorAcumuladoInicialFotoUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto inicial acumulada do medidor da melosa.");
+    if (!melosaQuantidadeAbastecidaFotoUri) {
+      Alert.alert("Foto obrigatória", "Selecione a foto da quantidade abastecida.");
       return;
     }
     if (!melosaMotoristaEquipamentoTexto.trim()) {
@@ -2120,28 +2170,19 @@ export default function App() {
       Alert.alert("Foto obrigatória", "Selecione a foto do equipamento junto com o operador/motorista.");
       return;
     }
-    if (!melosaMedidorAcumuladoFinalNumero.trim()) {
-      Alert.alert("Medidor obrigatório", "Informe o número final acumulado do medidor da melosa.");
+    if (!isMeaningfulSignatureDataUrl(melosaAssinaturaOperadorDataUrl)) {
+      Alert.alert("Assinatura obrigatória", "Peça ao operador da melosa para assinar no resumo.");
       return;
     }
-    if (!melosaMedidorAcumuladoFinalFotoUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto final acumulada do medidor da melosa.");
+    if (!isMeaningfulSignatureDataUrl(melosaAssinaturaMotoristaDataUrl)) {
+      Alert.alert("Assinatura obrigatória", "Peça ao motorista do equipamento para assinar no resumo.");
       return;
     }
-    const medidorInicial = parseMelosaMedidorNumero(melosaMedidorAcumuladoInicialNumero);
-    const medidorFinal = parseMelosaMedidorNumero(melosaMedidorAcumuladoFinalNumero);
-    if (medidorInicial == null || medidorFinal == null) {
-      Alert.alert("Medidor inválido", "Informe números válidos no medidor inicial e final.");
+    const litrosMelosa = parseMelosaMedidorNumero(melosaQuantidadeAbastecidaTexto);
+    if (litrosMelosa == null || litrosMelosa <= 0) {
+      Alert.alert("Quantidade inválida", "Informe uma quantidade abastecida válida em litros (maior que zero).");
       return;
     }
-    if (medidorFinal <= medidorInicial) {
-      Alert.alert(
-        "Medidor inválido",
-        "O número final deve ser maior que o inicial (litros abastecidos = final − inicial)."
-      );
-      return;
-    }
-    const litrosMelosa = medidorFinal - medidorInicial;
     let gpsLatitude = localLatitude;
     let gpsLongitude = localLongitude;
     let gpsAddress = localAddress;
@@ -2178,9 +2219,10 @@ export default function App() {
     }
     if (!userId) throw new Error("Usuário não encontrado para upload das fotos.");
 
-    const MELOSA_MEDIDOR_BUCKET = "melosa_medidor_acumulado";
+    const FOTO_QUANTIDADE_ABASTECIDA_BUCKET = "foto_quantidade_abastecida";
     const MELOSA_HORIMETRO_BUCKET = "melosa_horimetro_equipamento_abastecido";
     const MELOSA_EQUIPAMENTO_OPERADOR_BUCKET = "melosa_equipamento_operador";
+    const MELOSA_ASSINATURAS_BUCKET = "melosa_assinaturas";
     function extFromUri(uri: string) {
       const extMatch = uri.match(/\.(\w+)(?:\?|#|$)/);
       const ext = (extMatch?.[1] ?? "jpg").toLowerCase();
@@ -2203,13 +2245,30 @@ export default function App() {
       }
     }
 
-    const extMedidor = extFromUri(melosaMedidorAcumuladoInicialFotoUri as string);
-    const extOperador = extFromUri(melosaEquipamentoOperadorFotoUri as string);
-    const extMedidorFinal = extFromUri(melosaMedidorAcumuladoFinalFotoUri as string);
+    async function uploadBase64ToBucket(bucket: string, path: string, dataUrl: string, label: string) {
+      const { base64, contentType } = parseBase64DataUrl(dataUrl);
+      const arrayBuffer = base64ToArrayBuffer(base64);
+      const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
+        contentType,
+        upsert: true,
+      });
+      if (error) {
+        const msg = String(error.message ?? error);
+        const alreadyExists =
+          msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
+        if (!alreadyExists) {
+          throw new Error(`Falha ao enviar ${label}: ${msg}`);
+        }
+      }
+    }
 
-    const medidorInicialPath = `${userId}/melosa/medidor/inicial/${operationId}.${extMedidor}`;
-    const medidorFinalPath = `${userId}/melosa/medidor/final/${operationId}.${extMedidorFinal}`;
+    const extQuantidade = extFromUri(melosaQuantidadeAbastecidaFotoUri as string);
+    const extOperador = extFromUri(melosaEquipamentoOperadorFotoUri as string);
+
+    const quantidadePath = `${userId}/melosa/quantidade-abastecida/${operationId}.${extQuantidade}`;
     const operadorPath = `${userId}/melosa/equipamento-operador/${operationId}.${extOperador}`;
+    const assinaturaOperadorPath = `${userId}/melosa/assinaturas/operador/${operationId}.png`;
+    const assinaturaMotoristaPath = `${userId}/melosa/assinaturas/motorista/${operationId}.png`;
 
     const incluirHorimetro = !melosaNaoTenhoHorimetro;
     const hasMelosaHorimetroFoto = incluirHorimetro && !!melosaHorimetroEquipamentoFotoUri;
@@ -2226,16 +2285,10 @@ export default function App() {
 
     const uploads = [
       uploadToBucket(
-        MELOSA_MEDIDOR_BUCKET,
-        medidorInicialPath,
-        melosaMedidorAcumuladoInicialFotoUri as string,
-        "foto inicial do medidor da melosa"
-      ),
-      uploadToBucket(
-        MELOSA_MEDIDOR_BUCKET,
-        medidorFinalPath,
-        melosaMedidorAcumuladoFinalFotoUri as string,
-        "foto final do medidor da melosa"
+        FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+        quantidadePath,
+        melosaQuantidadeAbastecidaFotoUri as string,
+        "foto da quantidade abastecida"
       ),
       ...(hasMelosaHorimetroFoto && horimetroPath
         ? [
@@ -2253,6 +2306,18 @@ export default function App() {
         melosaEquipamentoOperadorFotoUri as string,
         "foto do equipamento com operador/motorista"
       ),
+      uploadBase64ToBucket(
+        MELOSA_ASSINATURAS_BUCKET,
+        assinaturaOperadorPath,
+        melosaAssinaturaOperadorDataUrl as string,
+        "assinatura do operador da melosa"
+      ),
+      uploadBase64ToBucket(
+        MELOSA_ASSINATURAS_BUCKET,
+        assinaturaMotoristaPath,
+        melosaAssinaturaMotoristaDataUrl as string,
+        "assinatura do motorista"
+      ),
     ];
 
     await Promise.all(uploads);
@@ -2265,6 +2330,9 @@ export default function App() {
       litros: litrosMelosa,
       placa_texto: melosaPlacaTexto.trim(),
       fornecedor_texto: melosaFornecedorTexto.trim(),
+      ativo_equipamento_empresa: melosaEquipamentoEmpresa || null,
+      ativo_equipamento_nome: melosaEquipamentoNomeTexto.trim() || null,
+      melosa_operador_nome: driverFullName.trim() || null,
       melosa_categoria: null,
       tanque_numero: melosaTanqueNumero,
 
@@ -2272,8 +2340,8 @@ export default function App() {
       melosa_litros_registro: null,
       melosa_combustivel_tipo_registro: null,
       melosa_comprovante_storage_path: null,
-      melosa_medidor_acumulado_inicial_numero: melosaMedidorAcumuladoInicialNumero.trim(),
-      melosa_medidor_acumulado_inicial_storage_path: medidorInicialPath,
+      melosa_quantidade_abastecida: melosaQuantidadeAbastecidaTexto.trim(),
+      melosa_quantidade_abastecida_storage_path: quantidadePath,
       melosa_horimetro_equipamento_abastecido_numero:
         incluirHorimetro && melosaHorimetroEquipamentoNumero.trim()
           ? melosaHorimetroEquipamentoNumero.trim()
@@ -2281,10 +2349,10 @@ export default function App() {
       melosa_horimetro_equipamento_abastecido_storage_path: incluirHorimetro ? horimetroPath ?? null : null,
       melosa_motorista_equipamento_abastecido: melosaMotoristaEquipamentoTexto.trim(),
       melosa_equipamento_operador_storage_path: operadorPath,
+      melosa_assinatura_operador_storage_path: assinaturaOperadorPath,
+      melosa_assinatura_motorista_storage_path: assinaturaMotoristaPath,
       melosa_lacre_numero: null,
       melosa_lacre_storage_path: null,
-      melosa_medidor_acumulado_final_numero: melosaMedidorAcumuladoFinalNumero.trim(),
-      melosa_medidor_acumulado_final_storage_path: medidorFinalPath,
 
       melosa_km_retirada: null,
       melosa_combustivel_tipo_retirada: melosaWdrCombustivelTipo.trim(),
@@ -2341,20 +2409,20 @@ export default function App() {
     }
 
     setMessage(null);
-    setScreen({ name: "melosa", step: "medidor_acumulado" });
+    setScreen({ name: "melosa", step: "quantidade_abastecida" });
   }
 
-  function continueMelosaMedidorAcumulado() {
+  function continueMelosaQuantidadeAbastecida() {
     if (!melosaWdrCombustivelTipo.trim()) {
       Alert.alert("Insumo obrigatório", "Selecione o insumo (Diesel ou Gasolina).");
       return;
     }
-    if (!melosaMedidorAcumuladoInicialNumero.trim()) {
-      Alert.alert("Medidor obrigatório", "Informe o número inicial acumulado do medidor da melosa.");
+    if (!melosaQuantidadeAbastecidaTexto.trim()) {
+      Alert.alert("Quantidade obrigatória", "Informe a quantidade abastecida em litros.");
       return;
     }
-    if (!melosaMedidorAcumuladoInicialFotoUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto inicial acumulada do medidor da melosa.");
+    if (!melosaQuantidadeAbastecidaFotoUri) {
+      Alert.alert("Foto obrigatória", "Selecione a foto da quantidade abastecida.");
       return;
     }
     setMessage(null);
@@ -2372,7 +2440,20 @@ export default function App() {
       return;
     }
     setMessage(null);
-    setScreen({ name: "melosa", step: "lacre_medidor" });
+    setScreen({ name: "melosa", step: "resumo" });
+  }
+
+  function continueMelosaResumo() {
+    if (!isMeaningfulSignatureDataUrl(melosaAssinaturaOperadorDataUrl)) {
+      Alert.alert("Assinatura obrigatória", "Peça ao operador da melosa para assinar.");
+      return;
+    }
+    if (!isMeaningfulSignatureDataUrl(melosaAssinaturaMotoristaDataUrl)) {
+      Alert.alert("Assinatura obrigatória", "Peça ao motorista do equipamento para assinar.");
+      return;
+    }
+    setMessage(null);
+    void submitMelosaWithdraw();
   }
 
   const toggleTheme = () => setThemeMode((m) => (m === "dark" ? "light" : "dark"));
@@ -2830,31 +2911,44 @@ export default function App() {
   if (screen.name === "melosa") {
     const melosaStep = screen.step;
     const isRegister = melosaStep === "register";
-    const isMedidorAcumulado = melosaStep === "medidor_acumulado";
+    const isQuantidadeAbastecida = melosaStep === "quantidade_abastecida";
     const isHorimetro = melosaStep === "horimetro";
-    const isLacreMedidor = melosaStep === "lacre_medidor";
+    const isResumo = melosaStep === "resumo";
+    const obraResumo = OBRAS.find((o) => o.codigo === melosaObraCodigo);
+    const obraResumoLabel = obraResumo ? `${obraResumo.codigo} - ${obraResumo.nome}` : String(melosaObraCodigo);
+    const equipamentoNomeResumo =
+      melosaEquipamentoNomeTexto.trim() || melosaFornecedorTexto.trim() || "—";
+    const horimetroResumoLabel = melosaNaoTenhoHorimetro
+      ? "—"
+      : melosaHorimetroEquipamentoNumero.trim() || "—";
+    const quantidadeResumoValor = melosaQuantidadeAbastecidaTexto.trim() || "—";
+    const insumoResumoLabel = melosaWdrCombustivelTipo === "GASOLINA" ? "Gasolina" : "Diesel";
     const melosaSubtitle = isRegister
       ? "Dados iniciais da retirada"
-      : isMedidorAcumulado
-        ? "Medidor da melosa"
+      : isQuantidadeAbastecida
+        ? "Quantidade abastecida"
         : isHorimetro
           ? "Horímetro, hodômetro e motorista"
-          : "Dados finais da melosa";
+          : isResumo
+            ? "Resumo e assinaturas"
+            : "Retirada melosa";
 
     const melosaPrimaryAction = isRegister
       ? continueMelosaRegister
-      : isMedidorAcumulado
-        ? continueMelosaMedidorAcumulado
+      : isQuantidadeAbastecida
+        ? continueMelosaQuantidadeAbastecida
         : isHorimetro
           ? continueMelosaHorimetro
-          : submitMelosaWithdraw;
-    const melosaPrimaryLabel = isLacreMedidor ? (busy ? "Salvando..." : "Salvar") : "Próximo";
+          : isResumo
+            ? continueMelosaResumo
+            : continueMelosaRegister;
+    const melosaPrimaryLabel = isResumo ? (busy ? "Salvando..." : "Salvar") : "Próximo";
 
     function melosaVoltar() {
       setMessage(null);
-      if (isMedidorAcumulado) setScreen({ name: "melosa", step: "register" });
-      else if (isHorimetro) setScreen({ name: "melosa", step: "medidor_acumulado" });
-      else if (isLacreMedidor) setScreen({ name: "melosa", step: "horimetro" });
+      if (isQuantidadeAbastecida) setScreen({ name: "melosa", step: "register" });
+      else if (isHorimetro) setScreen({ name: "melosa", step: "quantidade_abastecida" });
+      else if (isResumo) setScreen({ name: "melosa", step: "horimetro" });
     }
 
     const melosaActionFooter = (
@@ -2898,12 +2992,17 @@ export default function App() {
         <StatusBar style={barStyle} />
         <SafeAreaView style={styles.screenSafeArea}>
           <View style={styles.screenShell}>
-            <FormScreenScroll layoutKey={melosaStep}>
+            <FormScreenScroll
+              layoutKey={melosaStep}
+              scrollEnabled={!isResumo}
+              preferCenter={!isResumo}
+              keyboardDismissMode={isResumo ? "none" : "on-drag"}
+            >
               <CardMeasuredWrap
                 layout={layout}
                 isDarkMode={isDarkMode}
                 onBoundsChange={setCardBounds}
-                innerStyle={isLacreMedidor || isMedidorAcumulado || isHorimetro ? styles.glassInnerCompact : undefined}
+                innerStyle={isQuantidadeAbastecida || isHorimetro || isResumo ? styles.glassInnerCompact : undefined}
               >
               <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>
                 Retirada tanque melosa
@@ -2958,7 +3057,23 @@ export default function App() {
                     </>
                   )}
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Ativo do Equipamento</Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                    Ativo do Equipamento
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.secondaryButton,
+                      !isDarkMode ? styles.secondaryButtonLight : null,
+                      { marginBottom: 8 },
+                      melosaEquipamentoQrLoading ? { opacity: 0.6 } : null,
+                    ]}
+                    onPress={() => setMelosaEquipamentoQrOpen(true)}
+                    disabled={busy || melosaEquipamentoQrLoading}
+                  >
+                    <Text style={[styles.secondaryButtonText, !isDarkMode ? styles.secondaryButtonTextLight : null]}>
+                      {melosaEquipamentoQrLoading ? "A identificar equipamento…" : "Ler QR code do equipamento"}
+                    </Text>
+                  </TouchableOpacity>
                   <TextInput
                     value={melosaFornecedorTexto}
                     onChangeText={setMelosaFornecedorTexto}
@@ -2967,10 +3082,30 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     autoCapitalize="characters"
                   />
+
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                    Empresa do equipamento
+                  </Text>
+                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                    <Picker
+                      selectedValue={melosaEquipamentoEmpresa}
+                      onValueChange={(v) => setMelosaEquipamentoEmpresa(v as "" | EquipamentoEmpresa)}
+                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                    >
+                      <Picker.Item label="Selecione a empresa" value="" />
+                      {EQUIPAMENTO_EMPRESAS.map((empresa) => (
+                        <Picker.Item
+                          key={empresa}
+                          label={EQUIPAMENTO_EMPRESA_LABEL[empresa]}
+                          value={empresa}
+                        />
+                      ))}
+                    </Picker>
+                  </View>
                 </>
               ) : null}
 
-              {isMedidorAcumulado ? (
+              {isQuantidadeAbastecida ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Insumo</Text>
                   <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
@@ -2985,29 +3120,29 @@ export default function App() {
                   </View>
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
-                    Número Inicial Acumulado do Medidor da Melosa
+                    Quantidade Abastecida
                   </Text>
                   <TextInput
-                    value={melosaMedidorAcumuladoInicialNumero}
-                    onChangeText={setMelosaMedidorAcumuladoInicialNumero}
+                    value={melosaQuantidadeAbastecidaTexto}
+                    onChangeText={setMelosaQuantidadeAbastecidaTexto}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: 1542,3"
+                    placeholder="Ex.: 100"
                     placeholderTextColor={inputPlaceholderColor}
                     keyboardType="decimal-pad"
                   />
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
-                    Foto Inicial Acumulado do Medidor da Melosa
+                    Foto Quantidade Abastecida
                   </Text>
                   <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
-                    {melosaMedidorAcumuladoInicialFotoUri ? (
+                    {melosaQuantidadeAbastecidaFotoUri ? (
                       <>
                         <Image
-                          source={{ uri: melosaMedidorAcumuladoInicialFotoUri }}
+                          source={{ uri: melosaQuantidadeAbastecidaFotoUri }}
                           style={[styles.photoPreview, styles.photoPreviewCompact]}
                         />
                         <TouchableOpacity
                           style={styles.photoRemove}
-                          onPress={() => setMelosaMedidorAcumuladoInicialFotoUri(null)}
+                          onPress={() => setMelosaQuantidadeAbastecidaFotoUri(null)}
                           disabled={busy}
                         >
                           <Text style={styles.photoRemoveText}>Remover</Text>
@@ -3017,21 +3152,21 @@ export default function App() {
                       <Text
                         style={[styles.photoPlaceholder, styles.photoPlaceholderCompact, !isDarkMode ? styles.photoPlaceholderLight : null]}
                       >
-                        Selecione a foto inicial acumulada do medidor da melosa
+                        Selecione a foto da quantidade abastecida
                       </Text>
                     )}
                   </View>
                   <View style={styles.photoActionRow}>
                     <TouchableOpacity
                       style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMelosaMedidorAcumuladoInicialFromLibrary}
+                      onPress={pickMelosaQuantidadeAbastecidaFromLibrary}
                       disabled={busy}
                     >
                       <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMelosaMedidorAcumuladoInicialFromCamera}
+                      onPress={pickMelosaQuantidadeAbastecidaFromCamera}
                       disabled={busy}
                     >
                       <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
@@ -3194,70 +3329,131 @@ export default function App() {
                 </>
               ) : null}
 
-              {isLacreMedidor ? (
+              {isResumo ? (
                 <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
-                    Número final do acumulado do medidor da melosa
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
+                    Confira os dados antes de salvar
                   </Text>
-                  <TextInput
-                    value={melosaMedidorAcumuladoFinalNumero}
-                    onChangeText={setMelosaMedidorAcumuladoFinalNumero}
-                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: 5100"
-                    placeholderTextColor={inputPlaceholderColor}
-                    keyboardType="decimal-pad"
-                  />
-                  <Text
-                    style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}
-                    adjustsFontSizeToFit
-                    numberOfLines={2}
-                    minimumFontScale={0.85}
+
+                  <View
+                    style={[
+                      styles.melosaResumoQuantidadeHero,
+                      !isDarkMode ? styles.melosaResumoQuantidadeHeroLight : styles.melosaResumoQuantidadeHeroDark,
+                    ]}
                   >
-                    Foto final acumulado do medidor da melosa
-                  </Text>
-                  <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
-                    {melosaMedidorAcumuladoFinalFotoUri ? (
-                      <>
-                        <Image
-                          source={{ uri: melosaMedidorAcumuladoFinalFotoUri }}
-                          style={[styles.photoPreview, styles.photoPreviewCompact]}
-                        />
-                        <TouchableOpacity
-                          style={styles.photoRemove}
-                          onPress={() => setMelosaMedidorAcumuladoFinalFotoUri(null)}
-                          disabled={busy}
-                        >
-                          <Text style={styles.photoRemoveText}>Remover</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : (
+                    <Text
+                      style={[
+                        styles.melosaResumoQuantidadeLabel,
+                        !isDarkMode ? styles.melosaResumoQuantidadeLabelLight : styles.melosaResumoQuantidadeLabelDark,
+                      ]}
+                    >
+                      Quantidade abastecida
+                    </Text>
+                    <View style={styles.melosaResumoQuantidadeValueRow}>
                       <Text
-                        style={[styles.photoPlaceholder, styles.photoPlaceholderCompact, !isDarkMode ? styles.photoPlaceholderLight : null]}
+                        style={[
+                          styles.melosaResumoQuantidadeValue,
+                          !isDarkMode ? styles.melosaResumoQuantidadeValueLight : styles.melosaResumoQuantidadeValueDark,
+                        ]}
                       >
-                        Selecione a foto final acumulada do medidor da melosa
+                        {quantidadeResumoValor}
                       </Text>
-                    )}
+                      <Text
+                        style={[
+                          styles.melosaResumoQuantidadeUnit,
+                          !isDarkMode ? styles.melosaResumoQuantidadeUnitLight : styles.melosaResumoQuantidadeUnitDark,
+                        ]}
+                      >
+                        L
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.melosaResumoQuantidadeInsumo,
+                        !isDarkMode ? styles.melosaResumoQuantidadeInsumoLight : styles.melosaResumoQuantidadeInsumoDark,
+                      ]}
+                    >
+                      {insumoResumoLabel}
+                    </Text>
                   </View>
-                  <View style={styles.photoActionRow}>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMelosaMedidorAcumuladoFinalFromLibrary}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMelosaMedidorAcumuladoFinalFromCamera}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
-                    </TouchableOpacity>
+
+                  <ScrollView
+                    style={styles.melosaResumoSummaryScroll}
+                    nestedScrollEnabled
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                    bounces={false}
+                  >
+                    <View style={[styles.melosaResumoBox, !isDarkMode ? styles.melosaResumoBoxLight : styles.melosaResumoBoxDark]}>
+                    <View style={styles.melosaResumoRow}>
+                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                        Obra
+                      </Text>
+                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                        {obraResumoLabel}
+                      </Text>
+                    </View>
+                    <View style={styles.melosaResumoRow}>
+                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                        Ativo Melosa
+                      </Text>
+                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                        {melosaPlacaTexto.trim() || "—"}
+                      </Text>
+                    </View>
+                    <View style={styles.melosaResumoRow}>
+                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                        Ativo Equipamento
+                      </Text>
+                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                        {melosaFornecedorTexto.trim() || "—"}
+                      </Text>
+                    </View>
+                    <View style={styles.melosaResumoRow}>
+                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                        Nome do equipamento
+                      </Text>
+                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                        {equipamentoNomeResumo}
+                      </Text>
+                    </View>
+                    <View style={styles.melosaResumoRow}>
+                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                        Motorista do equipamento
+                      </Text>
+                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                        {melosaMotoristaEquipamentoTexto.trim() || "—"}
+                      </Text>
+                    </View>
+                    <View style={styles.melosaResumoRow}>
+                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                        Horímetro do equipamento
+                      </Text>
+                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                        {horimetroResumoLabel}
+                      </Text>
+                    </View>
+                    </View>
+                  </ScrollView>
+
+                  <View style={styles.melosaResumoSignatures}>
+                  <MelosaSignaturePad
+                    label={`Operador da melosa (${driverFullName.trim() || "—"})`}
+                    isDarkMode={isDarkMode}
+                    onSigned={setMelosaAssinaturaOperadorDataUrl}
+                    onClear={() => setMelosaAssinaturaOperadorDataUrl(null)}
+                  />
+                  <MelosaSignaturePad
+                    label={`Motorista do equipamento (${melosaMotoristaEquipamentoTexto.trim() || "—"})`}
+                    isDarkMode={isDarkMode}
+                    onSigned={setMelosaAssinaturaMotoristaDataUrl}
+                    onClear={() => setMelosaAssinaturaMotoristaDataUrl(null)}
+                  />
                   </View>
                 </>
               ) : null}
 
-              {isLacreMedidor && !isOnline ? (
+              {(isHorimetro || isResumo) && !isOnline ? (
                 <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 10 }]}>
                   Você está offline. Para enviar fotos, precisa estar online.
                 </Text>
@@ -3270,6 +3466,12 @@ export default function App() {
             {themeToggleOverlay}
           </View>
         </SafeAreaView>
+        <EquipamentoQrScanner
+          visible={melosaEquipamentoQrOpen}
+          isDarkMode={isDarkMode}
+          onClose={() => setMelosaEquipamentoQrOpen(false)}
+          onScanned={(data) => void handleMelosaEquipamentoQrScanned(data)}
+        />
       </View>
     );
   }
@@ -4490,6 +4692,104 @@ const styles = StyleSheet.create({
   melosaHorimetroToggleButtonTextLight: {
     color: lightTheme.textSecondary,
   },
+
+  melosaResumoBox: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+  },
+  melosaResumoBoxLight: {
+    borderColor: lightTheme.borderSubtle,
+    backgroundColor: lightTheme.surfaceMuted,
+  },
+  melosaResumoBoxDark: {
+    borderColor: "rgba(148,163,184,0.25)",
+    backgroundColor: "rgba(15,23,42,0.35)",
+  },
+  melosaResumoQuantidadeHero: {
+    marginTop: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 2,
+    alignItems: "center",
+    gap: 2,
+  },
+  melosaResumoQuantidadeHeroLight: {
+    borderColor: "#2563eb",
+    backgroundColor: "rgba(37,99,235,0.08)",
+  },
+  melosaResumoQuantidadeHeroDark: {
+    borderColor: "#60a5fa",
+    backgroundColor: "rgba(96,165,250,0.12)",
+  },
+  melosaResumoQuantidadeLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  melosaResumoQuantidadeLabelLight: { color: "#1d4ed8" },
+  melosaResumoQuantidadeLabelDark: { color: "#93c5fd" },
+  melosaResumoQuantidadeValueRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 4,
+    marginTop: 2,
+  },
+  melosaResumoQuantidadeValue: {
+    fontSize: 48,
+    fontWeight: "900",
+    lineHeight: 52,
+    letterSpacing: -1,
+  },
+  melosaResumoQuantidadeValueLight: { color: "#0f172a" },
+  melosaResumoQuantidadeValueDark: { color: "#f8fafc" },
+  melosaResumoQuantidadeUnit: {
+    fontSize: 28,
+    fontWeight: "800",
+    lineHeight: 40,
+    marginBottom: 4,
+  },
+  melosaResumoQuantidadeUnitLight: { color: "#334155" },
+  melosaResumoQuantidadeUnitDark: { color: "#cbd5e1" },
+  melosaResumoQuantidadeInsumo: {
+    marginTop: 2,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  melosaResumoQuantidadeInsumoLight: { color: "#475569" },
+  melosaResumoQuantidadeInsumoDark: { color: "#94a3b8" },
+  melosaResumoSummaryScroll: {
+    maxHeight: 190,
+    marginTop: 4,
+  },
+  melosaResumoSignatures: {
+    marginTop: 4,
+  },
+  melosaResumoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  melosaResumoLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  melosaResumoLabelLight: { color: "#64748b" },
+  melosaResumoLabelDark: { color: "#94a3b8" },
+  melosaResumoValue: {
+    flex: 1.2,
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "right",
+  },
+  melosaResumoValueLight: { color: "#0f172a" },
+  melosaResumoValueDark: { color: "#f8fafc" },
 
   homeRoot: {
     flex: 1,

@@ -16,12 +16,16 @@ export const env = {
   // Bucket da foto de confirmação do abastecimento na retirada
   CONFIRMACAO_ABASTECIMENTO_BUCKET: (process.env.CONFIRMACAO_ABASTECIMENTO_BUCKET ?? "confirmacao_abastecimento") as string,
   RETIRADA_HORIMETRO_BUCKET: (process.env.RETIRADA_HORIMETRO_BUCKET ?? "retirada_horimetro") as string,
-  // Bucket da foto inicial acumulada do medidor da melosa
-  MELOSA_MEDIDOR_ACUMULADO_BUCKET: (process.env.MELOSA_MEDIDOR_ACUMULADO_BUCKET ?? "melosa_medidor_acumulado") as string,
+  // Bucket da foto da quantidade abastecida na retirada melosa
+  FOTO_QUANTIDADE_ABASTECIDA_BUCKET: (process.env.FOTO_QUANTIDADE_ABASTECIDA_BUCKET ??
+    "foto_quantidade_abastecida") as string,
   MELOSA_HORIMETRO_EQUIPAMENTO_ABASTECIDO_BUCKET: (process.env.MELOSA_HORIMETRO_EQUIPAMENTO_ABASTECIDO_BUCKET ??
     "melosa_horimetro_equipamento_abastecido") as string,
   MELOSA_EQUIPAMENTO_OPERADOR_BUCKET: (process.env.MELOSA_EQUIPAMENTO_OPERADOR_BUCKET ?? "melosa_equipamento_operador") as string,
   MELOSA_LACRE_BUCKET: (process.env.MELOSA_LACRE_BUCKET ?? "melosa_lacre") as string,
+  MELOSA_ASSINATURAS_BUCKET: (process.env.MELOSA_ASSINATURAS_BUCKET ?? "melosa_assinaturas") as string,
+  EQUIPAMENTOS_DB_URL: process.env.EQUIPAMENTOS_DB_URL as string | undefined,
+  EQUIPAMENTOS_QR_PUBLIC_BASE_URL: process.env.EQUIPAMENTOS_QR_PUBLIC_BASE_URL as string | undefined,
   PORT: Number(process.env.PORT ?? 3001),
 };
 
@@ -51,10 +55,11 @@ export const envValidated = {
   MEDIDOR_TANQUE_BUCKET: env.MEDIDOR_TANQUE_BUCKET,
   CONFIRMACAO_ABASTECIMENTO_BUCKET: env.CONFIRMACAO_ABASTECIMENTO_BUCKET,
   RETIRADA_HORIMETRO_BUCKET: env.RETIRADA_HORIMETRO_BUCKET,
-  MELOSA_MEDIDOR_ACUMULADO_BUCKET: env.MELOSA_MEDIDOR_ACUMULADO_BUCKET,
+  FOTO_QUANTIDADE_ABASTECIDA_BUCKET: env.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
   MELOSA_HORIMETRO_EQUIPAMENTO_ABASTECIDO_BUCKET: env.MELOSA_HORIMETRO_EQUIPAMENTO_ABASTECIDO_BUCKET,
   MELOSA_EQUIPAMENTO_OPERADOR_BUCKET: env.MELOSA_EQUIPAMENTO_OPERADOR_BUCKET,
   MELOSA_LACRE_BUCKET: env.MELOSA_LACRE_BUCKET,
+  MELOSA_ASSINATURAS_BUCKET: env.MELOSA_ASSINATURAS_BUCKET,
   PORT: env.PORT,
 };
 

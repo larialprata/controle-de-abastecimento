@@ -2,11 +2,9 @@ import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { criarCicloRetiradaTanque, vincularAbastecimentoAoCicloAberto } from "../lib/melosaCiclo";
-import {
-  avaliarContinuidadeAbastecimentoMelosa,
-  parseMedidorNumero,
-} from "../lib/melosaMedidorContinuidade";
+import { parseMedidorNumero } from "../lib/melosaMedidorContinuidade";
 import { envValidated } from "../config";
+import { resolveEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 
 const router = Router();
@@ -37,6 +35,39 @@ async function storageObjectExists(
     return false;
   }
   return listed?.some((f) => f.name === fileName) ?? false;
+}
+
+const MELOSA_PHOTO_BUCKETS = [
+  envValidated.MELOSA_ASSINATURAS_BUCKET,
+  envValidated.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+  envValidated.MELOSA_HORIMETRO_EQUIPAMENTO_ABASTECIDO_BUCKET,
+  envValidated.MELOSA_EQUIPAMENTO_OPERADOR_BUCKET,
+  envValidated.MELOSA_LACRE_BUCKET,
+  "melosa_medidor_acumulado",
+  "melosa_comprovantes",
+  "melosa_tanques",
+  "melosa_tanque",
+] as const;
+
+async function findMelosaStorageFile(
+  service: ReturnType<typeof createSupabaseServiceRole>,
+  rawPath: string,
+): Promise<{ bucket: string; path: string } | null> {
+  const path = rawPath.trim().replace(/^\/+/, "");
+  if (!path) return null;
+
+  for (const bucket of MELOSA_PHOTO_BUCKETS) {
+    const { error } = await service.storage.from(bucket).download(path);
+    if (!error) return { bucket, path };
+  }
+  return null;
+}
+
+function mimeFromStoragePath(storagePath: string): string {
+  const ext = storagePath.split(".").pop()?.toLowerCase();
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "webp") return "image/webp";
+  return "image/png";
 }
 
 function parseMedidorMelosaNumero(value: string | null | undefined): number | null {
@@ -86,12 +117,10 @@ const movimentoSchema = z.object({
   melosa_litros_registro: z.number().min(0).optional().nullable(),
   melosa_combustivel_tipo_registro: z.string().optional().nullable(),
   melosa_comprovante_storage_path: z.string().optional().nullable(),
-  melosa_medidor_acumulado_inicial_numero: z.string().optional().nullable(),
-  melosa_medidor_acumulado_inicial_storage_path: z.string().optional().nullable(),
+  melosa_quantidade_abastecida: z.string().optional().nullable(),
+  melosa_quantidade_abastecida_storage_path: z.string().optional().nullable(),
   melosa_lacre_numero: z.string().optional().nullable(),
   melosa_lacre_storage_path: z.string().optional().nullable(),
-  melosa_medidor_acumulado_final_numero: z.string().optional().nullable(),
-  melosa_medidor_acumulado_final_storage_path: z.string().optional().nullable(),
   melosa_horimetro_equipamento_abastecido_numero: z.string().optional().nullable(),
   melosa_horimetro_equipamento_abastecido_storage_path: z.string().optional().nullable(),
   melosa_motorista_equipamento_abastecido: z.string().optional().nullable(),
@@ -107,6 +136,11 @@ const movimentoSchema = z.object({
   fornecedor_texto: z.string().optional().nullable(),
   ativo_melosa_texto: z.string().optional().nullable(),
   ativo_equipamento_texto: z.string().optional().nullable(),
+  ativo_equipamento_empresa: z.string().optional().nullable(),
+  ativo_equipamento_nome: z.string().optional().nullable(),
+  melosa_operador_nome: z.string().optional().nullable(),
+  melosa_assinatura_operador_storage_path: z.string().optional().nullable(),
+  melosa_assinatura_motorista_storage_path: z.string().optional().nullable(),
   tanque_numero: tanqueNumeroSchema.optional().nullable(),
   local_latitude: z.number().optional().nullable(),
   local_longitude: z.number().optional().nullable(),
@@ -122,8 +156,8 @@ const melosaUpdateSchema = z
     melosa_km_retirada: z.number().min(0).optional().nullable(),
     melosa_combustivel_tipo_registro: z.string().optional().nullable(),
     melosa_combustivel_tipo_retirada: z.string().optional().nullable(),
-    melosa_medidor_acumulado_inicial_numero: z.string().optional().nullable(),
-    melosa_medidor_acumulado_inicial_storage_path: z.string().optional().nullable(),
+    melosa_quantidade_abastecida: z.string().optional().nullable(),
+    melosa_quantidade_abastecida_storage_path: z.string().optional().nullable(),
     ativo_melosa_texto: z.string().optional().nullable(),
     ativo_equipamento_texto: z.string().optional().nullable(),
     placa_texto: z.string().optional().nullable(),
@@ -172,12 +206,10 @@ const MELOSA_DB_COLUMN_KEYS = [
   "melosa_litros_registro",
   "melosa_combustivel_tipo_registro",
   "melosa_comprovante_storage_path",
-  "melosa_medidor_acumulado_inicial_numero",
-  "melosa_medidor_acumulado_inicial_storage_path",
+  "melosa_quantidade_abastecida",
+  "melosa_quantidade_abastecida_storage_path",
   "melosa_lacre_numero",
   "melosa_lacre_storage_path",
-  "melosa_medidor_acumulado_final_numero",
-  "melosa_medidor_acumulado_final_storage_path",
   "melosa_horimetro_equipamento_abastecido_numero",
   "melosa_horimetro_equipamento_abastecido_storage_path",
   "melosa_motorista_equipamento_abastecido",
@@ -188,14 +220,16 @@ const MELOSA_DB_COLUMN_KEYS = [
   "melosa_tanque_storage_path",
   "ativo_melosa_texto",
   "ativo_equipamento_texto",
+  "ativo_equipamento_empresa",
+  "ativo_equipamento_nome",
+  "melosa_operador_nome",
+  "melosa_assinatura_operador_storage_path",
+  "melosa_assinatura_motorista_storage_path",
   "tanque_numero",
   "local_latitude",
   "local_longitude",
   "local_address",
   "obs",
-  "medidor_final_anterior",
-  "medidor_desvio_litros",
-  "medidor_continuidade_status",
 ] as const;
 
 function mapMelosaAtivoFields<T extends Record<string, unknown>>(row: T): T {
@@ -359,22 +393,43 @@ router.get("/melosa/photo-url", requireAuth, async (req: AuthedRequest, res) => 
     if (!rawPath) return res.status(400).json({ error: "path é obrigatório" });
 
     const service = createSupabaseServiceRole();
-    const candidates = [
-      "melosa_medidor_acumulado",
-      "melosa_horimetro_equipamento_abastecido",
-      "melosa_equipamento_operador",
-      "melosa_lacre",
-      "melosa_comprovantes",
-      "melosa_tanques",
-      "melosa_tanque",
-    ];
+    const found = await findMelosaStorageFile(service, rawPath);
+    if (!found) return res.status(404).json({ error: "Foto não encontrada no Storage" });
 
-    for (const bucket of candidates) {
-      const { data, error } = await service.storage.from(bucket).createSignedUrl(rawPath, 3600);
-      if (!error && data?.signedUrl) return res.json({ url: data.signedUrl, bucket });
+    const { data, error } = await service.storage.from(found.bucket).createSignedUrl(found.path, 3600);
+    if (error || !data?.signedUrl) {
+      return res.status(404).json({ error: error?.message ?? "Foto não encontrada no Storage" });
+    }
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    return res.json({ url: data.signedUrl, bucket: found.bucket });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+router.get("/melosa/photo-data", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const rawPath = typeof req.query.path === "string" ? req.query.path.trim() : "";
+    if (!rawPath) return res.status(400).json({ error: "path é obrigatório" });
+
+    const service = createSupabaseServiceRole();
+    const found = await findMelosaStorageFile(service, rawPath);
+    if (!found) return res.status(404).json({ error: "Foto não encontrada no Storage" });
+
+    const { data, error } = await service.storage.from(found.bucket).download(found.path);
+    if (error || !data) {
+      return res.status(404).json({ error: error?.message ?? "Foto não encontrada no Storage" });
     }
 
-    return res.status(404).json({ error: "Foto não encontrada no Storage" });
+    const buf = Buffer.from(await data.arrayBuffer());
+    const contentType = mimeFromStoragePath(found.path);
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    return res.json({
+      dataUrl: `data:${contentType};base64,${buf.toString("base64")}`,
+      bucket: found.bucket,
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
@@ -567,6 +622,9 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       (payload.ativo_melosa_texto?.trim() || payload.placa_texto?.trim() || "").trim() || null;
     const fornecedorNorm =
       (payload.ativo_equipamento_texto?.trim() || payload.fornecedor_texto?.trim() || "").trim() || null;
+    const equipamentoEmpresaNorm = payload.ativo_equipamento_empresa
+      ? resolveEquipamentoEmpresa(payload.ativo_equipamento_empresa)
+      : null;
     const tanqueNum = payload.tanque_numero;
 
     const needsVeiculoMeta =
@@ -684,22 +742,26 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       if (categoria != null && categoria !== "ESTACIONARIA" && categoria !== "MOVEL") {
         return res.status(400).json({ error: "melosa_categoria inválido (use ESTACIONARIA ou MOVEL)" });
       }
-      if (!payload.melosa_medidor_acumulado_inicial_numero?.trim()) {
-        return res.status(400).json({ error: "melosa_medidor_acumulado_inicial_numero é obrigatório" });
+      if (!payload.melosa_quantidade_abastecida?.trim()) {
+        return res.status(400).json({ error: "melosa_quantidade_abastecida é obrigatório" });
       }
-      if (!payload.melosa_medidor_acumulado_inicial_storage_path?.trim()) {
-        return res.status(400).json({ error: "melosa_medidor_acumulado_inicial_storage_path é obrigatório" });
+      const litrosMelosaCalculados = parseMedidorMelosaNumero(payload.melosa_quantidade_abastecida);
+      if (litrosMelosaCalculados == null || litrosMelosaCalculados <= 0) {
+        return res.status(400).json({ error: "Quantidade abastecida inválida (informe litros maior que zero)" });
       }
-      const medidorInicialOk = await storageObjectExists(
+      if (!payload.melosa_quantidade_abastecida_storage_path?.trim()) {
+        return res.status(400).json({ error: "melosa_quantidade_abastecida_storage_path é obrigatório" });
+      }
+      const quantidadeFotoOk = await storageObjectExists(
         service,
-        envValidated.MELOSA_MEDIDOR_ACUMULADO_BUCKET,
-        payload.melosa_medidor_acumulado_inicial_storage_path
+        envValidated.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+        payload.melosa_quantidade_abastecida_storage_path,
       );
-      if (!medidorInicialOk) {
+      if (!quantidadeFotoOk) {
         return res.status(400).json({
-          error: "Foto inicial acumulada do medidor da melosa não encontrada no Storage",
-          bucket: envValidated.MELOSA_MEDIDOR_ACUMULADO_BUCKET,
-          path: payload.melosa_medidor_acumulado_inicial_storage_path,
+          error: "Foto da quantidade abastecida não encontrada no Storage",
+          bucket: envValidated.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+          path: payload.melosa_quantidade_abastecida_storage_path,
         });
       }
 
@@ -732,6 +794,29 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         });
       }
 
+      if (!payload.melosa_assinatura_operador_storage_path?.trim()) {
+        return res.status(400).json({ error: "melosa_assinatura_operador_storage_path é obrigatório" });
+      }
+      if (!payload.melosa_assinatura_motorista_storage_path?.trim()) {
+        return res.status(400).json({ error: "melosa_assinatura_motorista_storage_path é obrigatório" });
+      }
+      const assinaturaOperadorOk = await storageObjectExists(
+        service,
+        envValidated.MELOSA_ASSINATURAS_BUCKET,
+        payload.melosa_assinatura_operador_storage_path,
+      );
+      if (!assinaturaOperadorOk) {
+        return res.status(400).json({ error: "Assinatura do operador da melosa não encontrada no Storage" });
+      }
+      const assinaturaMotoristaOk = await storageObjectExists(
+        service,
+        envValidated.MELOSA_ASSINATURAS_BUCKET,
+        payload.melosa_assinatura_motorista_storage_path,
+      );
+      if (!assinaturaMotoristaOk) {
+        return res.status(400).json({ error: "Assinatura do motorista não encontrada no Storage" });
+      }
+
       const lacreNumero = payload.melosa_lacre_numero?.trim() ?? "";
       const lacrePath = payload.melosa_lacre_storage_path?.trim() ?? "";
       if (lacreNumero && !lacrePath) {
@@ -742,44 +827,6 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         if (!lacreOk) {
           return res.status(400).json({ error: "Foto do lacre não encontrada no Storage" });
         }
-      }
-
-      if (!payload.melosa_medidor_acumulado_final_numero?.trim()) {
-        return res.status(400).json({ error: "melosa_medidor_acumulado_final_numero é obrigatório" });
-      }
-      const medidorInicial = parseMedidorMelosaNumero(payload.melosa_medidor_acumulado_inicial_numero);
-      const medidorFinal = parseMedidorMelosaNumero(payload.melosa_medidor_acumulado_final_numero);
-      if (medidorInicial == null || medidorFinal == null) {
-        return res.status(400).json({ error: "Números do medidor inicial e final inválidos" });
-      }
-      if (medidorFinal <= medidorInicial) {
-        return res.status(400).json({
-          error: "O número final acumulado do medidor deve ser maior que o inicial (litros = final − inicial)",
-        });
-      }
-      const litrosMelosaCalculados = medidorFinal - medidorInicial;
-
-      let medidorContinuidade: Awaited<ReturnType<typeof avaliarContinuidadeAbastecimentoMelosa>> | null = null;
-      try {
-        medidorContinuidade = await avaliarContinuidadeAbastecimentoMelosa(service, {
-          ativoMelosa: placaNorm ?? "",
-          medidorInicialInformado: medidorInicial,
-          excludeOperationId: payload.operation_id,
-        });
-      } catch (contErr: unknown) {
-        console.warn("[melosa_medidor] continuidade:", contErr);
-      }
-
-      if (!payload.melosa_medidor_acumulado_final_storage_path?.trim()) {
-        return res.status(400).json({ error: "melosa_medidor_acumulado_final_storage_path é obrigatório" });
-      }
-      const medidorFinalOk = await storageObjectExists(
-        service,
-        envValidated.MELOSA_MEDIDOR_ACUMULADO_BUCKET,
-        payload.melosa_medidor_acumulado_final_storage_path
-      );
-      if (!medidorFinalOk) {
-        return res.status(400).json({ error: "Foto final acumulada do medidor da melosa não encontrada no Storage" });
       }
 
       const insertRowMelosa = {
@@ -794,12 +841,10 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         melosa_litros_registro: payload.melosa_litros_registro ?? null,
         melosa_combustivel_tipo_registro: payload.melosa_combustivel_tipo_registro ?? null,
         melosa_comprovante_storage_path: payload.melosa_comprovante_storage_path ?? null,
-        melosa_medidor_acumulado_inicial_numero: payload.melosa_medidor_acumulado_inicial_numero ?? null,
-        melosa_medidor_acumulado_inicial_storage_path: payload.melosa_medidor_acumulado_inicial_storage_path ?? null,
+        melosa_quantidade_abastecida: payload.melosa_quantidade_abastecida ?? null,
+        melosa_quantidade_abastecida_storage_path: payload.melosa_quantidade_abastecida_storage_path ?? null,
         melosa_lacre_numero: lacreNumero || null,
         melosa_lacre_storage_path: lacrePath || null,
-        melosa_medidor_acumulado_final_numero: payload.melosa_medidor_acumulado_final_numero ?? null,
-        melosa_medidor_acumulado_final_storage_path: payload.melosa_medidor_acumulado_final_storage_path ?? null,
         melosa_horimetro_equipamento_abastecido_numero: payload.melosa_horimetro_equipamento_abastecido_numero ?? null,
         melosa_horimetro_equipamento_abastecido_storage_path:
           payload.melosa_horimetro_equipamento_abastecido_storage_path ?? null,
@@ -813,15 +858,16 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
 
         ativo_melosa_texto: placaNorm,
         ativo_equipamento_texto: fornecedorNorm,
+        ativo_equipamento_empresa: equipamentoEmpresaNorm,
+        ativo_equipamento_nome: payload.ativo_equipamento_nome?.trim() || null,
+        melosa_operador_nome: payload.melosa_operador_nome?.trim() || null,
+        melosa_assinatura_operador_storage_path: payload.melosa_assinatura_operador_storage_path ?? null,
+        melosa_assinatura_motorista_storage_path: payload.melosa_assinatura_motorista_storage_path ?? null,
         tanque_numero: tanqueNum,
         local_latitude: payload.local_latitude ?? null,
         local_longitude: payload.local_longitude ?? null,
         local_address: payload.local_address ?? null,
         obs: payload.obs ?? null,
-
-        medidor_final_anterior: medidorContinuidade?.medidor_final_anterior ?? null,
-        medidor_desvio_litros: medidorContinuidade?.medidor_desvio_litros ?? null,
-        medidor_continuidade_status: medidorContinuidade?.status ?? null,
       };
 
       const { error } = await service
@@ -845,14 +891,6 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       return res.json({
         ok: true,
         operation_id: payload.operation_id,
-        medidor_continuidade: medidorContinuidade
-          ? {
-              status: medidorContinuidade.status,
-              medidor_esperado: medidorContinuidade.medidor_esperado,
-              medidor_informado: medidorContinuidade.medidor_informado,
-              medidor_desvio_litros: medidorContinuidade.medidor_desvio_litros,
-            }
-          : null,
       });
     }
 

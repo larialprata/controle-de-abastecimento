@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { createClient } from "@supabase/supabase-js";
 import { resolveMobilidadeEquipamento } from "../lib/equipamentoMobilidade";
+import { parseObraCodigoInput } from "../lib/obraCodigo";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const XLSX = require(path.join(__dirname, "../../../web/node_modules/xlsx")) as typeof import("xlsx");
@@ -92,7 +93,7 @@ function loadRows(filePath: string): ImportRow[] {
 
     const nome = (iNome >= 0 ? String(row[iNome] ?? "").trim() : "") || ativo;
     const obraRaw = iObra >= 0 ? String(row[iObra] ?? "").trim() : "";
-    const obra_codigo = /^\d+$/.test(obraRaw) ? Number(obraRaw) : null;
+    const obra_codigo = obraRaw ? parseObraCodigoInput(obraRaw) : null;
     const mobilidade = resolveMobilidadeEquipamento(nome, iMob >= 0 ? parseMobilidade(row[iMob]) : null);
 
     map.set(ativo.toLowerCase(), { ativo, nome, obra_codigo, mobilidade });

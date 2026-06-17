@@ -135,8 +135,7 @@ type MelosaRow = MovimentoMelosaRow &
     melosa_horimetro_equipamento_abastecido_numero?: string | null;
     melosa_km_registro?: number | null;
     melosa_km_retirada?: number | null;
-    melosa_medidor_acumulado_inicial_numero?: string | null;
-    melosa_medidor_acumulado_final_numero?: string | null;
+    melosa_quantidade_abastecida?: string | null;
     melosa_motorista_equipamento_abastecido?: string | null;
   };
 
@@ -239,11 +238,8 @@ function litrosRetiradaTanqueRow(m: TanqueRow): number {
 }
 
 function litrosMelosaRow(m: MelosaRow): number {
-  const fromMedidor = calcQuantidadeLitrosFromMedidores(
-    m.melosa_medidor_acumulado_inicial_numero,
-    m.melosa_medidor_acumulado_final_numero,
-  );
-  if (fromMedidor != null) return fromMedidor;
+  const fromQuantidade = parseMedidorNumero(m.melosa_quantidade_abastecida);
+  if (fromQuantidade != null && fromQuantidade > 0) return fromQuantidade;
   return litrosEntrada(m.litros);
 }
 
@@ -255,10 +251,9 @@ function medidorDetalheTanque(m: TanqueRow): string {
 }
 
 function medidorDetalheMelosa(m: MelosaRow): string {
-  const ini = m.melosa_medidor_acumulado_inicial_numero;
-  const fin = m.melosa_medidor_acumulado_final_numero;
-  if (ini == null && fin == null) return "";
-  return `Medidor acumulado: ${ini ?? "—"} → ${fin ?? "—"}`;
+  const qtd = m.melosa_quantidade_abastecida;
+  if (qtd == null || String(qtd).trim() === "") return "";
+  return `Quantidade abastecida: ${qtd}`;
 }
 
 function parseMedidorNumero(v: unknown): number | null {
@@ -297,18 +292,11 @@ function buildAnaliseAbastecimentosVsSobra(
 
     const sobraAntes = accRecebido - accAbast - accDevolvido;
     const raw = rawPorKey.get(ev.key);
-    const medIniStr = String(raw?.melosa_medidor_acumulado_inicial_numero ?? "").trim();
-    const medFinStr = String(raw?.melosa_medidor_acumulado_final_numero ?? "").trim();
-    const medIni = parseMedidorNumero(raw?.melosa_medidor_acumulado_inicial_numero);
-    const medFin = parseMedidorNumero(raw?.melosa_medidor_acumulado_final_numero);
-
-    let litrosParaEquipamento: number | null = null;
-    if (medIni != null && medFin != null && medFin > medIni) {
-      litrosParaEquipamento = medFin - medIni;
-    }
+    const quantidadeStr = String(raw?.melosa_quantidade_abastecida ?? "").trim();
+    const litrosParaEquipamento = parseMedidorNumero(raw?.melosa_quantidade_abastecida);
 
     const litrosEfetivos = litrosParaEquipamento ?? ev.litros;
-    const litrosSaidaMelosaAntesChegar = medIni != null ? sobraAntes - medIni : null;
+    const litrosSaidaMelosaAntesChegar = null;
     const litrosNaMelosaApos = null;
     const sobraContabilApos = sobraAntes - litrosEfetivos;
 
@@ -344,13 +332,9 @@ function buildAnaliseAbastecimentosVsSobra(
 
     if (litrosParaEquipamento != null && Math.abs(litrosParaEquipamento - ev.litros) > 0.05) {
       alertas.push(
-        `Litros do registo (${fmtLitrosDashboard(ev.litros)} L) difere do medidor fin − ini (${fmtLitrosDashboard(litrosParaEquipamento)} L).`,
+        `Litros do registo (${fmtLitrosDashboard(ev.litros)} L) difere da quantidade abastecida (${fmtLitrosDashboard(litrosParaEquipamento)} L).`,
       );
       status = "atencao";
-    }
-    if (medIni != null && medFin != null && medFin <= medIni) {
-      alertas.push("Medidor final deve ser maior que o inicial (litros abastecidos = final − inicial).");
-      status = "inconsistente";
     }
     if (litrosEfetivos > sobraAntes + 0.05) {
       alertas.push(
@@ -359,9 +343,7 @@ function buildAnaliseAbastecimentosVsSobra(
       status = "inconsistente";
     }
     if (litrosSaidaMelosaAntesChegar != null && litrosSaidaMelosaAntesChegar < -0.05) {
-      alertas.push(
-        `Leitura ao chegar (${fmtLitrosDashboard(medIni!)} L) maior que a sobra contábil (${fmtLitrosDashboard(sobraAntes)} L) — conferir medidor ou registos anteriores.`,
-      );
+      alertas.push("Conferir registos anteriores — sobra contábil inconsistente.");
       status = "inconsistente";
     }
 
@@ -371,8 +353,8 @@ function buildAnaliseAbastecimentosVsSobra(
       equipamento: ev.equipamento,
       responsavel: ev.responsavel,
       sobraAntesLitros: sobraAntes,
-      medidorInicial: medIniStr || "—",
-      medidorFinal: medFinStr || "—",
+      medidorInicial: quantidadeStr || "—",
+      medidorFinal: "—",
       litrosParaEquipamento,
       litrosSaidaMelosaAntesChegar,
       limiteConsumoMelosaPct: limiteAceitavelPct,

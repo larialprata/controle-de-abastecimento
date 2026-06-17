@@ -6,6 +6,7 @@ const SNIPPET = `
 
 expoAutolinking {
   projectRoot = settings.rootDir.parentFile
+  searchPaths = ["../node_modules"]
 }
 `;
 

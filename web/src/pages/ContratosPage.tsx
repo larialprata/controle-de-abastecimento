@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Plus, X } from "lucide-react";
 import { useAuth } from "../state/AuthContext";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
+import { parseObraCodigoInput } from "../lib/obraCodigo";
 import { glassField, glassPanel } from "../lib/glass";
 import {
   EMPRESA_LABEL,
@@ -86,9 +87,9 @@ export default function ContratosPage() {
       setAddError("Informe o código e o nome da obra.");
       return;
     }
-    const codigo = Number(codigoTrim.replace(/\D/g, ""));
-    if (!Number.isFinite(codigo) || codigo <= 0) {
-      setAddError("Código inválido. Use um número inteiro positivo.");
+    const codigo = parseObraCodigoInput(codigoTrim);
+    if (codigo == null) {
+      setAddError("Código inválido. Ex.: 230 ou 00.230");
       return;
     }
 

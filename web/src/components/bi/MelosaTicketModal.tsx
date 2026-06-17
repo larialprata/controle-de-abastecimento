@@ -1,6 +1,7 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Printer, X } from "lucide-react";
 import type { ObraEmpresa } from "../../lib/obrasEmpresa";
+import { enrichMelosaTicketRowsWithSignatures } from "../../lib/melosaPhotoUrl";
 import DimensionalAbastecimentoTicket, {
   type DimensionalAbastecimentoRow,
 } from "./DimensionalAbastecimentoTicket";
@@ -17,12 +18,17 @@ export type MelosaTicketRow = {
   equipamento: string;
   obra: string;
   observacoes: string;
+  assinaturaMotoristaPath?: string | null;
+  assinaturaOperadorPath?: string | null;
+  assinaturaMotoristaUrl?: string | null;
+  assinaturaOperadorUrl?: string | null;
 };
 
 type Props = {
   rows: MelosaTicketRow[];
   variant: ObraEmpresa;
   onClose: () => void;
+  apiToken?: string;
 };
 
 const MONTHS_PT = [
@@ -216,9 +222,29 @@ function DelurbMelosaTicket({ rows, onClose }: { rows: MelosaTicketRow[]; onClos
   );
 }
 
-export default function MelosaTicketModal({ rows, variant, onClose }: Props) {
+export default function MelosaTicketModal({ rows, variant, onClose, apiToken }: Props) {
+  const [rowsWithSignatures, setRowsWithSignatures] = useState(rows);
+  const [loadingSignatures, setLoadingSignatures] = useState(false);
+
+  useEffect(() => {
+    setRowsWithSignatures(rows);
+    if (variant !== "DIMENSIONAL" || !apiToken?.trim()) return;
+
+    let cancelled = false;
+    setLoadingSignatures(true);
+    void enrichMelosaTicketRowsWithSignatures(apiToken, rows).then((enriched) => {
+      if (!cancelled) {
+        setRowsWithSignatures(enriched);
+        setLoadingSignatures(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [rows, variant, apiToken]);
+
   if (variant === "DIMENSIONAL") {
-    const dimensionalRows: DimensionalAbastecimentoRow[] = rows.map((row) => ({
+    const dimensionalRows: DimensionalAbastecimentoRow[] = rowsWithSignatures.map((row) => ({
       numero: row.numero,
       data: row.data,
       insumo: row.insumo,
@@ -229,12 +255,17 @@ export default function MelosaTicketModal({ rows, variant, onClose }: Props) {
       observacoes: row.observacoes,
       nome: row.nomeMotorista,
       responsavelAbastecimento: row.responsavelAbastecimento,
+      assinaturaMotoristaPath: row.assinaturaMotoristaPath,
+      assinaturaOperadorPath: row.assinaturaOperadorPath,
+      assinaturaMotoristaUrl: row.assinaturaMotoristaUrl,
+      assinaturaOperadorUrl: row.assinaturaOperadorUrl,
     }));
     return (
       <DimensionalAbastecimentoTicket
         rows={dimensionalRows}
         tituloSub="Retirada Melosa"
         printId="melosa-dimensional-ticket-print"
+        loadingSignatures={loadingSignatures}
         onClose={onClose}
       />
     );

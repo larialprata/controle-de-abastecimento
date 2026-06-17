@@ -7,9 +7,10 @@ export default function EquipamentosPage() {
       title="Equipamentos"
       description={
         <>
-          Cadastro dos <strong>equipamentos abastecidos</strong> (máquinas, veículos de obra, etc.). Informe se é{" "}
-          <strong>estacionário</strong> ou <strong>móvel</strong> e use <strong>Importar</strong> para carregar uma
-          planilha em lote.
+          Cadastro dos <strong>equipamentos abastecidos</strong>. Marque apenas se for da{" "}
+          <strong>Dimensional</strong>; caso contrário é <strong>Terceirizado</strong>. Informe também se é{" "}
+          <strong>estacionário</strong> ou <strong>móvel</strong>. Clique no <strong>ativo</strong> ou na{" "}
+          <strong>descrição</strong> para ver o QR code. Use <strong>Exportar QR</strong> para imprimir em lote.
         </>
       }
       ativoPlaceholder="Ex.: ASD123"
@@ -17,7 +18,10 @@ export default function EquipamentosPage() {
       emptyMessage="Nenhum equipamento cadastrado."
       addLabel="Adicionar equipamento"
       showMobilidade
+      showEmpresa
       enableImport
+      enableBulkSelect
+      enableQrCode
     />
   );
 }

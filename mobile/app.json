@@ -33,12 +33,21 @@
           }
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permitir acesso à câmera para ler QR codes de equipamentos."
+        }
+      ],
       "./plugins/withAndroidSdkLocalProperties.js",
       "./plugins/withExpoAutolinkingProjectRoot.js",
       "./plugins/withReactNativeMonorepoGradle.js",
       "./plugins/withGradleJitpackFix.js",
       "./plugins/withWindowsNativeCmakeShortPaths.js"
     ],
+    "autolinking": {
+      "searchPaths": ["../node_modules"]
+    },
     "web": {
       "favicon": "./assets/favicon.png"
     },

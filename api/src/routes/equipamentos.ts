@@ -2,6 +2,14 @@ import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { resolveMobilidadeEquipamento } from "../lib/equipamentoMobilidade";
+import { resolveEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
+import { parseObraCodigoInput, parseObraReferencia } from "../lib/obraCodigo";
+import {
+  buildEquipamentoExternoQrUrl,
+  findEquipamentoExterno,
+  isEquipamentosExternosConfigured,
+} from "../lib/equipamentosExternos";
+import { lookupEquipamentoFromQr } from "../lib/equipamentoQrLookup";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
 
@@ -9,6 +17,7 @@ const router = Router();
 
 const equipamentoTipoSchema = z.enum(["TANQUE", "MELOSA", "EQUIPAMENTO"]);
 const equipamentoMobilidadeSchema = z.enum(["ESTACIONARIO", "MOVEL"]);
+const equipamentoEmpresaInputSchema = z.string().trim().max(100).nullable().optional();
 
 const createEquipamentoSchema = z
   .object({
@@ -18,6 +27,7 @@ const createEquipamentoSchema = z
     obra_codigo: z.number().int().positive().nullable().optional(),
     capacidade_litros: z.number().positive().nullable().optional(),
     mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
+    empresa: equipamentoEmpresaInputSchema,
   })
   .superRefine((data, ctx) => {
     if (data.tipo === "MELOSA" && data.obra_codigo != null) {
@@ -48,9 +58,115 @@ const createEquipamentoSchema = z
         path: ["mobilidade"],
       });
     }
+    if (data.tipo !== "EQUIPAMENTO" && data.empresa != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Empresa só se aplica a equipamentos.",
+        path: ["empresa"],
+      });
+    }
   });
 
-const EQUIPAMENTO_SELECT = "ativo, nome, tipo, obra_codigo, capacidade_litros, mobilidade";
+const EQUIPAMENTO_SELECT = "ativo, nome, tipo, obra_codigo, capacidade_litros, mobilidade, empresa";
+
+function formatEquipamentoDbError(message: string): string {
+  if (message.includes("invalid input value for enum equipamento_empresa")) {
+    return "Banco desatualizado: execute migration_equipamento_empresa_text.sql no SQL Editor do Supabase.";
+  }
+  return message;
+}
+
+const EQUIPAMENTOS_QR_PUBLIC_BASE_URL = process.env.EQUIPAMENTOS_QR_PUBLIC_BASE_URL?.trim() || "";
+
+async function resolveEquipamentoQrResponse(input: {
+  ativo: string;
+  nome?: string | null;
+  obra_codigo?: number | null;
+  tipo?: "EQUIPAMENTO" | "MELOSA" | "TANQUE";
+  /** Equipamento cadastrado no Controle Abast: gera QR interno CONTROLE_ABAST */
+  preferAbastQr?: boolean;
+}) {
+  const ativo = input.ativo.trim();
+  const tipo = input.tipo === "MELOSA" ? "MELOSA" : "EQUIPAMENTO";
+
+  if (input.preferAbastQr) {
+    const qrContent = `CONTROLE_ABAST:${tipo}:${ativo}`;
+    return {
+      ativo,
+      nome: input.nome ?? ativo,
+      obra_codigo: input.obra_codigo ?? null,
+      source: "abast" as const,
+      qr_content: qrContent,
+      externo: null,
+    };
+  }
+
+  const externo = await findEquipamentoExterno(ativo, input.obra_codigo ?? null);
+  if (externo) {
+    const qrContent = buildEquipamentoExternoQrUrl(externo.qr_token, EQUIPAMENTOS_QR_PUBLIC_BASE_URL);
+    return {
+      ativo,
+      nome: input.nome ?? externo.name,
+      obra_codigo: input.obra_codigo ?? null,
+      source: "externo" as const,
+      qr_content: qrContent,
+      externo: {
+        id: externo.id,
+        ativo_placa: externo.ativo_placa,
+        obra_code: externo.obra_code,
+        qr_token: externo.qr_token,
+      },
+    };
+  }
+
+  const qrContent = `CONTROLE_ABAST:${tipo}:${ativo}`;
+  return {
+    ativo,
+    nome: input.nome ?? ativo,
+    obra_codigo: input.obra_codigo ?? null,
+    source: "abast" as const,
+    qr_content: qrContent,
+    externo: null,
+  };
+}
+
+async function loadAbastEquipamentoByAtivo(
+  ativo: string,
+  obraCodigo?: number | null,
+): Promise<{ ativo: string; nome: string | null; empresa: string | null } | null> {
+  const service = createSupabaseServiceRole();
+  const norm = ativo.trim().toUpperCase().replace(/\s+/g, "");
+  if (!norm) return null;
+
+  if (obraCodigo != null && obraCodigo > 0) {
+    const { data, error } = await service
+      .from("equipamentos")
+      .select("ativo, nome, empresa")
+      .eq("tipo", "EQUIPAMENTO")
+      .ilike("ativo", norm)
+      .eq("obra_codigo", obraCodigo)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return { ativo: data.ativo, nome: data.nome, empresa: data.empresa };
+  }
+
+  const { data: anyObra, error: err2 } = await service
+    .from("equipamentos")
+    .select("ativo, nome, empresa")
+    .eq("tipo", "EQUIPAMENTO")
+    .ilike("ativo", norm)
+    .limit(1)
+    .maybeSingle();
+  if (err2) throw err2;
+  if (!anyObra) return null;
+  return { ativo: anyObra.ativo, nome: anyObra.nome, empresa: anyObra.empresa };
+}
+
+const lookupQrSchema = z.object({
+  qr: z.string().trim().min(1).max(2000),
+  obra_codigo: z.number().int().positive().optional().nullable(),
+});
 
 async function validateObraCodigo(
   service: ReturnType<typeof createSupabaseServiceRole>,
@@ -69,9 +185,11 @@ async function validateObraCodigo(
 
 router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   const tipoRaw = typeof req.query.tipo === "string" ? req.query.tipo.toUpperCase() : undefined;
-  const obraRaw = typeof req.query.obra_codigo === "string" ? Number(req.query.obra_codigo) : undefined;
+  const obraRaw = typeof req.query.obra_codigo === "string" ? req.query.obra_codigo : undefined;
   const mobilidadeRaw =
     typeof req.query.mobilidade === "string" ? req.query.mobilidade.toUpperCase() : undefined;
+  const empresaRaw =
+    typeof req.query.empresa === "string" ? req.query.empresa.toUpperCase() : undefined;
 
   const service = createSupabaseServiceRole();
   let query = service.from("equipamentos").select(EQUIPAMENTO_SELECT).order("ativo");
@@ -79,16 +197,111 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   if (tipoRaw === "TANQUE" || tipoRaw === "MELOSA" || tipoRaw === "EQUIPAMENTO") {
     query = query.eq("tipo", tipoRaw);
   }
-  if (obraRaw != null && Number.isFinite(obraRaw)) {
-    query = query.eq("obra_codigo", obraRaw);
+  const obraCodigoFiltro = obraRaw ? parseObraCodigoInput(obraRaw) : undefined;
+  if (obraCodigoFiltro != null) {
+    query = query.eq("obra_codigo", obraCodigoFiltro);
   }
   if (mobilidadeRaw === "ESTACIONARIO" || mobilidadeRaw === "MOVEL") {
     query = query.eq("mobilidade", mobilidadeRaw);
   }
-
   const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
-  return res.json({ equipamentos: data ?? [] });
+  if (error) return res.status(500).json({ error: formatEquipamentoDbError(error.message) });
+  let equipamentos = data ?? [];
+  if (empresaRaw === "DIMENSIONAL" || empresaRaw === "TERCEIRIZADO") {
+    equipamentos = equipamentos.filter(
+      (e) => resolveEquipamentoEmpresa(e.empresa) === empresaRaw,
+    );
+  }
+  return res.json({ equipamentos });
+});
+
+router.get("/equipamentos/qr/status", requireAuth, async (_req: AuthedRequest, res) => {
+  return res.json({
+    externo_configurado: isEquipamentosExternosConfigured(),
+    public_base_url: EQUIPAMENTOS_QR_PUBLIC_BASE_URL || null,
+  });
+});
+
+router.post("/equipamentos/qr/lookup", requireAuth, async (req: AuthedRequest, res) => {
+  const parsed = lookupQrSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
+  }
+
+  try {
+    const equipamento = await lookupEquipamentoFromQr(
+      parsed.data.qr,
+      parsed.data.obra_codigo ?? null,
+      loadAbastEquipamentoByAtivo,
+    );
+    if (!equipamento) {
+      return res.status(404).json({ error: "QR code não reconhecido ou equipamento não encontrado." });
+    }
+    return res.json({ equipamento });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    return res.status(500).json({ error: message });
+  }
+});
+
+const resolveQrBatchSchema = z.object({
+  itens: z
+    .array(
+      z.object({
+        ativo: z.string().trim().min(1).max(100),
+        nome: z.string().trim().max(300).optional(),
+        obra_codigo: z.number().int().positive().nullable().optional(),
+        tipo: equipamentoTipoSchema.optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
+router.post("/equipamentos/qr/resolve", requireAuth, async (req: AuthedRequest, res) => {
+  const parsed = resolveQrBatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
+  }
+
+  const results = await Promise.all(
+    parsed.data.itens.map((item) =>
+      resolveEquipamentoQrResponse({
+        ativo: item.ativo,
+        nome: item.nome,
+        obra_codigo: item.obra_codigo ?? null,
+        tipo: item.tipo,
+        preferAbastQr: true,
+      }),
+    ),
+  );
+
+  return res.json({ itens: results });
+});
+
+router.get("/equipamentos/:ativo/qr", requireAuth, async (req: AuthedRequest, res) => {
+  const ativo = decodeURIComponent(req.params.ativo ?? "").trim();
+  if (!ativo) return res.status(400).json({ error: "Ativo inválido." });
+
+  const obraRaw = typeof req.query.obra_codigo === "string" ? req.query.obra_codigo : undefined;
+  const obra_codigo = obraRaw ? parseObraCodigoInput(obraRaw) : null;
+
+  const service = createSupabaseServiceRole();
+  const { data: existing } = await service
+    .from("equipamentos")
+    .select("ativo, nome, tipo, obra_codigo")
+    .eq("ativo", ativo)
+    .maybeSingle();
+
+  const qr = await resolveEquipamentoQrResponse({
+    ativo,
+    nome: existing?.nome ?? ativo,
+    obra_codigo: obra_codigo ?? existing?.obra_codigo ?? null,
+    tipo: existing?.tipo === "MELOSA" ? "MELOSA" : "EQUIPAMENTO",
+    preferAbastQr: Boolean(existing),
+  });
+
+  return res.json({ qr });
 });
 
 router.post("/equipamentos", requireAdmin, async (req: AuthedRequest, res) => {
@@ -97,7 +310,7 @@ router.post("/equipamentos", requireAdmin, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
   }
 
-  const { ativo, tipo, obra_codigo, capacidade_litros, mobilidade } = parsed.data;
+  const { ativo, tipo, obra_codigo, capacidade_litros, mobilidade, empresa } = parsed.data;
   const nome = parsed.data.nome?.trim() || ativo;
   const service = createSupabaseServiceRole();
 
@@ -105,10 +318,10 @@ router.post("/equipamentos", requireAdmin, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "Capacidade da melosa deve ser maior que zero." });
   }
 
-  const obraErr = await validateObraCodigo(
-    service,
-    tipo === "MELOSA" ? null : (obra_codigo ?? null),
-  );
+  const obraCodigoNormalizado =
+    tipo === "MELOSA" ? null : parseObraCodigoInput(obra_codigo ?? null);
+
+  const obraErr = await validateObraCodigo(service, obraCodigoNormalizado);
   if (obraErr) return res.status(400).json({ error: obraErr });
 
   const { data: existing } = await service
@@ -126,14 +339,15 @@ router.post("/equipamentos", requireAdmin, async (req: AuthedRequest, res) => {
       ativo,
       nome,
       tipo,
-      obra_codigo: tipo === "MELOSA" ? null : (obra_codigo ?? null),
+      obra_codigo: obraCodigoNormalizado,
       capacidade_litros: tipo === "MELOSA" ? (capacidade_litros ?? null) : null,
       mobilidade:
         tipo === "EQUIPAMENTO" ? resolveMobilidadeEquipamento(nome, mobilidade) : null,
+      empresa: tipo === "EQUIPAMENTO" ? resolveEquipamentoEmpresa(empresa) : null,
     })
     .select(EQUIPAMENTO_SELECT)
     .single();
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return res.status(500).json({ error: formatEquipamentoDbError(error.message) });
   return res.status(201).json({ equipamento: data });
 });
 
@@ -144,6 +358,7 @@ const importItemSchema = z.object({
   obra_codigo: z.number().int().positive().nullable().optional(),
   obra_nome: z.string().trim().max(300).optional(),
   mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
+  empresa: equipamentoEmpresaInputSchema.optional(),
 });
 
 const importEquipamentosSchema = z.object({
@@ -181,19 +396,25 @@ router.post("/equipamentos/import", requireAdmin, async (req: AuthedRequest, res
     const ativo = item.ativo.trim();
     const nome = item.nome?.trim() || ativo;
 
-    let obra_codigo: number | null = item.obra_codigo ?? null;
+    let obra_codigo: number | null =
+      item.obra_codigo != null ? parseObraCodigoInput(item.obra_codigo) : null;
     if (obra_codigo == null && item.obra_nome?.trim()) {
-      const key = item.obra_nome.trim().toLowerCase();
-      const cod = obrasPorNome.get(key);
-      if (cod == null) {
-        erros.push({
-          linha,
-          ativo,
-          mensagem: `Obra "${item.obra_nome}" não encontrada.`,
-        });
-        continue;
+      const fromNome = parseObraReferencia(item.obra_nome);
+      if (fromNome.obra_codigo != null) {
+        obra_codigo = fromNome.obra_codigo;
+      } else {
+        const key = item.obra_nome.trim().toLowerCase();
+        const cod = obrasPorNome.get(key);
+        if (cod == null) {
+          erros.push({
+            linha,
+            ativo,
+            mensagem: `Obra "${item.obra_nome}" não encontrada.`,
+          });
+          continue;
+        }
+        obra_codigo = cod;
       }
-      obra_codigo = cod;
     }
 
     if (obra_codigo != null) {
@@ -232,19 +453,20 @@ router.post("/equipamentos/import", requireAdmin, async (req: AuthedRequest, res
       obra_codigo,
       capacidade_litros: null,
       mobilidade: resolveMobilidadeEquipamento(nome, item.mobilidade),
+      empresa: resolveEquipamentoEmpresa(item.empresa),
     };
 
     if (existing) {
       const { error } = await service.from("equipamentos").update(payload).eq("ativo", existing.ativo);
       if (error) {
-        erros.push({ linha, ativo, mensagem: error.message });
+        erros.push({ linha, ativo, mensagem: formatEquipamentoDbError(error.message) });
         continue;
       }
       atualizados += 1;
     } else {
       const { error } = await service.from("equipamentos").insert(payload);
       if (error) {
-        erros.push({ linha, ativo, mensagem: error.message });
+        erros.push({ linha, ativo, mensagem: formatEquipamentoDbError(error.message) });
         continue;
       }
       criados += 1;
@@ -262,6 +484,7 @@ const updateEquipamentoSchema = z
     obra_codigo: z.number().int().positive().nullable().optional(),
     capacidade_litros: z.number().positive().nullable().optional(),
     mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
+    empresa: equipamentoEmpresaInputSchema,
   })
   .superRefine((data, ctx) => {
     if (data.tipo === "MELOSA" && data.obra_codigo != null) {
@@ -276,6 +499,13 @@ const updateEquipamentoSchema = z
         code: z.ZodIssueCode.custom,
         message: "Mobilidade só se aplica a equipamentos.",
         path: ["mobilidade"],
+      });
+    }
+    if (data.tipo != null && data.tipo !== "EQUIPAMENTO" && data.empresa != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Empresa só se aplica a equipamentos.",
+        path: ["empresa"],
       });
     }
   });
@@ -297,7 +527,7 @@ router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, re
   const service = createSupabaseServiceRole();
   const { data: existing, error: findErr } = await service
     .from("equipamentos")
-    .select("ativo, nome, tipo, obra_codigo, mobilidade")
+    .select("ativo, nome, tipo, obra_codigo, mobilidade, empresa")
     .eq("ativo", ativoAtual)
     .maybeSingle();
   if (findErr) return res.status(500).json({ error: findErr.message });
@@ -318,7 +548,7 @@ router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, re
   if (tipo === "MELOSA") {
     obra_codigo = null;
   } else if (parsed.data.obra_codigo !== undefined) {
-    obra_codigo = parsed.data.obra_codigo;
+    obra_codigo = parseObraCodigoInput(parsed.data.obra_codigo);
   } else {
     obra_codigo = existing.obra_codigo;
   }
@@ -333,6 +563,15 @@ router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, re
     mobilidade = resolveMobilidadeEquipamento(nome, parsed.data.mobilidade);
   } else {
     mobilidade = resolveMobilidadeEquipamento(nome, existing.mobilidade ?? null);
+  }
+
+  let empresa: string | null;
+  if (tipo !== "EQUIPAMENTO") {
+    empresa = null;
+  } else if (parsed.data.empresa !== undefined) {
+    empresa = resolveEquipamentoEmpresa(parsed.data.empresa);
+  } else {
+    empresa = resolveEquipamentoEmpresa(existing.empresa);
   }
 
   if (ativoNovo.toLowerCase() !== ativoAtual.toLowerCase()) {
@@ -354,6 +593,7 @@ router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, re
       tipo,
       obra_codigo,
       mobilidade,
+      empresa,
       ...(parsed.data.capacidade_litros !== undefined
         ? { capacidade_litros: tipo === "MELOSA" ? parsed.data.capacidade_litros : null }
         : {}),

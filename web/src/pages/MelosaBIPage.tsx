@@ -7,6 +7,7 @@ import { useAuth } from "../state/AuthContext";
 import { apiGet, apiPost } from "../lib/api";
 import { fmtTicketNumero, ticketNumeroParaFiltro } from "../lib/ticketNumero";
 import { downloadMelosaDescarbonizeExcel, type MelosaExcelRowInput } from "../lib/melosaDescarbonizeExcel";
+import { enrichMelosaTicketRowsWithSignatures } from "../lib/melosaPhotoUrl";
 import { biTableRowKey, resolveSelectedRows } from "../lib/biSelection";
 import {
   defaultPeriodoMesAtual,
@@ -41,11 +42,14 @@ type LinhaMelosa = Record<string, unknown> & {
   tanque_numero?: number | string | null;
   melosa_combustivel_tipo_registro?: string | null;
   melosa_combustivel_tipo_retirada?: string | null;
-  melosa_medidor_acumulado_inicial_numero?: string | null;
-  melosa_medidor_acumulado_final_numero?: string | null;
+  melosa_quantidade_abastecida?: string | null;
+  melosa_quantidade_abastecida_storage_path?: string | null;
   melosa_equipamento_operador_storage_path?: string | null;
   melosa_horimetro_equipamento_abastecido_numero?: string | null;
   melosa_motorista_equipamento_abastecido?: string | null;
+  melosa_operador_nome?: string | null;
+  melosa_assinatura_operador_storage_path?: string | null;
+  melosa_assinatura_motorista_storage_path?: string | null;
   melosa_categoria?: string | null;
   litros?: number | string | null;
   local_latitude?: number | string | null;
@@ -62,8 +66,7 @@ function toMelosaExcelInput(m: LinhaMelosa): MelosaExcelRowInput {
     dataHora: m.data_hora,
     insumoRetirada: m.melosa_combustivel_tipo_retirada,
     insumoRegistro: m.melosa_combustivel_tipo_registro,
-    medidorInicial: m.melosa_medidor_acumulado_inicial_numero,
-    medidorFinal: m.melosa_medidor_acumulado_final_numero,
+    quantidadeAbastecida: m.melosa_quantidade_abastecida,
     placaTexto: m.ativo_melosa_texto ?? m.placa_texto,
   };
 }
@@ -108,12 +111,8 @@ function parseLitrosField(v: unknown): number | null {
 }
 
 function calcQuantidadeLitros(m: LinhaMelosa): number | null {
-  const ini = parseMedidorNumero(m.melosa_medidor_acumulado_inicial_numero);
-  const fin = parseMedidorNumero(m.melosa_medidor_acumulado_final_numero);
-  if (ini != null && fin != null && ini !== fin) {
-    const diff = fin > ini ? fin - ini : ini - fin;
-    if (Number.isFinite(diff) && diff > 0) return diff;
-  }
+  const qtd = parseMedidorNumero(m.melosa_quantidade_abastecida);
+  if (qtd != null && qtd > 0) return qtd;
   const litros = parseLitrosField(m.litros);
   if (litros != null && litros > 0) return litros;
   return null;
@@ -142,9 +141,19 @@ function fmtInsumoTicket(m: LinhaMelosa): string {
 
 function buildMelosaTicketRow(m: LinhaMelosa): MelosaTicketRow {
   const responsavel =
-    typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
-      ? m.usuario_full_name.trim()
-      : "—";
+    typeof m.melosa_operador_nome === "string" && m.melosa_operador_nome.trim()
+      ? m.melosa_operador_nome.trim()
+      : typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
+        ? m.usuario_full_name.trim()
+        : "—";
+  const assinaturaMotoristaPath =
+    typeof m.melosa_assinatura_motorista_storage_path === "string"
+      ? m.melosa_assinatura_motorista_storage_path
+      : null;
+  const assinaturaOperadorPath =
+    typeof m.melosa_assinatura_operador_storage_path === "string"
+      ? m.melosa_assinatura_operador_storage_path
+      : null;
   return {
     numero: fmtTicketNumero(m.ticket_numero),
     data: fmtDateOnly(m.data_hora),
@@ -157,6 +166,8 @@ function buildMelosaTicketRow(m: LinhaMelosa): MelosaTicketRow {
     equipamento: fmtAtivoEquipamento(m),
     obra: fmtObra(m),
     observacoes: m.obs != null && String(m.obs).trim() ? String(m.obs).trim() : "",
+    assinaturaMotoristaPath,
+    assinaturaOperadorPath,
   };
 }
 
@@ -265,6 +276,7 @@ export default function MelosaBIPage() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [ticketOpen, setTicketOpen] = useState(false);
+  const [ticketRows, setTicketRows] = useState<MelosaTicketRow[]>([]);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
 
@@ -362,11 +374,6 @@ export default function MelosaBIPage() {
     return Array.from(set);
   }, [selectedRows]);
 
-  const ticketRows = useMemo(
-    () => selectedRows.map((m) => buildMelosaTicketRow(m)),
-    [selectedRows],
-  );
-
   const ticketVariant = useMemo((): ObraEmpresa => {
     const set = empresasDasLinhas(
       obras,
@@ -407,7 +414,34 @@ export default function MelosaBIPage() {
           return r;
         }),
       );
+
+      const rowsForTicket = selectedRows.map((r) => {
+        const op = typeof r.operation_id === "string" ? r.operation_id : "";
+        const n = op ? numeros[op] : undefined;
+        const withNumero = n != null ? { ...r, ticket_numero: n } : r;
+        return buildMelosaTicketRow(withNumero);
+      });
+      setTicketRows(rowsForTicket);
       setTicketOpen(true);
+
+      void enrichMelosaTicketRowsWithSignatures(token, rowsForTicket).then((enriched) => {
+        setTicketRows(enriched);
+        const semPaths = enriched.every(
+          (r) => !r.assinaturaMotoristaPath?.trim() && !r.assinaturaOperadorPath?.trim(),
+        );
+        const falhaCarregar = enriched.some(
+          (r) =>
+            (r.assinaturaMotoristaPath?.trim() && !r.assinaturaMotoristaUrl) ||
+            (r.assinaturaOperadorPath?.trim() && !r.assinaturaOperadorUrl),
+        );
+        if (falhaCarregar) {
+          window.alert("Não foi possível carregar as assinaturas. Reinicie a API e tente novamente.");
+        } else if (semPaths) {
+          window.alert(
+            "Este registro não tem assinaturas salvas. Use um registro feito no app com assinatura na última página.",
+          );
+        }
+      });
     } catch (err: unknown) {
       window.alert(err instanceof Error ? err.message : "Erro ao gerar número do ticket");
     } finally {
@@ -490,8 +524,8 @@ export default function MelosaBIPage() {
       <header className={`${glassPanel} px-5 py-5 text-center md:text-left`}>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">BI — Melosa</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-          Quantidade (L): medidor final − medidor inicial (o final deve ser maior que o inicial). O Excel usa a
-          planilha modelo do projeto (cores e cabeçalhos intactos); só os dados são preenchidos a partir da linha 2.
+          Quantidade (L) informada no app na retirada melosa. O Excel usa a planilha modelo do projeto (cores e
+          cabeçalhos intactos); só os dados são preenchidos a partir da linha 2.
         </p>
       </header>
 
@@ -777,7 +811,12 @@ export default function MelosaBIPage() {
       ) : null}
 
       {ticketOpen && ticketRows.length > 0 ? (
-        <MelosaTicketModal rows={ticketRows} variant={ticketVariant} onClose={() => setTicketOpen(false)} />
+        <MelosaTicketModal
+          rows={ticketRows}
+          variant={ticketVariant}
+          apiToken={authToken || undefined}
+          onClose={() => setTicketOpen(false)}
+        />
       ) : null}
     </div>
   );

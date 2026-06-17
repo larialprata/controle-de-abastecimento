@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
+import { parseObraCodigoInput } from "../lib/obraCodigo";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
 
@@ -12,7 +13,10 @@ export type ObraEmpresa = (typeof OBRA_EMPRESAS)[number];
 const obraEmpresaSchema = z.enum(OBRA_EMPRESAS);
 
 const createObraSchema = z.object({
-  codigo: z.coerce.number().int().positive(),
+  codigo: z.preprocess(
+    (val) => parseObraCodigoInput(val) ?? val,
+    z.number().int().positive(),
+  ),
   nome: z.string().trim().min(1).max(300),
   empresa: obraEmpresaSchema,
 });
@@ -41,7 +45,8 @@ router.post("/obras", requireAdmin, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
   }
 
-  const { codigo, nome, empresa } = parsed.data;
+  const codigo = parsed.data.codigo;
+  const { nome, empresa } = parsed.data;
   const service = createSupabaseServiceRole();
 
   const { data: existing } = await service.from("obras").select("codigo").eq("codigo", codigo).maybeSingle();

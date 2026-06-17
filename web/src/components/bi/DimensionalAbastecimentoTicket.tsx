@@ -1,5 +1,16 @@
 import { Printer, X } from "lucide-react";
 
+function TicketSignatureImg({ url, alt }: { url?: string | null; alt: string }) {
+  if (!url?.trim()) return null;
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className="ticket-signature-img inline-block h-12 w-[5.5rem] shrink-0 align-middle object-contain"
+    />
+  );
+}
+
 export type DimensionalAbastecimentoRow = {
   numero: string;
   data: string;
@@ -11,6 +22,10 @@ export type DimensionalAbastecimentoRow = {
   observacoes: string;
   nome: string;
   responsavelAbastecimento: string;
+  assinaturaMotoristaPath?: string | null;
+  assinaturaOperadorPath?: string | null;
+  assinaturaMotoristaUrl?: string | null;
+  assinaturaOperadorUrl?: string | null;
 };
 
 type Props = {
@@ -18,6 +33,7 @@ type Props = {
   tituloSub?: string;
   printId: string;
   onClose: () => void;
+  loadingSignatures?: boolean;
 };
 
 function fuelKind(insumo: string): "ALCOOL" | "DIESEL" | "GASOLINA" | null {
@@ -28,7 +44,13 @@ function fuelKind(insumo: string): "ALCOOL" | "DIESEL" | "GASOLINA" | null {
   return null;
 }
 
-function TicketSheet({ row, tituloSub }: { row: DimensionalAbastecimentoRow; tituloSub?: string }) {
+function TicketSheet({
+  row,
+  tituloSub,
+}: {
+  row: DimensionalAbastecimentoRow;
+  tituloSub?: string;
+}) {
   const kind = fuelKind(row.insumo);
   const litrosAlcool = kind === "ALCOOL" ? row.litros : "";
   const litrosDiesel = kind === "DIESEL" ? row.litros : "";
@@ -125,13 +147,19 @@ function TicketSheet({ row, tituloSub }: { row: DimensionalAbastecimentoRow; tit
               <span className="font-bold uppercase">Data</span>
               <div className="mt-4 font-medium">{row.data}</div>
             </td>
-            <td className="w-1/3 border border-black px-2 py-3 align-bottom">
+            <td className="w-1/3 border border-black px-2 py-2 align-bottom">
               <span className="font-bold uppercase">Nome</span>
-              <div className="mt-4 font-medium">{row.nome}</div>
+              <div className="mt-2 flex min-h-[3.25rem] items-center">
+                <span className="font-medium leading-tight whitespace-nowrap">{row.nome}</span>
+                <TicketSignatureImg url={row.assinaturaMotoristaUrl} alt="Assinatura do motorista" />
+              </div>
             </td>
-            <td className="w-1/3 border border-black px-2 py-3 align-bottom">
+            <td className="w-1/3 border border-black px-2 py-2 align-bottom">
               <span className="font-bold uppercase">Resp. abastecimento</span>
-              <div className="mt-4 font-medium">{row.responsavelAbastecimento}</div>
+              <div className="mt-2 flex min-h-[3.25rem] items-center">
+                <span className="font-medium leading-tight whitespace-nowrap">{row.responsavelAbastecimento}</span>
+                <TicketSignatureImg url={row.assinaturaOperadorUrl} alt="Assinatura do responsável pelo abastecimento" />
+              </div>
             </td>
           </tr>
         </tbody>
@@ -140,7 +168,13 @@ function TicketSheet({ row, tituloSub }: { row: DimensionalAbastecimentoRow; tit
   );
 }
 
-export default function DimensionalAbastecimentoTicket({ rows, tituloSub, printId, onClose }: Props) {
+export default function DimensionalAbastecimentoTicket({
+  rows,
+  tituloSub,
+  printId,
+  onClose,
+  loadingSignatures,
+}: Props) {
   return (
     <div
       className="fixed inset-0 z-[110] flex items-start justify-center overflow-y-auto bg-black/55 p-4 print:relative print:inset-auto print:block print:bg-white print:p-0"
@@ -151,7 +185,10 @@ export default function DimensionalAbastecimentoTicket({ rows, tituloSub, printI
       }}
     >
       <div className="w-full max-w-3xl print:max-w-none">
-        <div className="mb-3 flex flex-wrap justify-end gap-2 print:hidden">
+        <div className="mb-3 flex flex-wrap items-center justify-end gap-2 print:hidden">
+          {loadingSignatures ? (
+            <span className="mr-auto text-xs font-medium text-slate-500">Carregando assinaturas…</span>
+          ) : null}
           <button
             type="button"
             onClick={() => window.print()}
@@ -182,6 +219,12 @@ export default function DimensionalAbastecimentoTicket({ rows, tituloSub, printI
       </div>
 
       <style>{`
+        .ticket-signature-img {
+          border: 1px solid #64748b;
+          background: #ffffff !important;
+          print-color-adjust: exact;
+          -webkit-print-color-adjust: exact;
+        }
         @media print {
           body * { visibility: hidden; }
           #${printId}, #${printId} * { visibility: visible; }

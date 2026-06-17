@@ -44,8 +44,7 @@ type MedidorDesvio = {
   ativo_melosa_texto: string;
   ativo_equipamento_texto: string | null;
   litros: number;
-  melosa_medidor_acumulado_inicial_numero: string | null;
-  melosa_medidor_acumulado_final_numero: string | null;
+  melosa_quantidade_abastecida: string | null;
   medidor_final_anterior: number | null;
   medidor_desvio_litros: number | null;
   medidor_continuidade_status: string | null;
@@ -275,8 +274,7 @@ export default function HomePage() {
         ativo_melosa_texto: d.ativo_melosa_texto,
         ativo_equipamento_texto: d.ativo_equipamento_texto,
         litros: d.litros,
-        medidor_inicial: d.melosa_medidor_acumulado_inicial_numero,
-        medidor_final: d.melosa_medidor_acumulado_final_numero,
+        quantidade_abastecida: d.melosa_quantidade_abastecida,
         medidor_esperado: d.medidor_final_anterior,
         desvio_litros: d.medidor_desvio_litros,
       }));
@@ -500,7 +498,7 @@ export default function HomePage() {
                             <td className="px-3 py-2 whitespace-nowrap">{fmtDataBr(d.data_hora)}</td>
                             <td className="px-3 py-2">{d.ativo_melosa_texto}</td>
                             <td className="px-3 py-2">{d.ativo_equipamento_texto ?? "—"}</td>
-                            <td className="px-3 py-2">{d.melosa_medidor_acumulado_inicial_numero ?? "—"}</td>
+                            <td className="px-3 py-2">{d.melosa_quantidade_abastecida ?? "—"}</td>
                             <td className="px-3 py-2">{d.medidor_final_anterior ?? "—"}</td>
                             <td className="px-3 py-2 font-semibold text-amber-800 dark:text-amber-300">
                               {desvio > 0 ? "+" : ""}

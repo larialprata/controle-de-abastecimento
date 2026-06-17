@@ -32,17 +32,20 @@ export type MovimentacaoPayload = {
   melosa_litros_registro?: number | null;
   melosa_combustivel_tipo_registro?: string | null;
   melosa_comprovante_storage_path?: string | null;
-  melosa_medidor_acumulado_inicial_numero?: string | null;
-  melosa_medidor_acumulado_inicial_storage_path?: string | null;
+  melosa_quantidade_abastecida?: string | null;
+  melosa_quantidade_abastecida_storage_path?: string | null;
   melosa_lacre_numero?: string | null;
   melosa_lacre_storage_path?: string | null;
-  melosa_medidor_acumulado_final_numero?: string | null;
-  melosa_medidor_acumulado_final_storage_path?: string | null;
   melosa_horimetro_equipamento_abastecido_numero?: string | null;
   melosa_horimetro_equipamento_abastecido_storage_path?: string | null;
   melosa_motorista_equipamento_abastecido?: string | null;
   melosa_equipamento_operador_storage_path?: string | null;
   melosa_categoria?: "ESTACIONARIA" | "MOVEL" | null;
+  ativo_equipamento_empresa?: string | null;
+  ativo_equipamento_nome?: string | null;
+  melosa_operador_nome?: string | null;
+  melosa_assinatura_operador_storage_path?: string | null;
+  melosa_assinatura_motorista_storage_path?: string | null;
 
   melosa_km_retirada?: number | null;
   melosa_combustivel_tipo_retirada?: string | null;

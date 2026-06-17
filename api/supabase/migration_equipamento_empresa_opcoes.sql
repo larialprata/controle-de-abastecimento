@@ -1,0 +1,2 @@
+-- Obsoleto: use migration_equipamento_empresa_text.sql
+-- Converte a coluna empresa de enum para text e aceita todas as empresas do app.

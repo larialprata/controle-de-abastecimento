@@ -36,8 +36,9 @@ export async function apiPost(path: string, token: string, body?: unknown) {
 }
 
 export async function apiGet<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+    const res = await fetch(`${API_URL}${path}`, {
     headers: { Authorization: `Bearer ${token}`, ...CLIENT_PLATFORM_HEADER },
+    cache: "no-store",
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);

@@ -4,25 +4,30 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
+    "predev": "node scripts/ensure-dev-modules.cjs",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "seed:admin": "npm run build && node dist/scripts/seedAdmin.js",
-    "confirm:email": "npm run build && node dist/scripts/confirmUserEmail.js"
+    "confirm:email": "npm run build && node dist/scripts/confirmUserEmail.js",
+    "migrate:equipamento-empresa": "npx ts-node --transpile-only src/scripts/applyEquipamentoEmpresaMigration.ts",
+    "test:equipamentos-externos": "npx ts-node --transpile-only src/scripts/testEquipamentosExternos.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "pg": "^8.21.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.1",
+    "@types/pg": "^8.20.0",
+    "source-map-support": "^0.5.21",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.8.2"
   }
 }
-

@@ -35,8 +35,7 @@ export type TanquePrincipalAggregate = {
 export type MovimentoMelosaRow = MovimentoRowBase & {
   obra_codigo?: number;
   data_hora?: string;
-  melosa_medidor_acumulado_inicial_numero?: string | null;
-  melosa_medidor_acumulado_final_numero?: string | null;
+  melosa_quantidade_abastecida?: string | null;
   litros?: number;
 };
 
@@ -166,9 +165,9 @@ function parseLitrosField(v: unknown): number | null {
   return null;
 }
 
-function litrosFromMelosaRow(litros: unknown, ini: unknown, fin: unknown): number {
-  const fromMedidor = calcQuantidadeLitrosFromMedidores(ini, fin);
-  if (fromMedidor != null) return fromMedidor;
+function litrosFromMelosaRow(litros: unknown, quantidade: unknown): number {
+  const fromQuantidade = parseLitrosField(quantidade);
+  if (fromQuantidade != null && fromQuantidade > 0) return fromQuantidade;
   const parsed = parseLitrosField(litros);
   if (parsed != null && parsed > 0) return parsed;
   return 0;
@@ -319,11 +318,7 @@ export function aggregateMelosaPorAtivo(
     if (!passesCommonFilters(m, filters)) return;
     if (placaAtivoMelosa(m) !== ativoNorm) return;
 
-    const L = litrosFromMelosaRow(
-      m.litros,
-      m.melosa_medidor_acumulado_inicial_numero,
-      m.melosa_medidor_acumulado_final_numero,
-    );
+    const L = litrosFromMelosaRow(m.litros, m.melosa_quantidade_abastecida);
     if (L > 0) {
       abastecimentosEquipamentos += L;
       qtdAbastecimentosMelosa += 1;
@@ -352,11 +347,7 @@ export function aggregateCombustivelDashboard(
   melosaRows.forEach((m) => {
     if (!passesCommonFilters(m, filters)) return;
 
-    const L = litrosFromMelosaRow(
-      m.litros,
-      m.melosa_medidor_acumulado_inicial_numero,
-      m.melosa_medidor_acumulado_final_numero,
-    );
+    const L = litrosFromMelosaRow(m.litros, m.melosa_quantidade_abastecida);
     if (L > 0) {
       abastecimentosEquipamentos += L;
       qtdAbastecimentosMelosa += 1;

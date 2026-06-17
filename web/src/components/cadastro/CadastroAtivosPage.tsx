@@ -1,16 +1,27 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Download, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Plus, QrCode, Trash2, Upload, X } from "lucide-react";
 import { useAuth } from "../../state/AuthContext";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api";
 import { resolveMobilidadeEquipamento } from "../../lib/equipamentoMobilidade";
+import {
+  EQUIPAMENTO_EMPRESA_LABEL,
+  EQUIPAMENTO_EMPRESAS,
+  labelEquipamentoEmpresa,
+  resolveEquipamentoEmpresa,
+  type EquipamentoEmpresa,
+} from "../../lib/equipamentoEmpresa";
 import {
   chunkImportRows,
   downloadEquipamentosImportTemplate,
   parseEquipamentosImportFile,
   type EquipamentoImportRow,
 } from "../../lib/equipamentosImport";
+import { parseObraCodigoInput } from "../../lib/obraCodigo";
 import { glassField, glassPanel } from "../../lib/glass";
+import { downloadEquipamentosQrHtml } from "../../lib/equipamentoQrCode";
+import { resolveEquipamentosQrBatch } from "../../lib/equipamentoQrResolve";
+import EquipamentoQrModal from "./EquipamentoQrModal";
 
 export type CadastroAtivoTipo = "MELOSA" | "EQUIPAMENTO";
 export type EquipamentoMobilidade = "ESTACIONARIO" | "MOVEL";
@@ -22,6 +33,7 @@ type EquipamentoRow = {
   obra_codigo: number | null;
   capacidade_litros?: number | null;
   mobilidade?: EquipamentoMobilidade | null;
+  empresa?: EquipamentoEmpresa | null;
 };
 
 const MOBILIDADE_LABEL: Record<EquipamentoMobilidade, string> = {
@@ -41,7 +53,10 @@ export type CadastroAtivosPageProps = {
   emptyMessage: string;
   addLabel: string;
   showMobilidade?: boolean;
+  showEmpresa?: boolean;
   enableImport?: boolean;
+  enableBulkSelect?: boolean;
+  enableQrCode?: boolean;
 };
 
 export default function CadastroAtivosPage({
@@ -54,7 +69,10 @@ export default function CadastroAtivosPage({
   emptyMessage,
   addLabel,
   showMobilidade = false,
+  showEmpresa = false,
   enableImport = false,
+  enableBulkSelect = false,
+  enableQrCode = false,
 }: CadastroAtivosPageProps) {
   const { token, isAdmin } = useAuth();
   const [equipamentos, setEquipamentos] = useState<EquipamentoRow[]>([]);
@@ -71,10 +89,14 @@ export default function CadastroAtivosPage({
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<EquipamentoRow | null>(null);
+  const [bulkDeleteAtivos, setBulkDeleteAtivos] = useState<string[] | null>(null);
+  const [selectedAtivos, setSelectedAtivos] = useState<Set<string>>(() => new Set());
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [formMobilidade, setFormMobilidade] = useState<"" | EquipamentoMobilidade>("");
+  const [formDimensional, setFormDimensional] = useState(false);
   const [filtroMobilidade, setFiltroMobilidade] = useState<"" | EquipamentoMobilidade>("");
+  const [filtroEmpresa, setFiltroEmpresa] = useState<"" | EquipamentoEmpresa>("");
   const [importOpen, setImportOpen] = useState(false);
   const [importModo, setImportModo] = useState<"upsert" | "criar">("upsert");
   const [importRows, setImportRows] = useState<EquipamentoImportRow[]>([]);
@@ -87,6 +109,8 @@ export default function CadastroAtivosPage({
     erros: { linha?: number; ativo: string; mensagem: string }[];
   } | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [qrTarget, setQrTarget] = useState<EquipamentoRow | null>(null);
+  const [qrExporting, setQrExporting] = useState(false);
 
   const showCapacidade = fixedTipo === "MELOSA";
   const showObra = fixedTipo === "EQUIPAMENTO";
@@ -115,18 +139,92 @@ export default function CadastroAtivosPage({
     load();
   }, [load]);
 
+  useEffect(() => {
+    const valid = new Set(equipamentos.map((e) => e.ativo));
+    setSelectedAtivos((prev) => {
+      const next = new Set([...prev].filter((ativo) => valid.has(ativo)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [equipamentos]);
+
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return equipamentos.filter((e) => {
       if (filtroMobilidade && e.mobilidade !== filtroMobilidade) return false;
+      if (filtroEmpresa && resolveEquipamentoEmpresa(e.empresa) !== filtroEmpresa) return false;
       if (!q) return true;
       return (
         (e.ativo ?? "").toLowerCase().includes(q) ||
         (e.nome ?? "").toLowerCase().includes(q) ||
-        (e.mobilidade ? MOBILIDADE_LABEL[e.mobilidade].toLowerCase().includes(q) : false)
+        (e.mobilidade ? MOBILIDADE_LABEL[e.mobilidade].toLowerCase().includes(q) : false) ||
+        (e.empresa ? labelEquipamentoEmpresa(e.empresa).toLowerCase().includes(q) : false)
       );
     });
-  }, [equipamentos, busca, filtroMobilidade]);
+  }, [equipamentos, busca, filtroMobilidade, filtroEmpresa]);
+
+  const showSelection = isAdmin && enableBulkSelect;
+  const allFiltradasSelected =
+    filtradas.length > 0 && filtradas.every((e) => selectedAtivos.has(e.ativo));
+  const someFiltradasSelected = filtradas.some((e) => selectedAtivos.has(e.ativo));
+
+  const toggleSelectAtivo = useCallback((ativo: string) => {
+    setSelectedAtivos((prev) => {
+      const next = new Set(prev);
+      if (next.has(ativo)) next.delete(ativo);
+      else next.add(ativo);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllFiltradas = useCallback(() => {
+    setSelectedAtivos((prev) => {
+      const next = new Set(prev);
+      if (allFiltradasSelected) {
+        filtradas.forEach((e) => next.delete(e.ativo));
+      } else {
+        filtradas.forEach((e) => next.add(e.ativo));
+      }
+      return next;
+    });
+  }, [allFiltradasSelected, filtradas]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedAtivos(new Set());
+  }, []);
+
+  const openQrModal = useCallback((e: EquipamentoRow) => {
+    setQrTarget(e);
+  }, []);
+
+  const handleExportQrCodes = useCallback(async () => {
+    if (!token || filtradas.length === 0) return;
+    setQrExporting(true);
+    try {
+      const resolved = await resolveEquipamentosQrBatch(
+        token,
+        filtradas.map((e) => ({
+          ativo: e.ativo,
+          nome: e.nome,
+          obra_codigo: e.obra_codigo,
+          tipo: fixedTipo,
+        })),
+      );
+      await downloadEquipamentosQrHtml(
+        resolved.map((qr) => ({
+          ativo: qr.ativo,
+          nome: qr.nome,
+          tipo: fixedTipo,
+          qr_content: qr.qr_content,
+          source: qr.source,
+        })),
+        `QR codes — ${title}`,
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erro ao exportar QR codes.");
+    } finally {
+      setQrExporting(false);
+    }
+  }, [filtradas, fixedTipo, title, token]);
 
   const isEditing = editingAtivoOriginal != null;
 
@@ -137,6 +235,7 @@ export default function CadastroAtivosPage({
     setFormObraCodigo("");
     setFormCapacidadeLitros("");
     setFormMobilidade("");
+    setFormDimensional(false);
     setFormError(null);
     setFormOpen(true);
   }, []);
@@ -152,6 +251,7 @@ export default function CadastroAtivosPage({
         : "",
     );
     setFormMobilidade(e.mobilidade ?? "");
+    setFormDimensional(resolveEquipamentoEmpresa(e.empresa) === "DIMENSIONAL");
     setFormError(null);
     setFormOpen(true);
   }, []);
@@ -166,8 +266,24 @@ export default function CadastroAtivosPage({
   const closeDeleteModal = useCallback(() => {
     if (deleteSaving) return;
     setDeleteTarget(null);
+    setBulkDeleteAtivos(null);
     setDeleteError(null);
   }, [deleteSaving]);
+
+  const openBulkDeleteModal = useCallback(() => {
+    if (selectedAtivos.size === 0) return;
+    setDeleteError(null);
+    setDeleteTarget(null);
+    setBulkDeleteAtivos([...selectedAtivos]);
+  }, [selectedAtivos]);
+
+  const deleteAtivosList = useMemo(() => {
+    if (bulkDeleteAtivos?.length) return bulkDeleteAtivos;
+    if (deleteTarget) return [deleteTarget.ativo];
+    return [];
+  }, [bulkDeleteAtivos, deleteTarget]);
+
+  const isBulkDelete = (bulkDeleteAtivos?.length ?? 0) > 0;
 
   const handleSave = useCallback(async () => {
     if (!token) return;
@@ -179,8 +295,8 @@ export default function CadastroAtivosPage({
 
     const nomeTrim = formNome.trim();
     const obraCodigo =
-      showObra && formObraCodigo.trim() !== "" ? Number(formObraCodigo) : null;
-    if (showObra && formObraCodigo.trim() !== "" && !Number.isFinite(obraCodigo)) {
+      showObra && formObraCodigo.trim() !== "" ? parseObraCodigoInput(formObraCodigo) : null;
+    if (showObra && formObraCodigo.trim() !== "" && obraCodigo == null) {
       setFormError("Obra inválida.");
       return;
     }
@@ -214,6 +330,10 @@ export default function CadastroAtivosPage({
       );
     }
 
+    if (showEmpresa) {
+      payload.empresa = formDimensional ? "DIMENSIONAL" : "TERCEIRIZADO";
+    }
+
     setFormSaving(true);
     setFormError(null);
     try {
@@ -222,6 +342,17 @@ export default function CadastroAtivosPage({
       } else {
         await apiPost("/v1/equipamentos", token, payload);
       }
+      const savedRow: EquipamentoRow = {
+        ativo: ativoTrim,
+        nome: nomeTrim || ativoTrim,
+        tipo: fixedTipo,
+        obra_codigo: obraCodigo,
+        mobilidade: showMobilidade
+          ? resolveMobilidadeEquipamento(nomeTrim || ativoTrim, formMobilidade || null)
+          : null,
+        empresa: showEmpresa ? (formDimensional ? "DIMENSIONAL" : "TERCEIRIZADO") : null,
+      };
+      const wasCreate = !isEditing;
       setFormOpen(false);
       setEditingAtivoOriginal(null);
       setFormAtivo("");
@@ -229,7 +360,11 @@ export default function CadastroAtivosPage({
       setFormObraCodigo("");
       setFormCapacidadeLitros("");
       setFormMobilidade("");
+      setFormDimensional(false);
       await load();
+      if (enableQrCode && wasCreate) {
+        setQrTarget(savedRow);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erro ao guardar";
       setFormError(msg);
@@ -242,13 +377,16 @@ export default function CadastroAtivosPage({
     formAtivo,
     formCapacidadeLitros,
     formMobilidade,
+    formDimensional,
     formNome,
     formObraCodigo,
     isEditing,
     load,
     showCapacidade,
     showMobilidade,
+    showEmpresa,
     showObra,
+    enableQrCode,
     token,
   ]);
 
@@ -331,23 +469,61 @@ export default function CadastroAtivosPage({
   }, [importModo, importRows, load, token]);
 
   const handleDelete = useCallback(async () => {
-    if (!token || !deleteTarget) return;
+    if (!token || deleteAtivosList.length === 0) return;
     setDeleteSaving(true);
     setDeleteError(null);
+    const erros: string[] = [];
+    const batchSize = 5;
+
     try {
-      await apiDelete(`/v1/equipamentos/${encodeURIComponent(deleteTarget.ativo)}`, token);
+      for (let i = 0; i < deleteAtivosList.length; i += batchSize) {
+        const chunk = deleteAtivosList.slice(i, i + batchSize);
+        await Promise.all(
+          chunk.map(async (ativo) => {
+            try {
+              await apiDelete(`/v1/equipamentos/${encodeURIComponent(ativo)}`, token);
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : "Erro ao excluir";
+              erros.push(`${ativo}: ${msg}`);
+            }
+          }),
+        );
+      }
+
+      if (erros.length > 0) {
+        const restante = erros.length - Math.min(erros.length, 3);
+        const detalhe =
+          erros.slice(0, 3).join(" · ") + (restante > 0 ? ` · e mais ${restante}` : "");
+        setDeleteError(`Falha ao excluir ${erros.length} de ${deleteAtivosList.length}. ${detalhe}`);
+        setDeleteTarget(null);
+        setBulkDeleteAtivos(null);
+        setSelectedAtivos((prev) => {
+          const failed = new Set(
+            erros.map((e) => e.split(":")[0]?.trim()).filter((a): a is string => Boolean(a)),
+          );
+          return new Set([...prev].filter((ativo) => failed.has(ativo)));
+        });
+        await load();
+        return;
+      }
+
       setDeleteTarget(null);
+      setBulkDeleteAtivos(null);
+      setSelectedAtivos(new Set());
       await load();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Erro ao excluir";
-      setDeleteError(msg);
     } finally {
       setDeleteSaving(false);
     }
-  }, [deleteTarget, load, token]);
+  }, [deleteAtivosList, load, token]);
 
   const colCount =
-    2 + (showObra ? 1 : 0) + (showMobilidade ? 1 : 0) + (showCapacidade ? 1 : 0) + (isAdmin ? 1 : 0);
+    (showSelection ? 1 : 0) +
+    2 +
+    (showObra ? 1 : 0) +
+    (showEmpresa ? 1 : 0) +
+    (showMobilidade ? 1 : 0) +
+    (showCapacidade ? 1 : 0) +
+    (isAdmin ? 1 : 0);
 
   return (
     <div>
@@ -421,6 +597,23 @@ export default function CadastroAtivosPage({
           </div>
         ) : null}
 
+        {enableQrCode ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              QR codes
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleExportQrCodes()}
+              disabled={loading || qrExporting || filtradas.length === 0}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+            >
+              <QrCode className="h-4 w-4" aria-hidden />
+              {qrExporting ? "A exportar…" : `Exportar QR (${filtradas.length})`}
+            </button>
+          </div>
+        ) : null}
+
         {showMobilidade ? (
           <div className="flex flex-col gap-1">
             <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -434,6 +627,26 @@ export default function CadastroAtivosPage({
               <option value="">Todas</option>
               <option value="ESTACIONARIO">Estacionário</option>
               <option value="MOVEL">Móvel</option>
+            </select>
+          </div>
+        ) : null}
+
+        {showEmpresa ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Empresa
+            </span>
+            <select
+              className={glassField}
+              value={filtroEmpresa}
+              onChange={(e) => setFiltroEmpresa(e.target.value as "" | EquipamentoEmpresa)}
+            >
+              <option value="">Todas</option>
+              {EQUIPAMENTO_EMPRESAS.map((empresa) => (
+                <option key={empresa} value={empresa}>
+                  {EQUIPAMENTO_EMPRESA_LABEL[empresa]}
+                </option>
+              ))}
             </select>
           </div>
         ) : null}
@@ -458,11 +671,61 @@ export default function CadastroAtivosPage({
         </div>
       ) : null}
 
+      {showSelection ? (
+        <div className={`mb-4 flex flex-wrap items-center justify-between gap-3 p-4 ${glassPanel}`}>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            <strong className="text-slate-900 dark:text-white">{filtradas.length}</strong>{" "}
+            {filtradas.length === 1 ? "registro" : "registros"}
+            {busca.trim() || filtroMobilidade || filtroEmpresa ? " (filtrado)" : ""} ·{" "}
+            <strong className="text-slate-900 dark:text-white">{selectedAtivos.size}</strong> selecionado
+            {selectedAtivos.size === 1 ? "" : "s"}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedAtivos.size > 0 ? (
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={deleteSaving}
+                className="rounded-lg border border-slate-300 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+              >
+                Limpar seleção
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={openBulkDeleteModal}
+              disabled={deleteSaving || selectedAtivos.size === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+              Excluir selecionados
+              {selectedAtivos.size > 0 ? ` (${selectedAtivos.size})` : ""}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className={`overflow-hidden p-0 ${glassPanel}`}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[480px] border-collapse text-sm">
             <thead>
               <tr>
+                {showSelection ? (
+                  <th className="border-b border-slate-200 bg-slate-100 px-3 py-3 text-center dark:border-white/10 dark:bg-slate-800/90">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+                      checked={allFiltradasSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = !allFiltradasSelected && someFiltradasSelected;
+                      }}
+                      onChange={toggleSelectAllFiltradas}
+                      disabled={filtradas.length === 0 || deleteSaving}
+                      aria-label="Selecionar todos os registros visíveis"
+                      title="Selecionar todos os registros visíveis"
+                    />
+                  </th>
+                ) : null}
                 <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                   Ativo
                 </th>
@@ -472,6 +735,11 @@ export default function CadastroAtivosPage({
                 {showObra ? (
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Obra
+                  </th>
+                ) : null}
+                {showEmpresa ? (
+                  <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
+                    Empresa
                   </th>
                 ) : null}
                 {showMobilidade ? (
@@ -496,16 +764,63 @@ export default function CadastroAtivosPage({
                 const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-slate-50/90 dark:bg-white/[0.03]";
                 const obraNome = e.obra_codigo != null ? obrasPorCodigo.get(e.obra_codigo) : null;
                 return (
-                  <tr key={e.ativo} className={zebra}>
-                    <td className="border-b border-slate-100 px-4 py-3 font-mono text-slate-700 dark:border-white/5 dark:text-slate-300">
-                      {e.ativo}
+                  <tr
+                    key={e.ativo}
+                    className={`${zebra} ${selectedAtivos.has(e.ativo) ? "ring-1 ring-inset ring-accent/30" : ""}`}
+                  >
+                    {showSelection ? (
+                      <td className="border-b border-slate-100 px-3 py-3 text-center dark:border-white/5">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+                          checked={selectedAtivos.has(e.ativo)}
+                          onChange={() => toggleSelectAtivo(e.ativo)}
+                          disabled={deleteSaving}
+                          aria-label={`Selecionar ${e.ativo}`}
+                        />
+                      </td>
+                    ) : null}
+                    <td className="border-b border-slate-100 px-4 py-3 dark:border-white/5">
+                      {enableQrCode ? (
+                        <button
+                          type="button"
+                          onClick={() => openQrModal(e)}
+                          className="font-mono text-slate-700 underline-offset-2 transition hover:text-accent hover:underline dark:text-slate-300"
+                          title="Ver QR code"
+                        >
+                          {e.ativo}
+                        </button>
+                      ) : (
+                        <span className="font-mono text-slate-700 dark:text-slate-300">{e.ativo}</span>
+                      )}
                     </td>
                     <td className="border-b border-slate-100 px-4 py-3 dark:border-white/5">
-                      <span className="font-semibold text-slate-900 dark:text-white">{e.nome || "—"}</span>
+                      {enableQrCode ? (
+                        <button
+                          type="button"
+                          onClick={() => openQrModal(e)}
+                          className="text-left font-semibold text-slate-900 underline-offset-2 transition hover:text-accent hover:underline dark:text-white"
+                          title="Ver QR code"
+                        >
+                          {e.nome || "—"}
+                        </button>
+                      ) : (
+                        <span className="font-semibold text-slate-900 dark:text-white">{e.nome || "—"}</span>
+                      )}
                     </td>
                     {showObra ? (
                       <td className="border-b border-slate-100 px-4 py-3 text-slate-600 dark:border-white/5 dark:text-slate-400">
                         {e.obra_codigo != null ? `${e.obra_codigo} - ${obraNome ?? "?"}` : "—"}
+                      </td>
+                    ) : null}
+                    {showEmpresa ? (
+                      <td className="border-b border-slate-100 px-4 py-3 text-slate-600 dark:border-white/5 dark:text-slate-400">
+                        {labelEquipamentoEmpresa(e.empresa)}
+                      </td>
+                    ) : null}
+                    {showMobilidade ? (
+                      <td className="border-b border-slate-100 px-4 py-3 text-slate-600 dark:border-white/5 dark:text-slate-400">
+                        {e.mobilidade ? MOBILIDADE_LABEL[e.mobilidade] : "—"}
                       </td>
                     ) : null}
                     {showCapacidade ? (
@@ -639,6 +954,30 @@ export default function CadastroAtivosPage({
                 </div>
               ) : null}
 
+              {showEmpresa ? (
+                <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                  <input
+                    id="cadastro-form-dimensional"
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+                    checked={formDimensional}
+                    onChange={(e) => setFormDimensional(e.target.checked)}
+                    disabled={formSaving}
+                  />
+                  <div>
+                    <label
+                      htmlFor="cadastro-form-dimensional"
+                      className="block text-sm font-semibold text-slate-900 dark:text-white"
+                    >
+                      Equipamento da Dimensional
+                    </label>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Se desmarcado, o equipamento é considerado <strong>Terceirizado</strong>.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
               {showMobilidade ? (
                 <div>
                   <label
@@ -741,7 +1080,8 @@ export default function CadastroAtivosPage({
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
               Envie um arquivo <strong>.xlsx</strong> ou <strong>.csv</strong>. Aceita colunas{" "}
               <code className="text-xs">PATRIMÔNIO</code> / <code className="text-xs">EQUIPAMENTO</code> ou o modelo
-              padrão. Linhas duplicadas são unificadas por patrimônio.
+              padrão (coluna <strong>empresa</strong> opcional: use <strong>Dimensional</strong> ou deixe em branco para Terceirizado). Linhas duplicadas são unificadas
+              por patrimônio.
             </p>
 
             <div className="mt-4 space-y-4">
@@ -839,7 +1179,7 @@ export default function CadastroAtivosPage({
         </div>
       ) : null}
 
-      {deleteTarget ? (
+      {(deleteTarget || bulkDeleteAtivos) ? (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
           role="dialog"
@@ -851,13 +1191,31 @@ export default function CadastroAtivosPage({
         >
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${glassPanel}`}>
             <h2 id="delete-cadastro-title" className="text-lg font-bold text-slate-900 dark:text-white">
-              Excluir registo
+              {isBulkDelete ? "Excluir selecionados" : "Excluir registo"}
             </h2>
-            <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
-              Tem certeza que deseja excluir{" "}
-              <strong className="text-slate-900 dark:text-white">{deleteTarget.ativo}</strong>? Esta ação não pode ser
-              desfeita.
-            </p>
+            {isBulkDelete ? (
+              <>
+                <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
+                  Tem certeza que deseja excluir{" "}
+                  <strong className="text-slate-900 dark:text-white">{deleteAtivosList.length}</strong>{" "}
+                  {deleteAtivosList.length === 1 ? "equipamento" : "equipamentos"}? Esta ação não pode ser desfeita.
+                </p>
+                <ul className="mt-3 max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">
+                  {deleteAtivosList.slice(0, 20).map((ativo) => (
+                    <li key={ativo}>{ativo}</li>
+                  ))}
+                  {deleteAtivosList.length > 20 ? (
+                    <li className="pt-1 text-slate-500">… e mais {deleteAtivosList.length - 20}</li>
+                  ) : null}
+                </ul>
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
+                Tem certeza que deseja excluir{" "}
+                <strong className="text-slate-900 dark:text-white">{deleteTarget?.ativo}</strong>? Esta ação não pode
+                ser desfeita.
+              </p>
+            )}
             {deleteError ? (
               <p className="mt-3 text-sm font-semibold text-red-700 dark:text-red-300">{deleteError}</p>
             ) : null}
@@ -881,6 +1239,17 @@ export default function CadastroAtivosPage({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {qrTarget ? (
+        <EquipamentoQrModal
+          ativo={qrTarget.ativo}
+          nome={qrTarget.nome}
+          tipo={qrTarget.tipo}
+          obraCodigo={qrTarget.obra_codigo}
+          token={token ?? ""}
+          onClose={() => setQrTarget(null)}
+        />
       ) : null}
     </div>
   );
