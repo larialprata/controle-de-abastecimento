@@ -93,7 +93,14 @@ function buildSignatureHtml(penColor: string, backgroundColor: string): string {
       post("empty");
       return;
     }
-    post("ok", { data: canvas.toDataURL("image/png") });
+    const out = document.createElement("canvas");
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const octx = out.getContext("2d");
+    octx.fillStyle = "${backgroundColor}";
+    octx.fillRect(0, 0, out.width, out.height);
+    octx.drawImage(canvas, 0, 0);
+    post("ok", { data: out.toDataURL("image/png") });
   }
 
   function end(e) {

@@ -1,13 +1,44 @@
 import { Printer, X } from "lucide-react";
 
 function TicketSignatureImg({ url, alt }: { url?: string | null; alt: string }) {
-  if (!url?.trim()) return null;
+  if (!url?.trim()) {
+    return (
+      <div
+        className="ticket-signature-placeholder ml-auto h-14 min-w-[7rem] flex-1 max-w-[10rem]"
+        aria-hidden
+      />
+    );
+  }
   return (
     <img
       src={url}
       alt={alt}
-      className="ticket-signature-img inline-block h-12 w-[5.5rem] shrink-0 align-middle object-contain"
+      className="ticket-signature-img ml-auto h-14 min-w-[7rem] flex-1 max-w-[10rem] object-contain object-center"
     />
+  );
+}
+
+function TicketSignatureCell({
+  label,
+  name,
+  signatureUrl,
+  signatureAlt,
+}: {
+  label: string;
+  name: string;
+  signatureUrl?: string | null;
+  signatureAlt: string;
+}) {
+  return (
+    <td className="w-1/3 border border-black px-2 py-2 align-bottom">
+      <span className="font-bold uppercase">{label}</span>
+      <div className="mt-2 min-h-[4.5rem]">
+        <div className="font-medium leading-tight">{name}</div>
+        <div className="mt-1 flex min-h-[3.5rem] items-center">
+          <TicketSignatureImg url={signatureUrl} alt={signatureAlt} />
+        </div>
+      </div>
+    </td>
   );
 }
 
@@ -147,20 +178,18 @@ function TicketSheet({
               <span className="font-bold uppercase">Data</span>
               <div className="mt-4 font-medium">{row.data}</div>
             </td>
-            <td className="w-1/3 border border-black px-2 py-2 align-bottom">
-              <span className="font-bold uppercase">Nome</span>
-              <div className="mt-2 flex min-h-[3.25rem] items-center">
-                <span className="font-medium leading-tight whitespace-nowrap">{row.nome}</span>
-                <TicketSignatureImg url={row.assinaturaMotoristaUrl} alt="Assinatura do motorista" />
-              </div>
-            </td>
-            <td className="w-1/3 border border-black px-2 py-2 align-bottom">
-              <span className="font-bold uppercase">Resp. abastecimento</span>
-              <div className="mt-2 flex min-h-[3.25rem] items-center">
-                <span className="font-medium leading-tight whitespace-nowrap">{row.responsavelAbastecimento}</span>
-                <TicketSignatureImg url={row.assinaturaOperadorUrl} alt="Assinatura do responsável pelo abastecimento" />
-              </div>
-            </td>
+            <TicketSignatureCell
+              label="Nome"
+              name={row.nome}
+              signatureUrl={row.assinaturaMotoristaUrl}
+              signatureAlt="Assinatura do motorista"
+            />
+            <TicketSignatureCell
+              label="Resp. abastecimento"
+              name={row.responsavelAbastecimento}
+              signatureUrl={row.assinaturaOperadorUrl}
+              signatureAlt="Assinatura do responsável pelo abastecimento"
+            />
           </tr>
         </tbody>
       </table>
@@ -219,11 +248,15 @@ export default function DimensionalAbastecimentoTicket({
       </div>
 
       <style>{`
-        .ticket-signature-img {
+        .ticket-signature-img,
+        .ticket-signature-placeholder {
           border: 1px solid #64748b;
           background: #ffffff !important;
           print-color-adjust: exact;
           -webkit-print-color-adjust: exact;
+        }
+        .ticket-signature-placeholder {
+          opacity: 0.35;
         }
         @media print {
           body * { visibility: hidden; }
