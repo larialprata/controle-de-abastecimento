@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'web/**'
+      - '.github/workflows/deploy-web.yml'
   workflow_dispatch:
 
 jobs:
@@ -29,7 +30,8 @@ jobs:
           npm install
 
       - name: Build do frontend
-        run: npm run build -w controle-abast-web
+        working-directory: web
+        run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
