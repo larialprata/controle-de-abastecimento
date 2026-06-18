@@ -1,7 +1,4 @@
-import {
-  calcQuantidadeLitrosFromMedidores,
-  calcQuantidadeLitrosRetiradaTanqueFromMedidores,
-} from "./descarbonizeExcel";
+import { calcQuantidadeLitrosRetiradaTanqueFromMedidores } from "./descarbonizeExcel";
 import {
   type DashboardAggregateFilters,
   type MovimentoMelosaRow,
@@ -12,7 +9,6 @@ import {
   calcSaidaMelosaAntesChegar,
   calcularCombustivelControle,
   fmtLitrosDashboard,
-  fmtPctDashboard,
 } from "./combustivelControle";
 
 export type ResumoEventoTipo = "retirada_tanque" | "abastecimento" | "devolucao_tanque";
@@ -308,21 +304,6 @@ function buildAnaliseAbastecimentosVsSobra(
     const notas: string[] = [];
     const alertas: string[] = [];
     let status: ResumoAbastecimentoAnalise["status"] = "ok";
-
-    if (litrosSaidaMelosaAntesChegar != null && litrosSaidaMelosaAntesChegar > 0.05 && saidaAnalise) {
-      notas.push(
-        `${fmtLitrosDashboard(litrosSaidaMelosaAntesChegar)} L saíram da melosa entre a sobra contábil (${fmtLitrosDashboard(sobraAntes)} L) e a leitura ao chegar (${fmtLitrosDashboard(medIni!)} L) — ${fmtPctDashboard(saidaAnalise.litrosSaidaPct)} da sobra.`,
-      );
-      notas.push(
-        `Consumo aceitável do caminhão (gasolina/deslocamento): até ${fmtPctDashboard(limiteAceitavelPct)} da sobra = ${fmtLitrosDashboard(saidaAnalise.consumoGasolinaAceitavelLitros)} L.`,
-      );
-      if (saidaAnalise.status === "suspeita") {
-        alertas.push(
-          `Saída acima da margem: volume suspeito ${fmtLitrosDashboard(saidaAnalise.volumeSuspeitoLitros)} L (saída ${fmtLitrosDashboard(litrosSaidaMelosaAntesChegar)} L − aceitável ${fmtLitrosDashboard(saidaAnalise.consumoGasolinaAceitavelLitros)} L).`,
-        );
-        if (status === "ok") status = "atencao";
-      }
-    }
 
     if (litrosNaMelosaApos != null) {
       notas.push(

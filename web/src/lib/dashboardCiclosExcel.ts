@@ -20,8 +20,7 @@ export type DashboardDesvioExcelRow = {
   ativo_melosa_texto: string;
   ativo_equipamento_texto: string | null;
   litros: number;
-  medidor_inicial: string | null;
-  medidor_final: string | null;
+  quantidade_abastecida: string | null;
   medidor_esperado: number | null;
   desvio_litros: number | null;
 };
@@ -125,8 +124,7 @@ export async function downloadDashboardCiclosExcel(
       { header: "Melosa", key: "melosa", width: 14 },
       { header: "Equipamento", key: "equipamento", width: 14 },
       { header: "Litros", key: "litros", width: 10 },
-      { header: "Medidor inicial", key: "medidor_inicial", width: 16 },
-      { header: "Medidor final", key: "medidor_final", width: 16 },
+      { header: "Quantidade abastecida", key: "quantidade_abastecida", width: 20 },
       { header: "Esperado (anterior)", key: "esperado", width: 18 },
       { header: "Desvio (L)", key: "desvio", width: 12 },
     ];
@@ -137,8 +135,7 @@ export async function downloadDashboardCiclosExcel(
         melosa: d.ativo_melosa_texto,
         equipamento: d.ativo_equipamento_texto ?? "",
         litros: d.litros,
-        medidor_inicial: d.medidor_inicial ?? "",
-        medidor_final: d.medidor_final ?? "",
+        quantidade_abastecida: d.quantidade_abastecida ?? "",
         esperado: d.medidor_esperado ?? "",
         desvio: d.desvio_litros ?? "",
       });

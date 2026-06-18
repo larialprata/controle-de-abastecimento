@@ -44,17 +44,13 @@ export async function resolveEquipamentosQrBatch(
   token: string,
   itens: EquipamentoQrResolveItem[],
 ): Promise<EquipamentoQrResolved[]> {
-  const { itens: resolved } = await apiPost<{ itens: EquipamentoQrResolved[] }>(
-    "/v1/equipamentos/qr/resolve",
-    token,
-    {
-      itens: itens.map((item) => ({
-        ativo: item.ativo,
-        nome: item.nome ?? undefined,
-        obra_codigo: item.obra_codigo ?? null,
-        tipo: item.tipo,
-      })),
-    },
-  );
+  const { itens: resolved } = (await apiPost("/v1/equipamentos/qr/resolve", token, {
+    itens: itens.map((item) => ({
+      ativo: item.ativo,
+      nome: item.nome ?? undefined,
+      obra_codigo: item.obra_codigo ?? null,
+      tipo: item.tipo,
+    })),
+  })) as { itens: EquipamentoQrResolved[] };
   return resolved;
 }

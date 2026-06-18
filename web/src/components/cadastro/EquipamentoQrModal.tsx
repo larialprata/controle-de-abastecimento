@@ -17,7 +17,6 @@ export type EquipamentoQrModalProps = {
 export default function EquipamentoQrModal({
   ativo,
   nome,
-  tipo,
   obraCodigo,
   token,
   onClose,

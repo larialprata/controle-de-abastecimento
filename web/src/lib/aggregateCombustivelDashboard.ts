@@ -1,7 +1,4 @@
-import {
-  calcQuantidadeLitrosFromMedidores,
-  calcQuantidadeLitrosRetiradaTanqueFromMedidores,
-} from "./descarbonizeExcel";
+import { calcQuantidadeLitrosRetiradaTanqueFromMedidores } from "./descarbonizeExcel";
 
 export type MovimentoRowBase = {
   usuario_id?: string;
