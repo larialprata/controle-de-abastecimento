@@ -40,9 +40,16 @@ if (-not (Test-Path $MobileDest)) {
   throw "Destino incompleto: $MobileDest"
 }
 
-Write-Host "npm install na raiz do monorepo (workspaces)..."
-Set-Location $Dest
-npm install
+Write-Host "npm install em api, web e mobile..."
+foreach ($pkg in @("api", "web", "mobile")) {
+  $pkgPath = Join-Path $Dest $pkg
+  if (-not (Test-Path $pkgPath)) {
+    throw "Pasta ausente: $pkgPath"
+  }
+  Write-Host "  -> $pkg"
+  Set-Location $pkgPath
+  npm install
+}
 
 Write-Host ""
 Write-Host "Pronto. Abra o projeto em:"

@@ -1,7 +1,7 @@
 import { BlurView } from "expo-blur";
 import * as FileSystem from "expo-file-system";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
   Image,
@@ -134,9 +134,10 @@ function AdaptiveCardText({
 }
 
 function useScreenLayout() {
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   return useMemo(() => {
     const contentWidth = Math.min(screenWidth - SCREEN_HORIZONTAL_PADDING * 2, SCREEN_CARD_MAX_WIDTH);
+    const isCompactScreen = screenHeight < 640 || screenWidth < 360;
     const cardShellStyle = {
       width: contentWidth,
       maxWidth: SCREEN_CARD_MAX_WIDTH,
@@ -144,17 +145,21 @@ function useScreenLayout() {
     };
     return {
       screenWidth,
+      screenHeight,
+      isCompactScreen,
       contentWidth,
       cardShellStyle,
       brandLogoSize: {
-        width: Math.min(240, Math.max(150, Math.round(contentWidth * 0.82))),
-        height: Math.min(120, Math.max(68, Math.round(contentWidth * 0.36))),
+        width: Math.min(240, Math.max(120, Math.round(contentWidth * (isCompactScreen ? 0.72 : 0.82)))),
+        height: Math.min(120, Math.max(56, Math.round(contentWidth * (isCompactScreen ? 0.3 : 0.36)))),
       },
       heroImageHeight: Math.min(120, Math.max(76, Math.round(contentWidth * 0.28))),
       statusFontSize: scaleFontSize(14, screenWidth),
       actionTitleFontSize: scaleFontSize(16, screenWidth),
+      authTitleFontSize: scaleFontSize(26, screenWidth),
+      authCardInnerStyle: isCompactScreen ? styles.glassInnerCompact : undefined,
     };
-  }, [screenWidth]);
+  }, [screenWidth, screenHeight]);
 }
 
 function GlassCard({
@@ -302,46 +307,61 @@ function DraggableThemeToggle({
   );
 }
 
-function CenteredScrollView({
-  children,
-  contentContainerStyle,
-  style,
-  keyboardPadding = 0,
-  preferCenter = true,
-  viewportHeightOverride,
-  keyboardDismissMode = "on-drag",
-  scrollEnabled = true,
-}: {
-  children: ReactNode;
-  contentContainerStyle?: StyleProp<ViewStyle>;
-  style?: StyleProp<ViewStyle>;
-  keyboardPadding?: number;
-  preferCenter?: boolean;
-  viewportHeightOverride?: number;
-  keyboardDismissMode?: "none" | "on-drag" | "interactive";
-  scrollEnabled?: boolean;
-}) {
+const CenteredScrollView = forwardRef<
+  ScrollView,
+  {
+    children: ReactNode;
+    contentContainerStyle?: StyleProp<ViewStyle>;
+    style?: StyleProp<ViewStyle>;
+    keyboardPadding?: number;
+    preferCenter?: boolean;
+    viewportHeightOverride?: number;
+    keyboardDismissMode?: "none" | "on-drag" | "interactive";
+    scrollEnabled?: boolean;
+  }
+>(function CenteredScrollView(
+  {
+    children,
+    contentContainerStyle,
+    style,
+    keyboardPadding = 0,
+    preferCenter = true,
+    viewportHeightOverride,
+    keyboardDismissMode = "on-drag",
+    scrollEnabled = true,
+  },
+  ref
+) {
   const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const viewportHeight = viewportHeightOverride && viewportHeightOverride > 0 ? viewportHeightOverride : scrollViewportHeight;
   const scrollTopInset = SCREEN_TOP_INSET;
   const availableHeight = Math.max(0, viewportHeight - scrollTopInset - 12);
+  const keyboardOpen = keyboardPadding > 0;
   const shouldCenter =
-    preferCenter && viewportHeight > 0 && contentHeight > 0 && contentHeight <= availableHeight;
+    preferCenter &&
+    !keyboardOpen &&
+    viewportHeight > 0 &&
+    contentHeight > 0 &&
+    contentHeight <= availableHeight;
   const freeSpace = shouldCenter ? Math.max(0, availableHeight - contentHeight) : 0;
   const paddingTop = shouldCenter ? scrollTopInset + freeSpace / 2 : scrollTopInset;
-  const paddingBottom = shouldCenter ? Math.max(16, freeSpace / 2) : 16;
+  const paddingBottom = keyboardOpen
+    ? keyboardPadding + 48
+    : shouldCenter
+      ? Math.max(16, freeSpace / 2)
+      : 32;
 
   return (
     <ScrollView
+      ref={ref}
       style={[styles.screenScrollFill, style]}
       onLayout={(event) => setScrollViewportHeight(event.nativeEvent.layout.height)}
       contentContainerStyle={[
         styles.centeredScreenScroll,
+        shouldCenter ? styles.centeredScreenScrollCentered : null,
         { paddingTop, paddingBottom },
-        viewportHeight > 0 && !shouldCenter ? { minHeight: viewportHeight } : null,
         contentContainerStyle,
-        keyboardPadding > 0 ? { paddingBottom: keyboardPadding + paddingBottom } : null,
       ]}
       keyboardShouldPersistTaps="always"
       keyboardDismissMode={keyboardDismissMode}
@@ -349,7 +369,7 @@ function CenteredScrollView({
       scrollEnabled={scrollEnabled}
       bounces={scrollEnabled}
       showsVerticalScrollIndicator={scrollEnabled}
-      automaticallyAdjustKeyboardInsets
+      automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
     >
       <View
         style={styles.centeredScrollInner}
@@ -359,23 +379,29 @@ function CenteredScrollView({
       </View>
     </ScrollView>
   );
-}
+});
 
-function FormScreenScroll({
-  children,
-  contentContainerStyle,
-  preferCenter = true,
-  layoutKey,
-  keyboardDismissMode = "on-drag",
-  scrollEnabled = true,
-}: {
-  children: ReactNode;
-  contentContainerStyle?: StyleProp<ViewStyle>;
-  preferCenter?: boolean;
-  layoutKey?: string;
-  keyboardDismissMode?: "none" | "on-drag" | "interactive";
-  scrollEnabled?: boolean;
-}) {
+const FormScreenScroll = forwardRef<
+  ScrollView,
+  {
+    children: ReactNode;
+    contentContainerStyle?: StyleProp<ViewStyle>;
+    preferCenter?: boolean;
+    layoutKey?: string;
+    keyboardDismissMode?: "none" | "on-drag" | "interactive";
+    scrollEnabled?: boolean;
+  }
+>(function FormScreenScroll(
+  {
+    children,
+    contentContainerStyle,
+    preferCenter = true,
+    layoutKey,
+    keyboardDismissMode = "on-drag",
+    scrollEnabled = true,
+  },
+  ref
+) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [scrollAreaHeight, setScrollAreaHeight] = useState(0);
 
@@ -390,27 +416,44 @@ function FormScreenScroll({
     };
   }, []);
 
+  const scrollBody = (
+    <CenteredScrollView
+      ref={ref}
+      contentContainerStyle={contentContainerStyle}
+      keyboardPadding={keyboardHeight}
+      preferCenter={preferCenter && keyboardHeight === 0}
+      viewportHeightOverride={scrollAreaHeight}
+      keyboardDismissMode={keyboardDismissMode}
+      scrollEnabled={scrollEnabled}
+    >
+      {children}
+    </CenteredScrollView>
+  );
+
+  if (Platform.OS === "ios") {
+    return (
+      <KeyboardAvoidingView
+        key={layoutKey}
+        style={styles.formScrollView}
+        behavior="padding"
+        keyboardVerticalOffset={56}
+        onLayout={(event) => setScrollAreaHeight(event.nativeEvent.layout.height)}
+      >
+        {scrollBody}
+      </KeyboardAvoidingView>
+    );
+  }
+
   return (
-    <KeyboardAvoidingView
+    <View
       key={layoutKey}
       style={styles.formScrollView}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 56 : 0}
       onLayout={(event) => setScrollAreaHeight(event.nativeEvent.layout.height)}
     >
-      <CenteredScrollView
-        contentContainerStyle={contentContainerStyle}
-        keyboardPadding={keyboardHeight}
-        preferCenter={preferCenter && keyboardHeight === 0}
-        viewportHeightOverride={scrollAreaHeight}
-        keyboardDismissMode={keyboardDismissMode}
-        scrollEnabled={scrollEnabled}
-      >
-        {children}
-      </CenteredScrollView>
-    </KeyboardAvoidingView>
+      {scrollBody}
+    </View>
   );
-}
+});
 
 function FormActionFooter({ isDarkMode, children }: { isDarkMode: boolean; children: ReactNode }) {
   const { cardShellStyle } = useScreenLayout();
@@ -509,6 +552,19 @@ export default function App() {
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
   const loginEmailRef = useRef<TextInput | null>(null);
   const loginPasswordRef = useRef<TextInput | null>(null);
+  const loginScrollRef = useRef<ScrollView | null>(null);
+  const scrollLoginForInput = (field: "email" | "password") => {
+    requestAnimationFrame(() => {
+      if (field === "password") {
+        loginScrollRef.current?.scrollToEnd({ animated: true });
+        return;
+      }
+      loginScrollRef.current?.scrollTo({
+        y: layout.isCompactScreen ? 72 : 0,
+        animated: true,
+      });
+    });
+  };
   const [regPasswordVisible, setRegPasswordVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -2481,13 +2537,20 @@ export default function App() {
         <SafeAreaView style={styles.screenSafeArea}>
           <View style={styles.screenShell}>
             <FormScreenScroll
+              ref={loginScrollRef}
               contentContainerStyle={styles.authScrollLogin}
               layoutKey="login"
-              keyboardDismissMode="none"
+              preferCenter={layout.screenHeight >= 640}
+              keyboardDismissMode="on-drag"
             >
-              <CardMeasuredWrap layout={layout} isDarkMode={isDarkMode} onBoundsChange={setCardBounds}>
+              <CardMeasuredWrap
+                layout={layout}
+                isDarkMode={isDarkMode}
+                onBoundsChange={setCardBounds}
+                innerStyle={layout.authCardInnerStyle}
+              >
                 <View style={{ flexDirection: "column" }}>
-                  <View style={styles.brandWrap}>
+                  <View style={[styles.brandWrap, layout.isCompactScreen ? styles.brandWrapCompact : null]}>
                   <Image
                     source={require("./assets/logo_compacto.png")}
                     style={[styles.brandLogo, layout.brandLogoSize]}
@@ -2495,7 +2558,15 @@ export default function App() {
                   />
                     </View>
 
-                <Text style={[styles.authTitle, !isDarkMode ? styles.authTitleLight : null]}>Entrar</Text>
+                <Text
+                  style={[
+                    styles.authTitle,
+                    { fontSize: layout.authTitleFontSize },
+                    !isDarkMode ? styles.authTitleLight : null,
+                  ]}
+                >
+                  Entrar
+                </Text>
 
                 <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Email</Text>
                     <TextInput
@@ -2510,6 +2581,7 @@ export default function App() {
                       autoCapitalize="none"
                       keyboardType="email-address"
                       returnKeyType="next"
+                      onFocus={() => scrollLoginForInput("email")}
                       onSubmitEditing={() => {
                         loginPasswordRef.current?.focus();
                       }}
@@ -2532,6 +2604,7 @@ export default function App() {
                         autoCorrect={false}
                         underlineColorAndroid="transparent"
                         returnKeyType="done"
+                        onFocus={() => scrollLoginForInput("password")}
                         onSubmitEditing={onLogin}
                       />
                   <TouchableOpacity
@@ -4292,7 +4365,9 @@ const styles = StyleSheet.create({
     width: "100%",
     alignItems: "center",
     paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-    paddingBottom: 16,
+  },
+  centeredScreenScrollCentered: {
+    justifyContent: "center",
   },
   centeredScrollInner: {
     width: "100%",
@@ -4385,7 +4460,7 @@ const styles = StyleSheet.create({
     paddingBottom: 240,
   },
   authScrollLogin: {
-    paddingBottom: 120,
+    paddingBottom: 24,
   },
   authScrollRegister: {
     paddingBottom: 48,
@@ -4402,6 +4477,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     alignSelf: "center",
     marginBottom: 18,
+  },
+  brandWrapCompact: {
+    marginBottom: 10,
   },
   brandLogo: {
     alignSelf: "center",

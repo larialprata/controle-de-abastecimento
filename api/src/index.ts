@@ -29,7 +29,8 @@ app.use((req, res, next) => {
 app.get("/health", (_req, res) =>
   res.json({
     ok: true,
-    melosa_db_columns: "ativo_melosa_texto,ativo_equipamento_texto",
+    melosa_fluxo: "quantidade_abastecida",
+    melosa_db_columns: "ativo_melosa_texto,ativo_equipamento_texto,melosa_quantidade_abastecida",
   }),
 );
 
