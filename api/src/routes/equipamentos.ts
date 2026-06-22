@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { resolveMobilidadeEquipamento } from "../lib/equipamentoMobilidade";
-import { resolveEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
+import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { parseObraCodigoInput, parseObraReferencia } from "../lib/obraCodigo";
 import {
   buildEquipamentoExternoQrUrl,
@@ -189,7 +189,7 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   const mobilidadeRaw =
     typeof req.query.mobilidade === "string" ? req.query.mobilidade.toUpperCase() : undefined;
   const empresaRaw =
-    typeof req.query.empresa === "string" ? req.query.empresa.toUpperCase() : undefined;
+    typeof req.query.empresa === "string" ? normalizeEquipamentoEmpresa(req.query.empresa) : null;
 
   const service = createSupabaseServiceRole();
   let query = service.from("equipamentos").select(EQUIPAMENTO_SELECT).order("ativo");
@@ -207,9 +207,10 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: formatEquipamentoDbError(error.message) });
   let equipamentos = data ?? [];
-  if (empresaRaw === "DIMENSIONAL" || empresaRaw === "TERCEIRIZADO") {
-    equipamentos = equipamentos.filter(
-      (e) => resolveEquipamentoEmpresa(e.empresa) === empresaRaw,
+  if (empresaRaw) {
+    const empresaNeedle = empresaRaw.toLowerCase();
+    equipamentos = equipamentos.filter((e) =>
+      (normalizeEquipamentoEmpresa(e.empresa) ?? "").toLowerCase() === empresaNeedle,
     );
   }
   return res.json({ equipamentos });
@@ -343,7 +344,7 @@ router.post("/equipamentos", requireAdmin, async (req: AuthedRequest, res) => {
       capacidade_litros: tipo === "MELOSA" ? (capacidade_litros ?? null) : null,
       mobilidade:
         tipo === "EQUIPAMENTO" ? resolveMobilidadeEquipamento(nome, mobilidade) : null,
-      empresa: tipo === "EQUIPAMENTO" ? resolveEquipamentoEmpresa(empresa) : null,
+      empresa: tipo === "EQUIPAMENTO" ? normalizeEquipamentoEmpresa(empresa) : null,
     })
     .select(EQUIPAMENTO_SELECT)
     .single();
@@ -453,7 +454,7 @@ router.post("/equipamentos/import", requireAdmin, async (req: AuthedRequest, res
       obra_codigo,
       capacidade_litros: null,
       mobilidade: resolveMobilidadeEquipamento(nome, item.mobilidade),
-      empresa: resolveEquipamentoEmpresa(item.empresa),
+      empresa: normalizeEquipamentoEmpresa(item.empresa),
     };
 
     if (existing) {
@@ -569,9 +570,9 @@ router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, re
   if (tipo !== "EQUIPAMENTO") {
     empresa = null;
   } else if (parsed.data.empresa !== undefined) {
-    empresa = resolveEquipamentoEmpresa(parsed.data.empresa);
+    empresa = normalizeEquipamentoEmpresa(parsed.data.empresa);
   } else {
-    empresa = resolveEquipamentoEmpresa(existing.empresa);
+    empresa = normalizeEquipamentoEmpresa(existing.empresa);
   }
 
   if (ativoNovo.toLowerCase() !== ativoAtual.toLowerCase()) {

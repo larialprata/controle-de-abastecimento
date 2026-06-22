@@ -1,18 +1,14 @@
-export const EQUIPAMENTO_EMPRESAS = ["DIMENSIONAL", "TERCEIRIZADO"] as const;
-export type EquipamentoEmpresa = (typeof EQUIPAMENTO_EMPRESAS)[number];
+export type EquipamentoEmpresa = string;
 
-export const EQUIPAMENTO_EMPRESA_LABEL: Record<EquipamentoEmpresa, string> = {
-  DIMENSIONAL: "Dimensional",
-  TERCEIRIZADO: "Terceirizado",
-};
-
-export function resolveEquipamentoEmpresa(raw: string | null | undefined): EquipamentoEmpresa {
-  if (!raw?.trim()) return "TERCEIRIZADO";
-  const s = raw.trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
-  if (s === "dimensional" || s === "dim" || s.startsWith("dim")) return "DIMENSIONAL";
-  return "TERCEIRIZADO";
+export function normalizeEquipamentoEmpresa(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const trimmed = raw.trim().replace(/\s+/g, " ");
+  const upper = trimmed.toUpperCase();
+  if (upper === "TERCEIRIZADO" || upper === "TERCEIRIZADA") return null;
+  if (upper === "DIMENSIONAL") return "Dimensional";
+  return trimmed.length > 100 ? trimmed.slice(0, 100) : trimmed;
 }
 
 export function labelEquipamentoEmpresa(empresa: string | null | undefined): string {
-  return EQUIPAMENTO_EMPRESA_LABEL[resolveEquipamentoEmpresa(empresa)];
+  return normalizeEquipamentoEmpresa(empresa) ?? "—";
 }

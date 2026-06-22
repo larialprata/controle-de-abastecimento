@@ -5,11 +5,9 @@ import { useAuth } from "../../state/AuthContext";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api";
 import { resolveMobilidadeEquipamento } from "../../lib/equipamentoMobilidade";
 import {
-  EQUIPAMENTO_EMPRESA_LABEL,
-  EQUIPAMENTO_EMPRESAS,
+  collectEmpresasFromRows,
   labelEquipamentoEmpresa,
-  resolveEquipamentoEmpresa,
-  type EquipamentoEmpresa,
+  normalizeEquipamentoEmpresa,
 } from "../../lib/equipamentoEmpresa";
 import {
   chunkImportRows,
@@ -33,7 +31,7 @@ type EquipamentoRow = {
   obra_codigo: number | null;
   capacidade_litros?: number | null;
   mobilidade?: EquipamentoMobilidade | null;
-  empresa?: EquipamentoEmpresa | null;
+  empresa?: string | null;
 };
 
 const MOBILIDADE_LABEL: Record<EquipamentoMobilidade, string> = {
@@ -94,9 +92,9 @@ export default function CadastroAtivosPage({
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [formMobilidade, setFormMobilidade] = useState<"" | EquipamentoMobilidade>("");
-  const [formDimensional, setFormDimensional] = useState(false);
+  const [formEmpresa, setFormEmpresa] = useState("");
   const [filtroMobilidade, setFiltroMobilidade] = useState<"" | EquipamentoMobilidade>("");
-  const [filtroEmpresa, setFiltroEmpresa] = useState<"" | EquipamentoEmpresa>("");
+  const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [importModo, setImportModo] = useState<"upsert" | "criar">("upsert");
   const [importRows, setImportRows] = useState<EquipamentoImportRow[]>([]);
@@ -147,11 +145,22 @@ export default function CadastroAtivosPage({
     });
   }, [equipamentos]);
 
+  const empresasCadastradas = useMemo(
+    () => collectEmpresasFromRows(equipamentos),
+    [equipamentos],
+  );
+
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase();
+    const filtroEmpresaNorm = normalizeEquipamentoEmpresa(filtroEmpresa);
     return equipamentos.filter((e) => {
       if (filtroMobilidade && e.mobilidade !== filtroMobilidade) return false;
-      if (filtroEmpresa && resolveEquipamentoEmpresa(e.empresa) !== filtroEmpresa) return false;
+      if (
+        filtroEmpresaNorm &&
+        normalizeEquipamentoEmpresa(e.empresa)?.toLowerCase() !== filtroEmpresaNorm.toLowerCase()
+      ) {
+        return false;
+      }
       if (!q) return true;
       return (
         (e.ativo ?? "").toLowerCase().includes(q) ||
@@ -235,7 +244,7 @@ export default function CadastroAtivosPage({
     setFormObraCodigo("");
     setFormCapacidadeLitros("");
     setFormMobilidade("");
-    setFormDimensional(false);
+    setFormEmpresa("");
     setFormError(null);
     setFormOpen(true);
   }, []);
@@ -251,7 +260,7 @@ export default function CadastroAtivosPage({
         : "",
     );
     setFormMobilidade(e.mobilidade ?? "");
-    setFormDimensional(resolveEquipamentoEmpresa(e.empresa) === "DIMENSIONAL");
+    setFormEmpresa(e.empresa ?? "");
     setFormError(null);
     setFormOpen(true);
   }, []);
@@ -331,7 +340,7 @@ export default function CadastroAtivosPage({
     }
 
     if (showEmpresa) {
-      payload.empresa = formDimensional ? "DIMENSIONAL" : "TERCEIRIZADO";
+      payload.empresa = normalizeEquipamentoEmpresa(formEmpresa);
     }
 
     setFormSaving(true);
@@ -350,7 +359,7 @@ export default function CadastroAtivosPage({
         mobilidade: showMobilidade
           ? resolveMobilidadeEquipamento(nomeTrim || ativoTrim, formMobilidade || null)
           : null,
-        empresa: showEmpresa ? (formDimensional ? "DIMENSIONAL" : "TERCEIRIZADO") : null,
+        empresa: showEmpresa ? normalizeEquipamentoEmpresa(formEmpresa) : null,
       };
       const wasCreate = !isEditing;
       setFormOpen(false);
@@ -360,7 +369,7 @@ export default function CadastroAtivosPage({
       setFormObraCodigo("");
       setFormCapacidadeLitros("");
       setFormMobilidade("");
-      setFormDimensional(false);
+      setFormEmpresa("");
       await load();
       if (enableQrCode && wasCreate) {
         setQrTarget(savedRow);
@@ -377,7 +386,7 @@ export default function CadastroAtivosPage({
     formAtivo,
     formCapacidadeLitros,
     formMobilidade,
-    formDimensional,
+    formEmpresa,
     formNome,
     formObraCodigo,
     isEditing,
@@ -639,12 +648,12 @@ export default function CadastroAtivosPage({
             <select
               className={glassField}
               value={filtroEmpresa}
-              onChange={(e) => setFiltroEmpresa(e.target.value as "" | EquipamentoEmpresa)}
+              onChange={(e) => setFiltroEmpresa(e.target.value)}
             >
               <option value="">Todas</option>
-              {EQUIPAMENTO_EMPRESAS.map((empresa) => (
+              {empresasCadastradas.map((empresa) => (
                 <option key={empresa} value={empresa}>
-                  {EQUIPAMENTO_EMPRESA_LABEL[empresa]}
+                  {labelEquipamentoEmpresa(empresa)}
                 </option>
               ))}
             </select>
@@ -955,26 +964,29 @@ export default function CadastroAtivosPage({
               ) : null}
 
               {showEmpresa ? (
-                <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
+                <div>
+                  <label htmlFor="cadastro-form-empresa" className="mb-1 block text-xs font-bold uppercase text-slate-500">
+                    Empresa (opcional)
+                  </label>
                   <input
-                    id="cadastro-form-dimensional"
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
-                    checked={formDimensional}
-                    onChange={(e) => setFormDimensional(e.target.checked)}
+                    id="cadastro-form-empresa"
+                    type="text"
+                    list="cadastro-empresas-sugestoes"
+                    className={glassField}
+                    placeholder="Ex.: Dimensional, Construtora Alfa"
+                    value={formEmpresa}
+                    onChange={(e) => setFormEmpresa(e.target.value)}
                     disabled={formSaving}
+                    maxLength={100}
                   />
-                  <div>
-                    <label
-                      htmlFor="cadastro-form-dimensional"
-                      className="block text-sm font-semibold text-slate-900 dark:text-white"
-                    >
-                      Equipamento da Dimensional
-                    </label>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Se desmarcado, o equipamento é considerado <strong>Terceirizado</strong>.
-                    </p>
-                  </div>
+                  <datalist id="cadastro-empresas-sugestoes">
+                    {empresasCadastradas.map((empresa) => (
+                      <option key={empresa} value={empresa} />
+                    ))}
+                  </datalist>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Informe o nome da empresa proprietária do equipamento.
+                  </p>
                 </div>
               ) : null}
 
@@ -1080,7 +1092,8 @@ export default function CadastroAtivosPage({
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
               Envie um arquivo <strong>.xlsx</strong> ou <strong>.csv</strong>. Aceita colunas{" "}
               <code className="text-xs">PATRIMÔNIO</code> / <code className="text-xs">EQUIPAMENTO</code> ou o modelo
-              padrão (coluna <strong>empresa</strong> opcional: use <strong>Dimensional</strong> ou deixe em branco para Terceirizado). Linhas duplicadas são unificadas
+              padrão (coluna <strong>empresa</strong> opcional: informe o nome da empresa, ex.{" "}
+              <strong>Dimensional</strong>, <strong>Construtora Alfa</strong>). Linhas duplicadas são unificadas
               por patrimônio.
             </p>
 

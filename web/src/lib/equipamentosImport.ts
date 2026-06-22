@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 
 import { resolveMobilidadeEquipamento, type EquipamentoMobilidade } from "./equipamentoMobilidade";
-import { parseEquipamentoEmpresa, type EquipamentoEmpresa } from "./equipamentoEmpresa";
+import { parseEquipamentoEmpresa } from "./equipamentoEmpresa";
 import { parseObraReferencia } from "./obraCodigo";
 
 export type EquipamentoImportRow = {
@@ -11,7 +11,7 @@ export type EquipamentoImportRow = {
   obra_codigo?: number | null;
   obra_nome?: string;
   mobilidade?: EquipamentoMobilidade | null;
-  empresa?: EquipamentoEmpresa;
+  empresa?: string | null;
 };
 
 export type EquipamentoImportParseError = {
@@ -159,6 +159,18 @@ function mapRow(
     };
   }
 
+  const empresaRaw = cellStr(raw.empresa);
+  if (empresaRaw) {
+    const upper = empresaRaw.toUpperCase();
+    if (upper === "TERCEIRIZADO" || upper === "TERCEIRIZADA") {
+      return {
+        error: {
+          linha,
+          mensagem: `Empresa inválida "${empresaRaw}". Informe o nome da empresa (ex.: Dimensional, Construtora Alfa).`,
+        },
+      };
+    }
+  }
   const empresa = parseEquipamentoEmpresa(raw.empresa);
 
   const nomeFinal = nome || ativo;
@@ -229,7 +241,8 @@ export function downloadEquipamentosImportTemplate(): void {
   const data = [
     ["ativo", "descricao", "obra_codigo", "mobilidade", "empresa"],
     ["ASD123", "Escavadeira CAT 320", "00.230", "Móvel", "Dimensional"],
-    ["GER-01", "Gerador obra central", "", "Estacionário", ""],
+    ["GER-01", "Gerador obra central", "", "Estacionário", "Construtora Alfa"],
+    ["CAM-88", "Caminhão basculante", "00.229", "Móvel", "Transportes Beta"],
   ];
   const sheet = XLSX.utils.aoa_to_sheet(data);
   XLSX.utils.book_append_sheet(wb, sheet, "Equipamentos");

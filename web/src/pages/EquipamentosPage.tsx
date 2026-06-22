@@ -7,10 +7,10 @@ export default function EquipamentosPage() {
       title="Equipamentos"
       description={
         <>
-          Cadastro dos <strong>equipamentos abastecidos</strong>. Marque apenas se for da{" "}
-          <strong>Dimensional</strong>; caso contrário é <strong>Terceirizado</strong>. Informe também se é{" "}
-          <strong>estacionário</strong> ou <strong>móvel</strong>. Clique no <strong>ativo</strong> ou na{" "}
-          <strong>descrição</strong> para ver o QR code. Use <strong>Exportar QR</strong> para imprimir em lote.
+          Cadastro dos <strong>equipamentos abastecidos</strong>. Informe a <strong>empresa</strong> proprietária
+          (ex.: Dimensional, Construtora Alfa) e se é <strong>estacionário</strong> ou <strong>móvel</strong>. Clique
+          no <strong>ativo</strong> ou na <strong>descrição</strong> para ver o QR code. Use{" "}
+          <strong>Exportar QR</strong> para imprimir em lote.
         </>
       }
       ativoPlaceholder="Ex.: ASD123"

@@ -39,11 +39,7 @@ import { readImageUriAsArrayBuffer } from "./src/lib/readImageUri";
 import { lightTheme } from "./src/theme/light";
 import EquipamentoQrScanner from "./src/components/EquipamentoQrScanner";
 import MelosaSignaturePad from "./src/components/MelosaSignaturePad";
-import {
-  EQUIPAMENTO_EMPRESAS,
-  EQUIPAMENTO_EMPRESA_LABEL,
-  type EquipamentoEmpresa,
-} from "./src/lib/equipamentoEmpresa";
+import { labelEquipamentoEmpresa } from "./src/lib/equipamentoEmpresa";
 import { normalizeEquipamentoQrScan, parseAbastEquipamentoQrAtivo } from "./src/lib/equipamentoQr";
 import { base64ToArrayBuffer, parseBase64DataUrl } from "./src/lib/signatureImage";
 
@@ -332,25 +328,29 @@ const CenteredScrollView = forwardRef<
   },
   ref
 ) {
+  const scrollTopInset = SCREEN_TOP_INSET;
   const [scrollViewportHeight, setScrollViewportHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
   const viewportHeight = viewportHeightOverride && viewportHeightOverride > 0 ? viewportHeightOverride : scrollViewportHeight;
-  const scrollTopInset = SCREEN_TOP_INSET;
-  const availableHeight = Math.max(0, viewportHeight - scrollTopInset - 12);
   const keyboardOpen = keyboardPadding > 0;
   const shouldCenter =
     preferCenter &&
     !keyboardOpen &&
     viewportHeight > 0 &&
     contentHeight > 0 &&
-    contentHeight <= availableHeight;
-  const freeSpace = shouldCenter ? Math.max(0, availableHeight - contentHeight) : 0;
-  const paddingTop = shouldCenter ? scrollTopInset + freeSpace / 2 : scrollTopInset;
-  const paddingBottom = keyboardOpen
-    ? keyboardPadding + 48
-    : shouldCenter
-      ? Math.max(16, freeSpace / 2)
-      : 32;
+    contentHeight + 24 <= viewportHeight;
+  const centeredContainerStyle = shouldCenter
+    ? {
+        flexGrow: 1,
+        minHeight: viewportHeight,
+        justifyContent: "center" as const,
+        paddingTop: 12,
+        paddingBottom: 12,
+      }
+    : {
+        paddingTop: scrollTopInset,
+        paddingBottom: keyboardOpen ? keyboardPadding + 48 : 32,
+      };
 
   return (
     <ScrollView
@@ -359,8 +359,7 @@ const CenteredScrollView = forwardRef<
       onLayout={(event) => setScrollViewportHeight(event.nativeEvent.layout.height)}
       contentContainerStyle={[
         styles.centeredScreenScroll,
-        shouldCenter ? styles.centeredScreenScrollCentered : null,
-        { paddingTop, paddingBottom },
+        centeredContainerStyle,
         contentContainerStyle,
       ]}
       keyboardShouldPersistTaps="always"
@@ -587,7 +586,7 @@ export default function App() {
   const [melosaPlacaTexto, setMelosaPlacaTexto] = useState("");
   const [melosaFornecedorTexto, setMelosaFornecedorTexto] = useState("");
   const [melosaEquipamentoNomeTexto, setMelosaEquipamentoNomeTexto] = useState("");
-  const [melosaEquipamentoEmpresa, setMelosaEquipamentoEmpresa] = useState<"" | EquipamentoEmpresa>("");
+  const [melosaEquipamentoEmpresa, setMelosaEquipamentoEmpresa] = useState("");
   const [melosaEquipamentoQrOpen, setMelosaEquipamentoQrOpen] = useState(false);
   const [melosaEquipamentoQrLoading, setMelosaEquipamentoQrLoading] = useState(false);
   const [melosaTanqueNumero, setMelosaTanqueNumero] = useState<1 | 2>(1);
@@ -822,14 +821,14 @@ export default function App() {
     try {
       const qrNormalized = normalizeEquipamentoQrScan(qrData);
       const { equipamento } = await apiPost<{
-        equipamento: { ativo: string; nome: string | null; empresa: EquipamentoEmpresa; source: string };
+        equipamento: { ativo: string; nome: string | null; empresa: string | null; source: string };
       }>("/v1/equipamentos/qr/lookup", session.access_token, {
         qr: qrNormalized || qrData.trim(),
         obra_codigo: melosaObraCodigo,
       });
       setMelosaFornecedorTexto(equipamento.ativo);
       setMelosaEquipamentoNomeTexto(equipamento.nome?.trim() || "");
-      setMelosaEquipamentoEmpresa(equipamento.empresa);
+      setMelosaEquipamentoEmpresa(equipamento.empresa ?? "");
       setMelosaEquipamentoQrOpen(false);
       const origem =
         equipamento.source === "externo"
@@ -840,14 +839,14 @@ export default function App() {
       const nome = equipamento.nome && equipamento.nome !== equipamento.ativo ? `\n${equipamento.nome}` : "";
       Alert.alert(
         "Equipamento identificado",
-        `Ativo: ${equipamento.ativo}\nEmpresa: ${EQUIPAMENTO_EMPRESA_LABEL[equipamento.empresa]}${nome}\n\nFonte: ${origem}`,
+        `Ativo: ${equipamento.ativo}\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}${nome}\n\nFonte: ${origem}`,
       );
     } catch (e: unknown) {
       const ativoLocal = parseAbastEquipamentoQrAtivo(qrData);
       if (ativoLocal) {
         setMelosaFornecedorTexto(ativoLocal);
         setMelosaEquipamentoNomeTexto("");
-        setMelosaEquipamentoEmpresa("TERCEIRIZADO");
+        setMelosaEquipamentoEmpresa("");
         setMelosaEquipamentoQrOpen(false);
         Alert.alert(
           "Equipamento identificado (QR interno)",
@@ -2540,7 +2539,7 @@ export default function App() {
               ref={loginScrollRef}
               contentContainerStyle={styles.authScrollLogin}
               layoutKey="login"
-              preferCenter={layout.screenHeight >= 640}
+              preferCenter
               keyboardDismissMode="on-drag"
             >
               <CardMeasuredWrap
@@ -3159,22 +3158,14 @@ export default function App() {
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
                     Empresa do equipamento
                   </Text>
-                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                    <Picker
-                      selectedValue={melosaEquipamentoEmpresa}
-                      onValueChange={(v) => setMelosaEquipamentoEmpresa(v as "" | EquipamentoEmpresa)}
-                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                    >
-                      <Picker.Item label="Selecione a empresa" value="" />
-                      {EQUIPAMENTO_EMPRESAS.map((empresa) => (
-                        <Picker.Item
-                          key={empresa}
-                          label={EQUIPAMENTO_EMPRESA_LABEL[empresa]}
-                          value={empresa}
-                        />
-                      ))}
-                    </Picker>
-                  </View>
+                  <TextInput
+                    value={melosaEquipamentoEmpresa}
+                    onChangeText={setMelosaEquipamentoEmpresa}
+                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                    placeholder="Nome da empresa (ex.: Dimensional, Construtora Alfa)"
+                    placeholderTextColor={inputPlaceholderColor}
+                    maxLength={100}
+                  />
                 </>
               ) : null}
 
@@ -4365,9 +4356,6 @@ const styles = StyleSheet.create({
     width: "100%",
     alignItems: "center",
     paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-  },
-  centeredScreenScrollCentered: {
-    justifyContent: "center",
   },
   centeredScrollInner: {
     width: "100%",

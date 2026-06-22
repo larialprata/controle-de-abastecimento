@@ -1,4 +1,4 @@
-import { resolveEquipamentoEmpresa, type EquipamentoEmpresa } from "./equipamentoEmpresa";
+import { normalizeEquipamentoEmpresa } from "./equipamentoEmpresa";
 import {
   findEquipamentoExterno,
   findEquipamentoExternoByQrToken,
@@ -10,7 +10,7 @@ const ABAST_QR_TIPOS = new Set(["EQUIPAMENTO", "MELOSA", "TANQUE"]);
 export type EquipamentoQrLookupResult = {
   ativo: string;
   nome: string | null;
-  empresa: EquipamentoEmpresa;
+  empresa: string | null;
   source: "abast" | "externo";
 };
 
@@ -100,14 +100,14 @@ export async function lookupEquipamentoFromQr(
       return {
         ativo: abast.ativo,
         nome: abast.nome,
-        empresa: resolveEquipamentoEmpresa(abast.empresa),
+        empresa: normalizeEquipamentoEmpresa(abast.empresa),
         source: "abast",
       };
     }
     return {
       ativo: parsed.ativo.trim(),
       nome: null,
-      empresa: "TERCEIRIZADO",
+      empresa: null,
       source: "abast",
     };
   }
@@ -127,7 +127,7 @@ export async function lookupEquipamentoFromQr(
     return {
       ativo: abast.ativo,
       nome: abast.nome ?? externo.name,
-      empresa: resolveEquipamentoEmpresa(abast.empresa),
+      empresa: normalizeEquipamentoEmpresa(abast.empresa),
       source: "abast",
     };
   }
@@ -135,7 +135,7 @@ export async function lookupEquipamentoFromQr(
   return {
     ativo,
     nome: externo.name,
-    empresa: resolveEquipamentoEmpresa(externo.company_name),
+    empresa: normalizeEquipamentoEmpresa(externo.company_name),
     source: "externo",
   };
 }
@@ -153,7 +153,7 @@ export async function lookupEquipamentoByAtivo(
     return {
       ativo: abast.ativo,
       nome: abast.nome,
-      empresa: resolveEquipamentoEmpresa(abast.empresa),
+      empresa: normalizeEquipamentoEmpresa(abast.empresa),
       source: "abast",
     };
   }
@@ -164,7 +164,7 @@ export async function lookupEquipamentoByAtivo(
   return {
     ativo: normalizeAtivoPlacaExterno(externo.ativo_placa),
     nome: externo.name,
-    empresa: resolveEquipamentoEmpresa(externo.company_name),
+    empresa: normalizeEquipamentoEmpresa(externo.company_name),
     source: "externo",
   };
 }

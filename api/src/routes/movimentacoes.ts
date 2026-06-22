@@ -4,7 +4,7 @@ import { createSupabaseServiceRole } from "../lib/supabase";
 import { criarCicloRetiradaTanque, vincularAbastecimentoAoCicloAberto } from "../lib/melosaCiclo";
 import { parseMedidorNumero } from "../lib/melosaMedidorContinuidade";
 import { envValidated } from "../config";
-import { resolveEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
+import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 
 const router = Router();
@@ -623,7 +623,7 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     const fornecedorNorm =
       (payload.ativo_equipamento_texto?.trim() || payload.fornecedor_texto?.trim() || "").trim() || null;
     const equipamentoEmpresaNorm = payload.ativo_equipamento_empresa
-      ? resolveEquipamentoEmpresa(payload.ativo_equipamento_empresa)
+      ? normalizeEquipamentoEmpresa(payload.ativo_equipamento_empresa)
       : null;
     const tanqueNum = payload.tanque_numero;
 
