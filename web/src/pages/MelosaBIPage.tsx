@@ -8,6 +8,7 @@ import { apiGet, apiPost } from "../lib/api";
 import { fmtTicketNumero, ticketNumeroParaFiltro } from "../lib/ticketNumero";
 import { downloadMelosaDescarbonizeExcel, type MelosaExcelRowInput } from "../lib/melosaDescarbonizeExcel";
 import { enrichMelosaTicketRowsWithSignatures } from "../lib/melosaPhotoUrl";
+import { fmtEquipamentoTicketLabel, enrichMelosaRowsWithEquipamentoDescricao } from "../lib/equipamentoTicketLabel";
 import { biTableRowKey, resolveSelectedRows } from "../lib/biSelection";
 import {
   defaultPeriodoMesAtual,
@@ -39,6 +40,7 @@ type LinhaMelosa = Record<string, unknown> & {
   placa_texto?: string | null;
   ativo_melosa_texto?: string | null;
   ativo_equipamento_texto?: string | null;
+  ativo_equipamento_nome?: string | null;
   tanque_numero?: number | string | null;
   melosa_combustivel_tipo_registro?: string | null;
   melosa_combustivel_tipo_retirada?: string | null;
@@ -176,7 +178,10 @@ function fmtAtivoPlaca(m: LinhaMelosa): string {
 }
 
 function fmtAtivoEquipamento(m: LinhaMelosa): string {
-  return fmt(m.ativo_equipamento_texto ?? m.fornecedor_texto);
+  return fmtEquipamentoTicketLabel(
+    m.ativo_equipamento_texto ?? m.fornecedor_texto,
+    m.ativo_equipamento_nome,
+  );
 }
 
 function fmtObra(m: LinhaMelosa): string {
@@ -415,12 +420,30 @@ export default function MelosaBIPage() {
         }),
       );
 
-      const rowsForTicket = selectedRows.map((r) => {
+      const selectedWithNumeros = selectedRows.map((r) => {
         const op = typeof r.operation_id === "string" ? r.operation_id : "";
         const n = op ? numeros[op] : undefined;
-        const withNumero = n != null ? { ...r, ticket_numero: n } : r;
-        return buildMelosaTicketRow(withNumero);
+        return n != null ? { ...r, ticket_numero: n } : r;
       });
+
+      const withDescricao = await enrichMelosaRowsWithEquipamentoDescricao(
+        token,
+        selectedWithNumeros,
+        async (ativo, obraCodigo) => {
+          try {
+            const json = (await apiPost("/v1/equipamentos/qr/lookup", token, {
+              qr: ativo,
+              obra_codigo: obraCodigo,
+            })) as { equipamento?: { nome?: string | null } };
+            const nome = json.equipamento?.nome?.trim();
+            return nome ? { nome } : null;
+          } catch {
+            return null;
+          }
+        },
+      );
+
+      const rowsForTicket = withDescricao.map((r) => buildMelosaTicketRow(r));
       setTicketRows(rowsForTicket);
       setTicketOpen(true);
 

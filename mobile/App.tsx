@@ -539,7 +539,7 @@ export default function App() {
     saveThemeTogglePosition(position);
   };
 
-  const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
+  const [themeMode, setThemeMode] = useState<"dark" | "light">("light");
   const isDarkMode = themeMode === "dark";
   const barStyle = isDarkMode ? "light" : "dark";
   const inputPlaceholderColor = isDarkMode ? "rgba(255,255,255,0.65)" : lightTheme.placeholder;
@@ -582,6 +582,11 @@ export default function App() {
   const [isMelosaUser, setIsMelosaUser] = useState(false);
 
   const [melosasCadastradas, setMelosasCadastradas] = useState<{ ativo: string; nome: string | null }[]>([]);
+  const [obrasCadastradas, setObrasCadastradas] = useState<{ codigo: number; nome: string }[]>([]);
+  const obrasDisponiveis = useMemo(
+    () => (obrasCadastradas.length > 0 ? obrasCadastradas : [...OBRAS]),
+    [obrasCadastradas],
+  );
   const [melosaObraCodigo, setMelosaObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
   const [melosaPlacaTexto, setMelosaPlacaTexto] = useState("");
   const [melosaFornecedorTexto, setMelosaFornecedorTexto] = useState("");
@@ -589,6 +594,9 @@ export default function App() {
   const [melosaEquipamentoEmpresa, setMelosaEquipamentoEmpresa] = useState("");
   const [melosaEquipamentoQrOpen, setMelosaEquipamentoQrOpen] = useState(false);
   const [melosaEquipamentoQrLoading, setMelosaEquipamentoQrLoading] = useState(false);
+  const [melosaEquipamentoAtivoLookupLoading, setMelosaEquipamentoAtivoLookupLoading] = useState(false);
+  const melosaAtivoLookupSeqRef = useRef(0);
+  const skipMelosaAtivoLookupRef = useRef(false);
   const [melosaTanqueNumero, setMelosaTanqueNumero] = useState<1 | 2>(1);
   const [melosaRegKmText, setMelosaRegKmText] = useState("");
   const [melosaRegLitrosText, setMelosaRegLitrosText] = useState("");
@@ -598,7 +606,7 @@ export default function App() {
   const [melosaQuantidadeAbastecidaFotoUri, setMelosaQuantidadeAbastecidaFotoUri] = useState<string | null>(null);
   const [melosaHorimetroEquipamentoNumero, setMelosaHorimetroEquipamentoNumero] = useState("");
   const [melosaHorimetroEquipamentoFotoUri, setMelosaHorimetroEquipamentoFotoUri] = useState<string | null>(null);
-  const [melosaNaoTenhoHorimetro, setMelosaNaoTenhoHorimetro] = useState(true);
+  const [melosaNaoTenhoHorimetro, setMelosaNaoTenhoHorimetro] = useState(false);
   const [melosaMotoristaEquipamentoTexto, setMelosaMotoristaEquipamentoTexto] = useState("");
   const [melosaEquipamentoOperadorFotoUri, setMelosaEquipamentoOperadorFotoUri] = useState<string | null>(null);
   const [melosaAssinaturaOperadorDataUrl, setMelosaAssinaturaOperadorDataUrl] = useState<string | null>(null);
@@ -718,6 +726,59 @@ export default function App() {
       .catch(() => setMelosasCadastradas([]));
   }, [session?.access_token]);
 
+  const melosaRegisterAberta = screen.name === "melosa" && screen.step === "register";
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      setObrasCadastradas([]);
+      return;
+    }
+    apiGet<{ obras: { codigo: number; nome: string }[] }>("/v1/obras", session.access_token)
+      .then((json) => setObrasCadastradas(json.obras ?? []))
+      .catch(() => setObrasCadastradas([]));
+  }, [session?.access_token, melosaRegisterAberta]);
+
+  useEffect(() => {
+    if (screen.name !== "melosa" || screen.step !== "register") return;
+
+    const ativo = melosaFornecedorTexto.trim();
+    if (!ativo) {
+      setMelosaEquipamentoNomeTexto("");
+      setMelosaEquipamentoEmpresa("");
+      setMelosaEquipamentoAtivoLookupLoading(false);
+      return;
+    }
+
+    if (skipMelosaAtivoLookupRef.current) {
+      skipMelosaAtivoLookupRef.current = false;
+      return;
+    }
+
+    if (!session?.access_token || !isOnline) return;
+
+    const seq = ++melosaAtivoLookupSeqRef.current;
+    const timer = setTimeout(() => {
+      setMelosaEquipamentoAtivoLookupLoading(true);
+      void fetchMelosaEquipamentoByAtivo(ativo)
+        .then((equipamento) => {
+          if (seq !== melosaAtivoLookupSeqRef.current) return;
+          if (equipamento) {
+            applyMelosaEquipamentoLookup(equipamento);
+          } else {
+            setMelosaEquipamentoNomeTexto("");
+            setMelosaEquipamentoEmpresa("");
+          }
+        })
+        .finally(() => {
+          if (seq === melosaAtivoLookupSeqRef.current) {
+            setMelosaEquipamentoAtivoLookupLoading(false);
+          }
+        });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [melosaFornecedorTexto, melosaObraCodigo, session?.access_token, isOnline, screen]);
+
   useEffect(() => {
     if (!session?.access_token) return;
     if (!isOnline) return;
@@ -775,13 +836,14 @@ export default function App() {
   }
 
   function resetMelosaFlow() {
-    setMelosaObraCodigo(OBRAS[0]?.codigo ?? 229);
+    setMelosaObraCodigo(obrasDisponiveis[0]?.codigo ?? 229);
     setMelosaPlacaTexto("");
     setMelosaFornecedorTexto("");
     setMelosaEquipamentoNomeTexto("");
     setMelosaEquipamentoEmpresa("");
     setMelosaEquipamentoQrOpen(false);
     setMelosaEquipamentoQrLoading(false);
+    setMelosaEquipamentoAtivoLookupLoading(false);
     setMelosaTanqueNumero(1);
     setMelosaRegKmText("");
     setMelosaRegLitrosText("");
@@ -789,7 +851,7 @@ export default function App() {
     setMelosaComprovanteFotoUri(null);
     setMelosaQuantidadeAbastecidaTexto("");
     setMelosaQuantidadeAbastecidaFotoUri(null);
-    setMelosaNaoTenhoHorimetro(true);
+    setMelosaNaoTenhoHorimetro(false);
     setMelosaHorimetroEquipamentoNumero("");
     setMelosaHorimetroEquipamentoFotoUri(null);
     setMelosaMotoristaEquipamentoTexto("");
@@ -803,6 +865,50 @@ export default function App() {
     setLocalLatitude(null);
     setLocalLongitude(null);
     setLocalAddress(null);
+  }
+
+  type MelosaEquipamentoLookup = {
+    ativo: string;
+    nome: string | null;
+    empresa: string | null;
+    source: string;
+  };
+
+  function normalizeAtivoCompact(value: string): string {
+    return value.trim().toUpperCase().replace(/\s+/g, "");
+  }
+
+  function pickMelosaEquipamentoDescricao(ativo: string, nome?: string | null): string {
+    const descricao = nome?.trim() || "";
+    if (!descricao) return "";
+    if (normalizeAtivoCompact(descricao) === normalizeAtivoCompact(ativo)) return "";
+    return descricao;
+  }
+
+  function applyMelosaEquipamentoLookup(equipamento: Pick<MelosaEquipamentoLookup, "ativo" | "nome" | "empresa">) {
+    setMelosaEquipamentoNomeTexto(pickMelosaEquipamentoDescricao(equipamento.ativo, equipamento.nome));
+    setMelosaEquipamentoEmpresa(equipamento.empresa ?? "");
+  }
+
+  async function fetchMelosaEquipamentoByQr(qr: string): Promise<MelosaEquipamentoLookup | null> {
+    if (!session?.access_token || !qr.trim()) return null;
+    try {
+      const { equipamento } = await apiPost<{ equipamento: MelosaEquipamentoLookup }>(
+        "/v1/equipamentos/qr/lookup",
+        session.access_token,
+        {
+          qr: qr.trim(),
+          obra_codigo: melosaObraCodigo,
+        },
+      );
+      return equipamento;
+    } catch {
+      return null;
+    }
+  }
+
+  async function fetchMelosaEquipamentoByAtivo(ativo: string): Promise<MelosaEquipamentoLookup | null> {
+    return fetchMelosaEquipamentoByQr(ativo);
   }
 
   async function handleMelosaEquipamentoQrScanned(qrData: string) {
@@ -820,15 +926,13 @@ export default function App() {
     setMelosaEquipamentoQrLoading(true);
     try {
       const qrNormalized = normalizeEquipamentoQrScan(qrData);
-      const { equipamento } = await apiPost<{
-        equipamento: { ativo: string; nome: string | null; empresa: string | null; source: string };
-      }>("/v1/equipamentos/qr/lookup", session.access_token, {
-        qr: qrNormalized || qrData.trim(),
-        obra_codigo: melosaObraCodigo,
-      });
+      const equipamento = await fetchMelosaEquipamentoByQr(qrNormalized || qrData.trim());
+      if (!equipamento?.ativo?.trim()) {
+        throw new Error("Equipamento não encontrado.");
+      }
+      skipMelosaAtivoLookupRef.current = true;
       setMelosaFornecedorTexto(equipamento.ativo);
-      setMelosaEquipamentoNomeTexto(equipamento.nome?.trim() || "");
-      setMelosaEquipamentoEmpresa(equipamento.empresa ?? "");
+      applyMelosaEquipamentoLookup(equipamento);
       setMelosaEquipamentoQrOpen(false);
       const origem =
         equipamento.source === "externo"
@@ -836,21 +940,31 @@ export default function App() {
           : equipamento.source === "abast"
             ? "Controle Abast"
             : "cadastro local";
-      const nome = equipamento.nome && equipamento.nome !== equipamento.ativo ? `\n${equipamento.nome}` : "";
+      const descricao = pickMelosaEquipamentoDescricao(equipamento.ativo, equipamento.nome);
+      const descricaoLabel = descricao ? `\nDescrição: ${descricao}` : "";
       Alert.alert(
         "Equipamento identificado",
-        `Ativo: ${equipamento.ativo}\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}${nome}\n\nFonte: ${origem}`,
+        `Ativo: ${equipamento.ativo}\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}${descricaoLabel}\n\nFonte: ${origem}`,
       );
     } catch (e: unknown) {
       const ativoLocal = parseAbastEquipamentoQrAtivo(qrData);
       if (ativoLocal) {
-        setMelosaFornecedorTexto(ativoLocal);
-        setMelosaEquipamentoNomeTexto("");
-        setMelosaEquipamentoEmpresa("");
+        const equipamento = await fetchMelosaEquipamentoByAtivo(ativoLocal);
+        skipMelosaAtivoLookupRef.current = true;
+        setMelosaFornecedorTexto(equipamento?.ativo ?? ativoLocal);
+        if (equipamento) {
+          applyMelosaEquipamentoLookup(equipamento);
+        } else {
+          setMelosaEquipamentoNomeTexto("");
+          setMelosaEquipamentoEmpresa("");
+        }
         setMelosaEquipamentoQrOpen(false);
+        const empresaLabel = equipamento?.empresa
+          ? `\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}`
+          : "";
         Alert.alert(
           "Equipamento identificado (QR interno)",
-          `Ativo: ${ativoLocal}\n\nOs dados completos não puderam ser carregados da API. Confira o ativo e a empresa antes de salvar.`,
+          `Ativo: ${equipamento?.ativo ?? ativoLocal}${empresaLabel}\n\n${equipamento ? "Dados carregados da API." : "Os dados completos não puderam ser carregados da API. Confira o ativo antes de salvar."}`,
         );
         return;
       }
@@ -2453,7 +2567,7 @@ export default function App() {
     }
   }
 
-  function continueMelosaRegister() {
+  async function continueMelosaRegister() {
     if (!melosaPlacaTexto.trim()) {
       Alert.alert("Ativo Melosa obrigatório", "Informe o Ativo Melosa.");
       return;
@@ -2461,6 +2575,18 @@ export default function App() {
     if (!melosaFornecedorTexto.trim()) {
       Alert.alert("Ativo do Equipamento obrigatório", "Informe o Ativo do Equipamento.");
       return;
+    }
+
+    if (isOnline && session?.access_token) {
+      setMelosaEquipamentoAtivoLookupLoading(true);
+      try {
+        const equipamento = await fetchMelosaEquipamentoByAtivo(melosaFornecedorTexto.trim());
+        if (equipamento) {
+          applyMelosaEquipamentoLookup(equipamento);
+        }
+      } finally {
+        setMelosaEquipamentoAtivoLookupLoading(false);
+      }
     }
 
     setMessage(null);
@@ -2481,7 +2607,7 @@ export default function App() {
       return;
     }
     setMessage(null);
-    setMelosaNaoTenhoHorimetro(true);
+    setMelosaNaoTenhoHorimetro(false);
     setScreen({ name: "melosa", step: "horimetro" });
   }
 
@@ -2802,7 +2928,6 @@ export default function App() {
                 </CardMeasuredWrap>
               </CenteredScrollView>
             </KeyboardAvoidingView>
-            {themeToggleOverlay}
           </View>
         </SafeAreaView>
       </View>
@@ -2974,7 +3099,6 @@ export default function App() {
               {message ? <Text style={[styles.homeMessage, !isDarkMode ? styles.homeMessageLight : null]}>{message}</Text> : null}
             </CardMeasuredWrap>
           </CenteredScrollView>
-          {themeToggleOverlay}
         </View>
       </SafeAreaView>
     );
@@ -2986,10 +3110,9 @@ export default function App() {
     const isQuantidadeAbastecida = melosaStep === "quantidade_abastecida";
     const isHorimetro = melosaStep === "horimetro";
     const isResumo = melosaStep === "resumo";
-    const obraResumo = OBRAS.find((o) => o.codigo === melosaObraCodigo);
+    const obraResumo = obrasDisponiveis.find((o) => o.codigo === melosaObraCodigo);
     const obraResumoLabel = obraResumo ? `${obraResumo.codigo} - ${obraResumo.nome}` : String(melosaObraCodigo);
-    const equipamentoNomeResumo =
-      melosaEquipamentoNomeTexto.trim() || melosaFornecedorTexto.trim() || "—";
+    const equipamentoDescricaoResumo = melosaEquipamentoNomeTexto.trim() || "—";
     const horimetroResumoLabel = melosaNaoTenhoHorimetro
       ? "—"
       : melosaHorimetroEquipamentoNumero.trim() || "—";
@@ -3006,7 +3129,7 @@ export default function App() {
             : "Retirada melosa";
 
     const melosaPrimaryAction = isRegister
-      ? continueMelosaRegister
+      ? () => void continueMelosaRegister()
       : isQuantidadeAbastecida
         ? continueMelosaQuantidadeAbastecida
         : isHorimetro
@@ -3089,7 +3212,7 @@ export default function App() {
                       onValueChange={(v) => setMelosaObraCodigo(Number(v))}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
-                      {OBRAS.map((o) => (
+                      {obrasDisponiveis.map((o) => (
                         <Picker.Item key={o.codigo} label={`${o.codigo} - ${o.nome}`} value={o.codigo} />
                       ))}
                     </Picker>
@@ -3154,18 +3277,11 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     autoCapitalize="characters"
                   />
-
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
-                    Empresa do equipamento
-                  </Text>
-                  <TextInput
-                    value={melosaEquipamentoEmpresa}
-                    onChangeText={setMelosaEquipamentoEmpresa}
-                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Nome da empresa (ex.: Dimensional, Construtora Alfa)"
-                    placeholderTextColor={inputPlaceholderColor}
-                    maxLength={100}
-                  />
+                  {melosaEquipamentoQrLoading || melosaEquipamentoAtivoLookupLoading ? (
+                    <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
+                      Buscando dados do equipamento…
+                    </Text>
+                  ) : null}
                 </>
               ) : null}
 
@@ -3475,10 +3591,18 @@ export default function App() {
                     </View>
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
-                        Nome do equipamento
+                        Descrição do equipamento
                       </Text>
                       <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
-                        {equipamentoNomeResumo}
+                        {equipamentoDescricaoResumo}
+                      </Text>
+                    </View>
+                    <View style={styles.melosaResumoRow}>
+                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                        Empresa do equipamento
+                      </Text>
+                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                        {labelEquipamentoEmpresa(melosaEquipamentoEmpresa)}
                       </Text>
                     </View>
                     <View style={styles.melosaResumoRow}>
@@ -3527,7 +3651,6 @@ export default function App() {
               </CardMeasuredWrap>
             </FormScreenScroll>
             {melosaActionFooter}
-            {themeToggleOverlay}
           </View>
         </SafeAreaView>
         <EquipamentoQrScanner
@@ -3660,7 +3783,7 @@ export default function App() {
                       onValueChange={(v) => setObraCodigo(Number(v))}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
-                      {OBRAS.map((o) => (
+                      {obrasDisponiveis.map((o) => (
                         <Picker.Item key={o.codigo} label={`${o.codigo} - ${o.nome}`} value={o.codigo} />
                       ))}
                     </Picker>
@@ -3777,7 +3900,7 @@ export default function App() {
                       onValueChange={(v) => setObraCodigo(Number(v))}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
-                      {OBRAS.map((o) => (
+                      {obrasDisponiveis.map((o) => (
                         <Picker.Item key={o.codigo} label={`${o.codigo} - ${o.nome}`} value={o.codigo} />
                       ))}
                     </Picker>
@@ -4129,7 +4252,6 @@ export default function App() {
               </CardMeasuredWrap>
             </FormScreenScroll>
             {tanqueActionFooter}
-            {themeToggleOverlay}
           </View>
         </SafeAreaView>
       </View>
@@ -4155,7 +4277,7 @@ export default function App() {
 
         <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Obra</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled style={{ marginTop: 6 }}>
-          {OBRAS.map((o) => {
+          {obrasDisponiveis.map((o) => {
             const selected = o.codigo === obraCodigo;
             return (
               <TouchableOpacity
@@ -4249,7 +4371,6 @@ export default function App() {
             </TouchableOpacity>
           </View>
           </FormActionFooter>
-          {themeToggleOverlay}
         </View>
       </SafeAreaView>
     </View>

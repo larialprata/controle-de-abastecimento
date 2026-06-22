@@ -86,6 +86,58 @@ type AbastEquipamentoRow = {
   empresa: string | null;
 };
 
+async function resolveDadosExternos(
+  ativo: string,
+  obraCodigo?: number | null,
+): Promise<{ nome: string | null; empresa: string | null }> {
+  let row = await findEquipamentoExterno(ativo, obraCodigo ?? null);
+  if (!row?.ativo_placa && obraCodigo != null) {
+    row = await findEquipamentoExterno(ativo, null);
+  }
+  if (!row) return { nome: null, empresa: null };
+  return {
+    nome: row.name?.trim() || null,
+    empresa: normalizeEquipamentoEmpresa(row.company_name),
+  };
+}
+
+function pickEquipamentoDescricao(
+  ativo: string,
+  abastNome: string | null | undefined,
+  externoNome: string | null | undefined,
+): string | null {
+  const abast = abastNome?.trim() || null;
+  const externo = externoNome?.trim() || null;
+  const ativoNorm = normalizeAtivoPlacaExterno(ativo);
+
+  const abastEhDescricao = Boolean(abast && normalizeAtivoPlacaExterno(abast) !== ativoNorm);
+  const externoEhDescricao = Boolean(externo && normalizeAtivoPlacaExterno(externo) !== ativoNorm);
+
+  if (abastEhDescricao) return abast;
+  if (externoEhDescricao) return externo;
+  if (abast) return abast;
+  if (externo) return externo;
+  return null;
+}
+
+function buildLookupResult(input: {
+  ativo: string;
+  abastNome: string | null | undefined;
+  abastEmpresa: string | null | undefined;
+  externoNome: string | null | undefined;
+  externoEmpresa: string | null | undefined;
+  source: "abast" | "externo";
+}): EquipamentoQrLookupResult {
+  return {
+    ativo: input.ativo,
+    nome: pickEquipamentoDescricao(input.ativo, input.abastNome, input.externoNome),
+    empresa:
+      normalizeEquipamentoEmpresa(input.abastEmpresa) ??
+      normalizeEquipamentoEmpresa(input.externoEmpresa),
+    source: input.source,
+  };
+}
+
 export async function lookupEquipamentoFromQr(
   qr: string,
   obraCodigo: number | null | undefined,
@@ -97,13 +149,20 @@ export async function lookupEquipamentoFromQr(
   if (parsed?.kind === "abast") {
     const abast = await loadAbastEquipamento(parsed.ativo, obraCodigo);
     if (abast) {
-      return {
+      const externos = await resolveDadosExternos(parsed.ativo, obraCodigo);
+      return buildLookupResult({
         ativo: abast.ativo,
-        nome: abast.nome,
-        empresa: normalizeEquipamentoEmpresa(abast.empresa),
+        abastNome: abast.nome,
+        abastEmpresa: abast.empresa,
+        externoNome: externos.nome,
+        externoEmpresa: externos.empresa,
         source: "abast",
-      };
+      });
     }
+
+    const fallback = await lookupEquipamentoByAtivo(parsed.ativo, obraCodigo, loadAbastEquipamento);
+    if (fallback) return fallback;
+
     return {
       ativo: parsed.ativo.trim(),
       nome: null,
@@ -124,20 +183,24 @@ export async function lookupEquipamentoFromQr(
   const abast = await loadAbastEquipamento(ativo, obra);
 
   if (abast) {
-    return {
+    return buildLookupResult({
       ativo: abast.ativo,
-      nome: abast.nome ?? externo.name,
-      empresa: normalizeEquipamentoEmpresa(abast.empresa),
+      abastNome: abast.nome,
+      abastEmpresa: abast.empresa,
+      externoNome: externo.name,
+      externoEmpresa: externo.company_name,
       source: "abast",
-    };
+    });
   }
 
-  return {
+  return buildLookupResult({
     ativo,
-    nome: externo.name,
-    empresa: normalizeEquipamentoEmpresa(externo.company_name),
+    abastNome: null,
+    abastEmpresa: null,
+    externoNome: externo.name,
+    externoEmpresa: externo.company_name,
     source: "externo",
-  };
+  });
 }
 
 export async function lookupEquipamentoByAtivo(
@@ -150,21 +213,37 @@ export async function lookupEquipamentoByAtivo(
 
   const abast = await loadAbastEquipamento(norm, obraCodigo);
   if (abast) {
-    return {
+    const externos = await resolveDadosExternos(norm, obraCodigo);
+    return buildLookupResult({
       ativo: abast.ativo,
-      nome: abast.nome,
-      empresa: normalizeEquipamentoEmpresa(abast.empresa),
+      abastNome: abast.nome,
+      abastEmpresa: abast.empresa,
+      externoNome: externos.nome,
+      externoEmpresa: externos.empresa,
       source: "abast",
-    };
+    });
   }
 
   const externo = await findEquipamentoExterno(norm, obraCodigo ?? null);
-  if (!externo?.ativo_placa) return null;
+  if (!externo?.ativo_placa) {
+    const externoSemObra = obraCodigo != null ? await findEquipamentoExterno(norm, null) : null;
+    if (!externoSemObra?.ativo_placa) return null;
+    return buildLookupResult({
+      ativo: normalizeAtivoPlacaExterno(externoSemObra.ativo_placa),
+      abastNome: null,
+      abastEmpresa: null,
+      externoNome: externoSemObra.name,
+      externoEmpresa: externoSemObra.company_name,
+      source: "externo",
+    });
+  }
 
-  return {
+  return buildLookupResult({
     ativo: normalizeAtivoPlacaExterno(externo.ativo_placa),
-    nome: externo.name,
-    empresa: normalizeEquipamentoEmpresa(externo.company_name),
+    abastNome: null,
+    abastEmpresa: null,
+    externoNome: externo.name,
+    externoEmpresa: externo.company_name,
     source: "externo",
-  };
+  });
 }

@@ -8,6 +8,7 @@ import {
   buildEquipamentoExternoQrUrl,
   findEquipamentoExterno,
   isEquipamentosExternosConfigured,
+  normalizeAtivoPlacaExterno,
 } from "../lib/equipamentosExternos";
 import { lookupEquipamentoFromQr } from "../lib/equipamentoQrLookup";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
@@ -135,32 +136,37 @@ async function loadAbastEquipamentoByAtivo(
   obraCodigo?: number | null,
 ): Promise<{ ativo: string; nome: string | null; empresa: string | null } | null> {
   const service = createSupabaseServiceRole();
-  const norm = ativo.trim().toUpperCase().replace(/\s+/g, "");
+  const norm = normalizeAtivoPlacaExterno(ativo);
   if (!norm) return null;
 
-  if (obraCodigo != null && obraCodigo > 0) {
-    const { data, error } = await service
-      .from("equipamentos")
-      .select("ativo, nome, empresa")
-      .eq("tipo", "EQUIPAMENTO")
-      .ilike("ativo", norm)
-      .eq("obra_codigo", obraCodigo)
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) return { ativo: data.ativo, nome: data.nome, empresa: data.empresa };
+  const searchNeedles = [...new Set([ativo.trim(), ativo.trim().toUpperCase(), norm].filter(Boolean))];
+
+  async function findInScope(scopeObra?: number | null) {
+    for (const needle of searchNeedles) {
+      let query = service
+        .from("equipamentos")
+        .select("ativo, nome, empresa")
+        .eq("tipo", "EQUIPAMENTO")
+        .ilike("ativo", needle);
+      if (scopeObra != null && scopeObra > 0) {
+        query = query.eq("obra_codigo", scopeObra);
+      }
+      const { data, error } = await query.limit(8);
+      if (error) throw error;
+      const match = (data ?? []).find((row) => normalizeAtivoPlacaExterno(row.ativo) === norm);
+      if (match) {
+        return { ativo: match.ativo, nome: match.nome, empresa: match.empresa };
+      }
+    }
+    return null;
   }
 
-  const { data: anyObra, error: err2 } = await service
-    .from("equipamentos")
-    .select("ativo, nome, empresa")
-    .eq("tipo", "EQUIPAMENTO")
-    .ilike("ativo", norm)
-    .limit(1)
-    .maybeSingle();
-  if (err2) throw err2;
-  if (!anyObra) return null;
-  return { ativo: anyObra.ativo, nome: anyObra.nome, empresa: anyObra.empresa };
+  if (obraCodigo != null && obraCodigo > 0) {
+    const scoped = await findInScope(obraCodigo);
+    if (scoped) return scoped;
+  }
+
+  return findInScope(null);
 }
 
 const lookupQrSchema = z.object({

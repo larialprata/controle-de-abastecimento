@@ -140,7 +140,9 @@ function TicketSheet({
           <tr>
             <td className="w-[34%] border border-black px-2 py-2 align-top">
               <span className="font-bold uppercase">Equipamento</span>
-              <div className="mt-1 min-h-[2rem] font-medium">{row.equipamento}</div>
+              <div className="mt-1 min-h-[2rem] whitespace-normal break-words font-medium leading-snug">
+                {row.equipamento}
+              </div>
             </td>
             <td className="w-[22%] border border-black px-2 py-2 align-top">
               <span className="font-bold uppercase">Obra</span>
