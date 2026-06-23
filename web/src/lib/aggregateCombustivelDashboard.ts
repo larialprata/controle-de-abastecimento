@@ -16,6 +16,7 @@ export type MovimentoTanqueRow = MovimentoRowBase & {
   tanque_numero?: number | string | null;
   medidor_tanque_numero_inicial?: string | null;
   medidor_tanque_numero_final?: string | null;
+  tanque_quantidade_abastecida?: string | null;
 };
 
 export type TanquePrincipalAggregate = {
@@ -142,6 +143,8 @@ function litrosEntradaTanque(litros: unknown): number {
 }
 
 function litrosRetiradaTanque(row: MovimentoTanqueRow): number {
+  const fromQuantidade = parseLitrosField(row.tanque_quantidade_abastecida);
+  if (fromQuantidade != null && fromQuantidade > 0) return fromQuantidade;
   const fromMedidor = calcQuantidadeLitrosRetiradaTanqueFromMedidores(
     row.medidor_tanque_numero_inicial,
     row.medidor_tanque_numero_final,

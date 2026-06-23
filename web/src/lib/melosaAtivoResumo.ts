@@ -121,6 +121,7 @@ type TanqueRow = MovimentoTanqueRow &
     combustivel_tipo?: string | null;
     medidor_tanque_numero_inicial?: string | null;
     medidor_tanque_numero_final?: string | null;
+    tanque_quantidade_abastecida?: string | null;
   };
 
 type MelosaRow = MovimentoMelosaRow &
@@ -225,6 +226,8 @@ function litrosEntrada(litros: unknown): number {
 }
 
 function litrosRetiradaTanqueRow(m: TanqueRow): number {
+  const fromQuantidade = parseMedidorNumero(m.tanque_quantidade_abastecida);
+  if (fromQuantidade != null && fromQuantidade > 0) return fromQuantidade;
   const fromMedidor = calcQuantidadeLitrosRetiradaTanqueFromMedidores(
     m.medidor_tanque_numero_inicial,
     m.medidor_tanque_numero_final,
@@ -240,6 +243,8 @@ function litrosMelosaRow(m: MelosaRow): number {
 }
 
 function medidorDetalheTanque(m: TanqueRow): string {
+  const qtd = m.tanque_quantidade_abastecida;
+  if (qtd != null && String(qtd).trim()) return `Qtd. abastecida: ${String(qtd).trim()} L`;
   const ini = m.medidor_tanque_numero_inicial;
   const fin = m.medidor_tanque_numero_final;
   if (ini == null && fin == null) return "";

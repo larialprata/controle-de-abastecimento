@@ -89,6 +89,53 @@ router.patch("/obras/:codigo", requireAdmin, async (req: AuthedRequest, res) => 
   return res.json({ obra: data });
 });
 
+async function countObraReferencias(service: ReturnType<typeof createSupabaseServiceRole>, codigo: number) {
+  const tables = ["movimentacoes", "melosa_movimentacoes", "equipamentos", "melosa_ciclos"] as const;
+  const counts: Record<string, number> = {};
+  for (const table of tables) {
+    const { count, error } = await service
+      .from(table)
+      .select("*", { count: "exact", head: true })
+      .eq("obra_codigo", codigo);
+    if (error) throw error;
+    counts[table] = count ?? 0;
+  }
+  return counts;
+}
+
+router.delete("/obras/:codigo", requireAdmin, async (req: AuthedRequest, res) => {
+  const codigo = Number(req.params.codigo);
+  if (!Number.isFinite(codigo) || codigo <= 0) {
+    return res.status(400).json({ error: "Código inválido." });
+  }
+
+  const service = createSupabaseServiceRole();
+  const { data: existing } = await service.from("obras").select("codigo").eq("codigo", codigo).maybeSingle();
+  if (!existing) {
+    return res.status(404).json({ error: `Obra ${codigo} não encontrada.` });
+  }
+
+  try {
+    const refs = await countObraReferencias(service, codigo);
+    const total = Object.values(refs).reduce((a, b) => a + b, 0);
+    if (total > 0) {
+      const parts = Object.entries(refs)
+        .filter(([, n]) => n > 0)
+        .map(([t, n]) => `${t.replace(/_/g, " ")} (${n})`);
+      return res.status(409).json({
+        error: `Não é possível excluir: o contrato ${codigo} está vinculado a ${parts.join(", ")}.`,
+      });
+    }
+
+    const { error } = await service.from("obras").delete().eq("codigo", codigo);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ ok: true, codigo });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Erro ao verificar vínculos do contrato.";
+    return res.status(500).json({ error: msg });
+  }
+});
+
 router.get("/ping", requireAuth, async (_req: AuthedRequest, res) => res.json({ ok: true }));
 
 export default router;

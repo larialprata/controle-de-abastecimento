@@ -48,7 +48,7 @@ type Screen =
   | { name: "login" }
   | { name: "registro" }
   | { name: "home" }
-  | { name: "form"; tipo: MovimentoTipo; retiradaStep?: "dados" | "detalhes" | "medidor" | "confirmacao" }
+  | { name: "form"; tipo: MovimentoTipo; retiradaStep?: "dados" | "detalhes" | "quantidade_abastecida" | "resumo" }
   | { name: "melosa"; step: "register" | "quantidade_abastecida" | "horimetro" | "resumo" };
 
 /** Espaço reservado no scroll para o rodapé fixo (Salvar/Cancelar) + barra do sistema. */
@@ -353,6 +353,35 @@ const CenteredScrollView = forwardRef<
         paddingBottom: keyboardOpen ? keyboardPadding + 48 : 32,
       };
 
+  if (!scrollEnabled) {
+    return (
+      <ScrollView
+        ref={ref}
+        style={[styles.screenScrollFill, style]}
+        onLayout={(event) => setScrollViewportHeight(event.nativeEvent.layout.height)}
+        contentContainerStyle={[
+          styles.centeredScreenScroll,
+          centeredContainerStyle,
+          contentContainerStyle,
+        ]}
+        keyboardShouldPersistTaps="always"
+        keyboardDismissMode={keyboardDismissMode}
+        nestedScrollEnabled={false}
+        scrollEnabled={false}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+      >
+        <View
+          style={styles.centeredScrollInner}
+          onLayout={(event) => setContentHeight(event.nativeEvent.layout.height)}
+        >
+          {children}
+        </View>
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView
       ref={ref}
@@ -608,10 +637,12 @@ export default function App() {
   const [melosaHorimetroEquipamentoNumero, setMelosaHorimetroEquipamentoNumero] = useState("");
   const [melosaHorimetroEquipamentoFotoUri, setMelosaHorimetroEquipamentoFotoUri] = useState<string | null>(null);
   const [melosaNaoTenhoHorimetro, setMelosaNaoTenhoHorimetro] = useState(false);
+  const [melosaLubrificado, setMelosaLubrificado] = useState(false);
   const [melosaMotoristaEquipamentoTexto, setMelosaMotoristaEquipamentoTexto] = useState("");
   const [melosaEquipamentoOperadorFotoUri, setMelosaEquipamentoOperadorFotoUri] = useState<string | null>(null);
   const [melosaAssinaturaOperadorDataUrl, setMelosaAssinaturaOperadorDataUrl] = useState<string | null>(null);
   const [melosaAssinaturaMotoristaDataUrl, setMelosaAssinaturaMotoristaDataUrl] = useState<string | null>(null);
+  const [signatureScrollLocked, setSignatureScrollLocked] = useState(false);
   const [melosaWdrKmText, setMelosaWdrKmText] = useState("");
   const [melosaWdrLitrosText, setMelosaWdrLitrosText] = useState("");
   const [melosaWdrCombustivelTipo, setMelosaWdrCombustivelTipo] = useState("DIESEL");
@@ -635,11 +666,10 @@ export default function App() {
   const [numeroLacreMelosa, setNumeroLacreMelosa] = useState("");
   const [lacreTanqueFotoUri, setLacreTanqueFotoUri] = useState<string | null>(null);
   const [lacreMelosaFotoUri, setLacreMelosaFotoUri] = useState<string | null>(null);
-  const [numeroInicialMedidorTanque, setNumeroInicialMedidorTanque] = useState("");
-  const [numeroFinalMedidorTanque, setNumeroFinalMedidorTanque] = useState("");
-  const [medidorTanqueFotoInicialUri, setMedidorTanqueFotoInicialUri] = useState<string | null>(null);
-  const [medidorTanqueFotoFinalUri, setMedidorTanqueFotoFinalUri] = useState<string | null>(null);
-  const [confirmacaoAbastecimentoFotoUri, setConfirmacaoAbastecimentoFotoUri] = useState<string | null>(null);
+  const [tanqueQuantidadeAbastecidaTexto, setTanqueQuantidadeAbastecidaTexto] = useState("");
+  const [tanqueQuantidadeAbastecidaFotoUri, setTanqueQuantidadeAbastecidaFotoUri] = useState<string | null>(null);
+  const [tanqueAssinaturaOperadorDataUrl, setTanqueAssinaturaOperadorDataUrl] = useState<string | null>(null);
+  const [tanqueAssinaturaMelosaDataUrl, setTanqueAssinaturaMelosaDataUrl] = useState<string | null>(null);
   const [tanqueNumero, setTanqueNumero] = useState<1 | 2>(1);
   const [valorUnitarioText, setValorUnitarioText] = useState<string>("");
   const [notaFotoUri, setNotaFotoUri] = useState<string | null>(null);
@@ -659,11 +689,16 @@ export default function App() {
       if (screen.tipo === "ENTRADA_TANQUE_OBRA" || screen.tipo === "RETIRADA_TANQUE") {
         safeCaptureLocationAndAddress();
       }
+      if (screen.tipo !== "RETIRADA_TANQUE" || screen.retiradaStep !== "resumo") {
+        setSignatureScrollLocked(false);
+      }
       return;
     }
     if (screen.name === "melosa" && screen.step === "resumo") {
       safeCaptureLocationAndAddress();
+      return;
     }
+    setSignatureScrollLocked(false);
   }, [screen]);
 
   useEffect(() => {
@@ -810,11 +845,10 @@ export default function App() {
     setNumeroLacreMelosa("");
     setLacreTanqueFotoUri(null);
     setLacreMelosaFotoUri(null);
-    setNumeroInicialMedidorTanque("");
-    setNumeroFinalMedidorTanque("");
-    setMedidorTanqueFotoInicialUri(null);
-    setMedidorTanqueFotoFinalUri(null);
-    setConfirmacaoAbastecimentoFotoUri(null);
+    setTanqueQuantidadeAbastecidaTexto("");
+    setTanqueQuantidadeAbastecidaFotoUri(null);
+    setTanqueAssinaturaOperadorDataUrl(null);
+    setTanqueAssinaturaMelosaDataUrl(null);
     setTanqueNumero(1);
     setValorUnitarioText("");
     setNotaFotoUri(null);
@@ -853,6 +887,7 @@ export default function App() {
     setMelosaQuantidadeAbastecidaTexto("");
     setMelosaQuantidadeAbastecidaFotoUri(null);
     setMelosaNaoTenhoHorimetro(false);
+    setMelosaLubrificado(false);
     setMelosaHorimetroEquipamentoNumero("");
     setMelosaHorimetroEquipamentoFotoUri(null);
     setMelosaMotoristaEquipamentoTexto("");
@@ -1294,10 +1329,10 @@ export default function App() {
     setHorimetroFotoUri(asset.uri);
   }
 
-  async function pickMedidorTanqueFotoInicialFromLibrary() {
+  async function pickTanqueQuantidadeAbastecidaFromLibrary() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto inicial do medidor do tanque.");
+      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do medidor de abastecimento.");
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -1308,13 +1343,13 @@ export default function App() {
     if (result.canceled) return;
     const asset = result.assets?.[0];
     if (!asset?.uri) return;
-    setMedidorTanqueFotoInicialUri(asset.uri);
+    setTanqueQuantidadeAbastecidaFotoUri(asset.uri);
   }
 
-  async function pickMedidorTanqueFotoInicialFromCamera() {
+  async function pickTanqueQuantidadeAbastecidaFromCamera() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto inicial do medidor do tanque.");
+      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do medidor de abastecimento.");
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -1325,75 +1360,7 @@ export default function App() {
     if (result.canceled) return;
     const asset = result.assets?.[0];
     if (!asset?.uri) return;
-    setMedidorTanqueFotoInicialUri(asset.uri);
-  }
-
-  async function pickMedidorTanqueFotoFinalFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto final do medidor do tanque.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMedidorTanqueFotoFinalUri(asset.uri);
-  }
-
-  async function pickMedidorTanqueFotoFinalFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto final do medidor do tanque.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMedidorTanqueFotoFinalUri(asset.uri);
-  }
-
-  async function pickConfirmacaoAbastecimentoFotoFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto de confirmação do abastecimento.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setConfirmacaoAbastecimentoFotoUri(asset.uri);
-  }
-
-  async function pickConfirmacaoAbastecimentoFotoFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto de confirmação do abastecimento.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setConfirmacaoAbastecimentoFotoUri(asset.uri);
+    setTanqueQuantidadeAbastecidaFotoUri(asset.uri);
   }
 
   async function pickMelosaComprovanteFromLibrary() {
@@ -1961,37 +1928,33 @@ export default function App() {
       return;
     }
     setMessage(null);
-    setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "medidor" });
+    setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "quantidade_abastecida" });
   }
 
-  function continueRetiradaTanqueMedidor() {
-    if (!numeroInicialMedidorTanque.trim()) {
-      Alert.alert("Medidor obrigatório", "Informe o número inicial do medidor do tanque.");
+  function continueRetiradaTanqueQuantidadeAbastecida() {
+    if (!tanqueQuantidadeAbastecidaTexto.trim()) {
+      Alert.alert("Quantidade obrigatória", "Informe a quantidade abastecida em litros.");
       return;
     }
-    if (!medidorTanqueFotoInicialUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto inicial do medidor do tanque.");
-      return;
-    }
-    setMessage(null);
-    setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "confirmacao" });
-  }
-
-  function continueRetiradaTanqueConfirmacao() {
-    if (!numeroFinalMedidorTanque.trim()) {
-      Alert.alert("Medidor obrigatório", "Informe o número final do medidor do tanque.");
-      return;
-    }
-    if (!medidorTanqueFotoFinalUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto final do medidor do tanque.");
-      return;
-    }
-    if (!confirmacaoAbastecimentoFotoUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto junto ao tanque.");
+    if (!tanqueQuantidadeAbastecidaFotoUri) {
+      Alert.alert("Foto obrigatória", "Selecione a foto do medidor de abastecimento.");
       return;
     }
     if (!isOnline) {
       Alert.alert("Requer internet", "Para enviar as fotos, você precisa estar online.");
+      return;
+    }
+    setMessage(null);
+    setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "resumo" });
+  }
+
+  function continueRetiradaTanqueResumo() {
+    if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaOperadorDataUrl)) {
+      Alert.alert("Assinatura obrigatória", "Peça ao operador do tanque para assinar no resumo.");
+      return;
+    }
+    if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaMelosaDataUrl)) {
+      Alert.alert("Assinatura obrigatória", "Peça ao responsável pela melosa para assinar no resumo.");
       return;
     }
     setMessage(null);
@@ -2083,42 +2046,31 @@ export default function App() {
         Alert.alert("Lacres obrigatórios", "Preencha os dados e fotos dos lacres para continuar.");
         return;
       }
-      if (!numeroInicialMedidorTanque.trim()) {
-        Alert.alert("Medidor obrigatório", "Informe o número inicial do medidor do tanque.");
+      if (!tanqueQuantidadeAbastecidaTexto.trim()) {
+        Alert.alert("Quantidade obrigatória", "Informe a quantidade abastecida em litros.");
         return;
       }
-      if (!medidorTanqueFotoInicialUri) {
-        Alert.alert("Foto obrigatória", "Selecione a foto inicial do medidor do tanque.");
+      if (!tanqueQuantidadeAbastecidaFotoUri) {
+        Alert.alert("Foto obrigatória", "Selecione a foto do medidor de abastecimento.");
         return;
       }
-      if (!confirmacaoAbastecimentoFotoUri) {
-        Alert.alert("Foto obrigatória", "Selecione a foto junto ao tanque.");
-        return;
-      }
-      if (!numeroFinalMedidorTanque.trim()) {
-        Alert.alert("Medidor obrigatório", "Informe o número final do medidor do tanque.");
-        return;
-      }
-      if (!medidorTanqueFotoFinalUri) {
-        Alert.alert("Foto obrigatória", "Selecione a foto final do medidor do tanque.");
-        return;
-      }
-      const medidorInicialTanque = parseMelosaMedidorNumero(numeroInicialMedidorTanque);
-      const medidorFinalTanque = parseMelosaMedidorNumero(numeroFinalMedidorTanque);
-      if (medidorInicialTanque == null || medidorFinalTanque == null) {
-        Alert.alert("Medidor inválido", "Informe números válidos no medidor inicial e final do tanque.");
+      if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaOperadorDataUrl)) {
+        Alert.alert("Assinatura obrigatória", "Peça ao operador do tanque para assinar no resumo.");
         setBusy(false);
         return;
       }
-      if (medidorFinalTanque <= medidorInicialTanque) {
-        Alert.alert(
-          "Medidor inválido",
-          "O número final do medidor deve ser maior que o inicial (litros retirados = final − inicial)."
-        );
+      if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaMelosaDataUrl)) {
+        Alert.alert("Assinatura obrigatória", "Peça ao responsável pela melosa para assinar no resumo.");
         setBusy(false);
         return;
       }
-      litros = medidorFinalTanque - medidorInicialTanque;
+      const litrosTanque = parseMelosaMedidorNumero(tanqueQuantidadeAbastecidaTexto);
+      if (litrosTanque == null || litrosTanque <= 0) {
+        Alert.alert("Quantidade inválida", "Informe uma quantidade abastecida válida em litros.");
+        setBusy(false);
+        return;
+      }
+      litros = litrosTanque;
       if (!isOnline) {
         Alert.alert("Requer internet", "Para enviar fotos, você precisa estar online.");
         return;
@@ -2145,9 +2097,9 @@ export default function App() {
     let notaStoragePath: string | null = null;
     let lacreTanqueStoragePath: string | null = null;
     let lacreMelosaStoragePath: string | null = null;
-    let medidorTanqueFotoInicialStoragePath: string | null = null;
-    let medidorTanqueFotoFinalStoragePath: string | null = null;
-    let confirmacaoAbastecimentoFotoStoragePath: string | null = null;
+    let tanqueQuantidadeAbastecidaStoragePath: string | null = null;
+    let tanqueAssinaturaOperadorStoragePath: string | null = null;
+    let tanqueAssinaturaMelosaStoragePath: string | null = null;
     let retiradaHorimetroFotoStoragePath: string | null = null;
 
     if (isEntradaTanqueObra) {
@@ -2173,12 +2125,29 @@ export default function App() {
     if (isRetiradaTanque) {
       const LACRE_TANQUE_BUCKET = "lacre_tanque";
       const LACRE_MELOSA_BUCKET = "lacre_melosa";
-      const MEDIDOR_TANQUE_BUCKET = "medidor_tanque";
-      const CONFIRMACAO_ABASTECIMENTO_BUCKET = "confirmacao_abastecimento";
+      const FOTO_QUANTIDADE_ABASTECIDA_BUCKET = "foto_quantidade_abastecida";
       const RETIRADA_HORIMETRO_BUCKET = "retirada_horimetro";
+      const TANQUE_ASSINATURAS_BUCKET = "melosa_assinaturas";
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
       if (!userId) throw new Error("Usuário não encontrado para upload das fotos dos lacres.");
+
+      async function uploadBase64ToBucket(bucket: string, path: string, dataUrl: string, label: string) {
+        const { base64, contentType } = parseBase64DataUrl(dataUrl);
+        const arrayBuffer = base64ToArrayBuffer(base64);
+        const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
+          contentType,
+          upsert: true,
+        });
+        if (error) {
+          const msg = String(error.message ?? error);
+          const alreadyExists =
+            msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
+          if (!alreadyExists) {
+            throw new Error(`Falha ao enviar ${label}: ${msg}`);
+          }
+        }
+      }
 
       function extFromUri(uri: string) {
         const extMatch = String(uri).match(/\.(\w+)(?:\?|#|$)/);
@@ -2188,14 +2157,12 @@ export default function App() {
 
       const tanqueExt = extFromUri(lacreTanqueFotoUri as string);
       const melosaExt = extFromUri(lacreMelosaFotoUri as string);
-      const medidorInicialExt = extFromUri(medidorTanqueFotoInicialUri as string);
-      const medidorFinalExt = extFromUri(medidorTanqueFotoFinalUri as string);
-      const confirmacaoExt = extFromUri(confirmacaoAbastecimentoFotoUri as string);
+      const quantidadeExt = extFromUri(tanqueQuantidadeAbastecidaFotoUri as string);
       const tanquePath = `${userId}/lacres/tanque/${operationId}.${tanqueExt}`;
       const melosaPath = `${userId}/lacres/melosa/${operationId}.${melosaExt}`;
-      const medidorInicialPath = `${userId}/medidor/inicial/${operationId}.${medidorInicialExt}`;
-      const medidorFinalPath = `${userId}/medidor/final/${operationId}.${medidorFinalExt}`;
-      const confirmacaoPath = `${userId}/junto_tanque/${operationId}.${confirmacaoExt}`;
+      const quantidadePath = `${userId}/tanque/quantidade/${operationId}.${quantidadeExt}`;
+      const assinaturaOperadorPath = `${userId}/tanque/assinaturas/operador/${operationId}.png`;
+      const assinaturaMelosaPath = `${userId}/tanque/assinaturas/melosa/${operationId}.png`;
 
       const hasHorimetroFoto = !!horimetroFotoUri;
       let horimetroPath: string | null = null;
@@ -2211,14 +2178,8 @@ export default function App() {
 
       const { arrayBuffer: tanqueBytes, contentType: tanqueContentType } = await readImageUriAsArrayBuffer(lacreTanqueFotoUri as string);
       const { arrayBuffer: melosaBytes, contentType: melosaContentType } = await readImageUriAsArrayBuffer(lacreMelosaFotoUri as string);
-      const { arrayBuffer: medidorInicialBytes, contentType: medidorInicialContentType } = await readImageUriAsArrayBuffer(
-        medidorTanqueFotoInicialUri as string
-      );
-      const { arrayBuffer: medidorFinalBytes, contentType: medidorFinalContentType } = await readImageUriAsArrayBuffer(
-        medidorTanqueFotoFinalUri as string
-      );
-      const { arrayBuffer: confirmacaoBytes, contentType: confirmacaoContentType } = await readImageUriAsArrayBuffer(
-        confirmacaoAbastecimentoFotoUri as string
+      const { arrayBuffer: quantidadeBytes, contentType: quantidadeContentType } = await readImageUriAsArrayBuffer(
+        tanqueQuantidadeAbastecidaFotoUri as string
       );
 
       const uploads = [
@@ -2230,16 +2191,8 @@ export default function App() {
           contentType: melosaContentType,
           upsert: false,
         }),
-        supabase.storage.from(MEDIDOR_TANQUE_BUCKET).upload(medidorInicialPath, medidorInicialBytes, {
-          contentType: medidorInicialContentType,
-          upsert: false,
-        }),
-        supabase.storage.from(MEDIDOR_TANQUE_BUCKET).upload(medidorFinalPath, medidorFinalBytes, {
-          contentType: medidorFinalContentType,
-          upsert: false,
-        }),
-        supabase.storage.from(CONFIRMACAO_ABASTECIMENTO_BUCKET).upload(confirmacaoPath, confirmacaoBytes, {
-          contentType: confirmacaoContentType,
+        supabase.storage.from(FOTO_QUANTIDADE_ABASTECIDA_BUCKET).upload(quantidadePath, quantidadeBytes, {
+          contentType: quantidadeContentType,
           upsert: false,
         }),
       ];
@@ -2255,14 +2208,27 @@ export default function App() {
 
       await Promise.all(uploads);
 
+      await uploadBase64ToBucket(
+        TANQUE_ASSINATURAS_BUCKET,
+        assinaturaOperadorPath,
+        tanqueAssinaturaOperadorDataUrl as string,
+        "assinatura do operador do tanque",
+      );
+      await uploadBase64ToBucket(
+        TANQUE_ASSINATURAS_BUCKET,
+        assinaturaMelosaPath,
+        tanqueAssinaturaMelosaDataUrl as string,
+        "assinatura do responsável pela melosa",
+      );
+
       if (hasHorimetroFoto && horimetroPath) {
         retiradaHorimetroFotoStoragePath = horimetroPath;
       }
       lacreTanqueStoragePath = tanquePath;
       lacreMelosaStoragePath = melosaPath;
-      medidorTanqueFotoInicialStoragePath = medidorInicialPath;
-      medidorTanqueFotoFinalStoragePath = medidorFinalPath;
-      confirmacaoAbastecimentoFotoStoragePath = confirmacaoPath;
+      tanqueQuantidadeAbastecidaStoragePath = quantidadePath;
+      tanqueAssinaturaOperadorStoragePath = assinaturaOperadorPath;
+      tanqueAssinaturaMelosaStoragePath = assinaturaMelosaPath;
     }
 
     const payload: MovimentacaoPayload = {
@@ -2289,11 +2255,11 @@ export default function App() {
       lacre_tanque_storage_path: isRetiradaTanque ? lacreTanqueStoragePath : null,
       lacre_melosa_numero: isRetiradaTanque ? numeroLacreMelosa.trim() : null,
       lacre_melosa_storage_path: isRetiradaTanque ? lacreMelosaStoragePath : null,
-      medidor_tanque_numero_inicial: isRetiradaTanque ? numeroInicialMedidorTanque.trim() : null,
-      medidor_tanque_foto_inicial_storage_path: isRetiradaTanque ? medidorTanqueFotoInicialStoragePath : null,
-      medidor_tanque_numero_final: isRetiradaTanque ? numeroFinalMedidorTanque.trim() : null,
-      medidor_tanque_foto_final_storage_path: isRetiradaTanque ? medidorTanqueFotoFinalStoragePath : null,
-      confirmacao_abastecimento_foto_storage_path: isRetiradaTanque ? confirmacaoAbastecimentoFotoStoragePath : null,
+      tanque_quantidade_abastecida: isRetiradaTanque ? tanqueQuantidadeAbastecidaTexto.trim() : null,
+      tanque_quantidade_abastecida_storage_path: isRetiradaTanque ? tanqueQuantidadeAbastecidaStoragePath : null,
+      tanque_operador_nome: isRetiradaTanque ? driverFullName.trim() || null : null,
+      tanque_assinatura_operador_storage_path: isRetiradaTanque ? tanqueAssinaturaOperadorStoragePath : null,
+      tanque_assinatura_melosa_storage_path: isRetiradaTanque ? tanqueAssinaturaMelosaStoragePath : null,
       retirada_horimetro_foto_storage_path: isRetiradaTanque ? retiradaHorimetroFotoStoragePath : null,
 
       local_latitude: localLatitude,
@@ -2544,6 +2510,7 @@ export default function App() {
       melosa_equipamento_operador_storage_path: operadorPath,
       melosa_assinatura_operador_storage_path: assinaturaOperadorPath,
       melosa_assinatura_motorista_storage_path: assinaturaMotoristaPath,
+      melosa_lubrificado: melosaLubrificado ? true : null,
       melosa_lacre_numero: null,
       melosa_lacre_storage_path: null,
 
@@ -3211,9 +3178,10 @@ export default function App() {
           <View style={styles.screenShell}>
             <FormScreenScroll
               layoutKey={melosaStep}
-              scrollEnabled={!isResumo}
+              scrollEnabled={!signatureScrollLocked}
               preferCenter={!isResumo}
               keyboardDismissMode={isResumo ? "none" : "on-drag"}
+              contentContainerStyle={isResumo ? styles.resumoScrollContent : undefined}
             >
               <CardMeasuredWrap
                 layout={layout}
@@ -3602,7 +3570,7 @@ export default function App() {
 
                   <ScrollView
                     style={styles.melosaResumoSummaryScroll}
-                    nestedScrollEnabled
+                    nestedScrollEnabled={false}
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                     bounces={false}
@@ -3667,18 +3635,42 @@ export default function App() {
                     </View>
                   </ScrollView>
 
-                  <View style={styles.melosaResumoSignatures}>
+                  <TouchableOpacity
+                    style={styles.lubrificadoRow}
+                    onPress={() => setMelosaLubrificado((v) => !v)}
+                    disabled={busy}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: melosaLubrificado }}
+                    accessibilityLabel="Lubrificado"
+                  >
+                    <View
+                      style={[
+                        styles.lubrificadoBox,
+                        !isDarkMode ? styles.lubrificadoBoxLight : styles.lubrificadoBoxDark,
+                        melosaLubrificado ? styles.lubrificadoBoxChecked : null,
+                      ]}
+                    >
+                      {melosaLubrificado ? (
+                        <Text style={styles.lubrificadoBoxMark}>✓</Text>
+                      ) : null}
+                    </View>
+                    <Text style={[styles.lubrificadoLabel, !isDarkMode ? styles.labelLight : null]}>Lubrificado</Text>
+                  </TouchableOpacity>
+
+                  <View style={styles.melosaResumoSignatures} collapsable={false}>
                   <MelosaSignaturePad
                     label={`Operador da melosa (${driverFullName.trim() || "—"})`}
                     isDarkMode={isDarkMode}
                     onSigned={setMelosaAssinaturaOperadorDataUrl}
                     onClear={() => setMelosaAssinaturaOperadorDataUrl(null)}
+                    onScrollLockChange={setSignatureScrollLocked}
                   />
                   <MelosaSignaturePad
                     label={`Motorista do equipamento (${melosaMotoristaEquipamentoTexto.trim() || "—"})`}
                     isDarkMode={isDarkMode}
                     onSigned={setMelosaAssinaturaMotoristaDataUrl}
                     onClear={() => setMelosaAssinaturaMotoristaDataUrl(null)}
+                    onScrollLockChange={setSignatureScrollLocked}
                   />
                   </View>
                 </>
@@ -3714,17 +3706,25 @@ export default function App() {
       screen.name === "form" && screen.tipo === "RETIRADA_TANQUE" ? (screen.retiradaStep ?? "dados") : "dados";
     const isRetiradaDados = isRetiradaTanque && retiradaStep === "dados";
     const isRetiradaDetalhes = isRetiradaTanque && retiradaStep === "detalhes";
-    const isRetiradaMedidor = isRetiradaTanque && retiradaStep === "medidor";
-    const isRetiradaConfirmacao = isRetiradaTanque && retiradaStep === "confirmacao";
+    const isRetiradaQuantidadeAbastecida = isRetiradaTanque && retiradaStep === "quantidade_abastecida";
+    const isRetiradaResumo = isRetiradaTanque && retiradaStep === "resumo";
+    const obraTanqueResumo = obrasDisponiveis.find((o) => o.codigo === obraCodigo);
+    const obraTanqueResumoLabel = obraTanqueResumo ? `${obraTanqueResumo.codigo} - ${obraTanqueResumo.nome}` : String(obraCodigo);
+    const insumoTanqueResumoLabel =
+      obraCombustivelTipo === "GASOLINA"
+        ? "Gasolina"
+        : obraCombustivelTipo === "ALCOOL"
+          ? "Álcool"
+          : "Diesel/S10 Aditivado";
     const title = isEntradaTanqueObra ? "Entrada no tanque da obra" : "Retirada do tanque";
     const subtitle = isRetiradaDados
       ? "Dados da retirada"
       : isRetiradaDetalhes
         ? "Lacres"
-        : isRetiradaMedidor
-          ? "Medidor do tanque"
-          : isRetiradaConfirmacao
-            ? "Medidor final e foto"
+        : isRetiradaQuantidadeAbastecida
+          ? "Quantidade abastecida"
+          : isRetiradaResumo
+            ? "Resumo e assinaturas"
         : title;
 
     const tanqueActionFooter = (
@@ -3735,12 +3735,12 @@ export default function App() {
             onPress={() => {
               setBusy(false);
               setMessage(null);
-              if (isRetiradaConfirmacao) {
-                setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "medidor" });
+              if (isRetiradaQuantidadeAbastecida) {
+                setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "detalhes" });
                 return;
               }
-              if (isRetiradaMedidor) {
-                setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "detalhes" });
+              if (isRetiradaResumo) {
+                setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "quantidade_abastecida" });
                 return;
               }
               if (isRetiradaDetalhes) {
@@ -3752,7 +3752,7 @@ export default function App() {
             }}
           >
             <Text style={[styles.secondaryButtonText, !isDarkMode ? styles.secondaryButtonTextLight : null]}>
-              {isRetiradaDetalhes || isRetiradaMedidor || isRetiradaConfirmacao ? "Voltar" : "Cancelar"}
+              {isRetiradaDetalhes || isRetiradaQuantidadeAbastecida || isRetiradaResumo ? "Voltar" : "Cancelar"}
             </Text>
           </TouchableOpacity>
           {isRetiradaDados ? (
@@ -3771,19 +3771,19 @@ export default function App() {
             >
               <Text style={styles.primaryButtonText}>Próximo</Text>
             </TouchableOpacity>
-          ) : isRetiradaMedidor ? (
+          ) : isRetiradaQuantidadeAbastecida ? (
             <TouchableOpacity
               style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
               disabled={busy}
-              onPress={continueRetiradaTanqueMedidor}
+              onPress={continueRetiradaTanqueQuantidadeAbastecida}
             >
               <Text style={styles.primaryButtonText}>Próximo</Text>
             </TouchableOpacity>
-          ) : isRetiradaConfirmacao ? (
+          ) : isRetiradaResumo ? (
             <TouchableOpacity
               style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
               disabled={busy}
-              onPress={continueRetiradaTanqueConfirmacao}
+              onPress={continueRetiradaTanqueResumo}
             >
               <Text style={styles.primaryButtonText}>{busy ? "Salvando..." : "Salvar"}</Text>
             </TouchableOpacity>
@@ -3805,8 +3805,19 @@ export default function App() {
         <StatusBar style={barStyle} />
         <SafeAreaView style={styles.screenSafeArea}>
           <View style={styles.screenShell}>
-            <FormScreenScroll>
-              <CardMeasuredWrap layout={layout} isDarkMode={isDarkMode} onBoundsChange={setCardBounds}>
+            <FormScreenScroll
+              layoutKey={isRetiradaTanque ? retiradaStep : tipoAtual ?? "form"}
+              scrollEnabled={!signatureScrollLocked}
+              preferCenter={!isRetiradaResumo}
+              keyboardDismissMode={isRetiradaResumo ? "none" : "on-drag"}
+              contentContainerStyle={isRetiradaResumo ? styles.resumoScrollContent : undefined}
+            >
+              <CardMeasuredWrap
+                layout={layout}
+                isDarkMode={isDarkMode}
+                onBoundsChange={setCardBounds}
+                innerStyle={isRetiradaResumo ? styles.glassInnerCompact : undefined}
+              >
               <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>Registrar</Text>
               <Text
                 style={[styles.formSubtitle, !isDarkMode ? styles.formSubtitleLight : null]}
@@ -4067,44 +4078,51 @@ export default function App() {
                 </>
               ) : null}
 
-              {isRetiradaMedidor ? (
+              {isRetiradaQuantidadeAbastecida ? (
                 <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>Número Inicial do Medidor do Tanque</Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
+                    Quantidade Abastecida
+                  </Text>
                   <TextInput
-                    value={numeroInicialMedidorTanque}
-                    onChangeText={setNumeroInicialMedidorTanque}
+                    value={tanqueQuantidadeAbastecidaTexto}
+                    onChangeText={setTanqueQuantidadeAbastecidaTexto}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Informe o número inicial do medidor"
+                    placeholder="Ex.: 100"
                     placeholderTextColor={inputPlaceholderColor}
                     keyboardType="decimal-pad"
                   />
-
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto Inicial do Medidor do Tanque</Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
+                    Foto Medidor Abastecimento
+                  </Text>
                   <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
-                    {medidorTanqueFotoInicialUri ? (
+                    {tanqueQuantidadeAbastecidaFotoUri ? (
                       <>
-                        <Image source={{ uri: medidorTanqueFotoInicialUri }} style={styles.photoPreviewFull} />
-                        <TouchableOpacity style={styles.photoRemove} onPress={() => setMedidorTanqueFotoInicialUri(null)} disabled={busy}>
+                        <Image source={{ uri: tanqueQuantidadeAbastecidaFotoUri }} style={styles.photoPreviewFull} />
+                        <TouchableOpacity
+                          style={styles.photoRemove}
+                          onPress={() => setTanqueQuantidadeAbastecidaFotoUri(null)}
+                          disabled={busy}
+                        >
                           <Text style={styles.photoRemoveText}>Remover</Text>
                         </TouchableOpacity>
                       </>
                     ) : (
                       <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
-                        Selecione a foto inicial do medidor do tanque
+                        Selecione a foto do medidor de abastecimento
                       </Text>
                     )}
                   </View>
                   <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
                     <TouchableOpacity
                       style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMedidorTanqueFotoInicialFromLibrary}
+                      onPress={pickTanqueQuantidadeAbastecidaFromLibrary}
                       disabled={busy}
                     >
                       <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMedidorTanqueFotoInicialFromCamera}
+                      onPress={pickTanqueQuantidadeAbastecidaFromCamera}
                       disabled={busy}
                     >
                       <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
@@ -4113,80 +4131,128 @@ export default function App() {
                 </>
               ) : null}
 
-              {isRetiradaConfirmacao ? (
+              {isRetiradaResumo ? (
                 <>
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>Número Final do Medidor do Tanque</Text>
-                  <TextInput
-                    value={numeroFinalMedidorTanque}
-                    onChangeText={setNumeroFinalMedidorTanque}
-                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Informe o número final do medidor"
-                    placeholderTextColor={inputPlaceholderColor}
-                    keyboardType="decimal-pad"
-                  />
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
+                    Confira os dados antes de salvar
+                  </Text>
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto Final do Medidor do Tanque</Text>
-                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
-                    {medidorTanqueFotoFinalUri ? (
-                      <>
-                        <Image source={{ uri: medidorTanqueFotoFinalUri }} style={styles.photoPreviewFull} />
-                        <TouchableOpacity style={styles.photoRemove} onPress={() => setMedidorTanqueFotoFinalUri(null)} disabled={busy}>
-                          <Text style={styles.photoRemoveText}>Remover</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : (
-                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
-                        Selecione a foto final do medidor do tanque
+                  <View
+                    style={[
+                      styles.melosaResumoQuantidadeHero,
+                      !isDarkMode ? styles.melosaResumoQuantidadeHeroLight : styles.melosaResumoQuantidadeHeroDark,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.melosaResumoQuantidadeLabel,
+                        !isDarkMode ? styles.melosaResumoQuantidadeLabelLight : styles.melosaResumoQuantidadeLabelDark,
+                      ]}
+                    >
+                      Quantidade abastecida
+                    </Text>
+                    <View style={styles.melosaResumoQuantidadeValueRow}>
+                      <Text
+                        style={[
+                          styles.melosaResumoQuantidadeValue,
+                          !isDarkMode ? styles.melosaResumoQuantidadeValueLight : styles.melosaResumoQuantidadeValueDark,
+                        ]}
+                      >
+                        {tanqueQuantidadeAbastecidaTexto.trim() || "—"}
                       </Text>
-                    )}
-                  </View>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMedidorTanqueFotoFinalFromLibrary}
-                      disabled={busy}
+                      <Text
+                        style={[
+                          styles.melosaResumoQuantidadeUnit,
+                          !isDarkMode ? styles.melosaResumoQuantidadeUnitLight : styles.melosaResumoQuantidadeUnitDark,
+                        ]}
+                      >
+                        L
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.melosaResumoQuantidadeInsumo,
+                        !isDarkMode ? styles.melosaResumoQuantidadeInsumoLight : styles.melosaResumoQuantidadeInsumoDark,
+                      ]}
                     >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickMedidorTanqueFotoFinalFromCamera}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
-                    </TouchableOpacity>
+                      {insumoTanqueResumoLabel}
+                    </Text>
                   </View>
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Foto junto ao tanque</Text>
-                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
-                    {confirmacaoAbastecimentoFotoUri ? (
-                      <>
-                        <Image source={{ uri: confirmacaoAbastecimentoFotoUri }} style={styles.photoPreviewFull} />
-                        <TouchableOpacity style={styles.photoRemove} onPress={() => setConfirmacaoAbastecimentoFotoUri(null)} disabled={busy}>
-                          <Text style={styles.photoRemoveText}>Remover</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : (
-                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
-                        Selecione a foto junto ao tanque
-                      </Text>
-                    )}
-                  </View>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickConfirmacaoAbastecimentoFotoFromLibrary}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
-                      onPress={pickConfirmacaoAbastecimentoFotoFromCamera}
-                      disabled={busy}
-                    >
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
-                    </TouchableOpacity>
+                  <ScrollView
+                    style={styles.melosaResumoSummaryScroll}
+                    nestedScrollEnabled={false}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                    bounces={false}
+                  >
+                    <View style={[styles.melosaResumoBox, !isDarkMode ? styles.melosaResumoBoxLight : styles.melosaResumoBoxDark]}>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Obra
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {obraTanqueResumoLabel}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Tanque
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          Tanque {tanqueNumero}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Patrimônio (melosa)
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {placaTexto.trim() || "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Horímetro
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {horimetroHodometroTexto.trim() || "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Lacre tanque
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {numeroLacreTanque.trim() || "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Lacre melosa
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {numeroLacreMelosa.trim() || "—"}
+                        </Text>
+                      </View>
+                    </View>
+                  </ScrollView>
+
+                  <View style={styles.melosaResumoSignatures} collapsable={false}>
+                    <MelosaSignaturePad
+                      label={`Operador do tanque (${driverFullName.trim() || "—"})`}
+                      isDarkMode={isDarkMode}
+                      onSigned={setTanqueAssinaturaOperadorDataUrl}
+                      onClear={() => setTanqueAssinaturaOperadorDataUrl(null)}
+                      onScrollLockChange={setSignatureScrollLocked}
+                    />
+                    <MelosaSignaturePad
+                      label={`Responsável pela melosa (${placaTexto.trim() || "—"})`}
+                      isDarkMode={isDarkMode}
+                      onSigned={setTanqueAssinaturaMelosaDataUrl}
+                      onClear={() => setTanqueAssinaturaMelosaDataUrl(null)}
+                      onScrollLockChange={setSignatureScrollLocked}
+                    />
                   </View>
                 </>
               ) : null}
@@ -4996,8 +5062,49 @@ const styles = StyleSheet.create({
     maxHeight: 190,
     marginTop: 4,
   },
+  lubrificadoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  lubrificadoBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lubrificadoBoxLight: {
+    borderColor: "#64748b",
+    backgroundColor: "#ffffff",
+  },
+  lubrificadoBoxDark: {
+    borderColor: "#94a3b8",
+    backgroundColor: "rgba(15,23,42,0.6)",
+  },
+  lubrificadoBoxChecked: {
+    borderColor: "#2563eb",
+    backgroundColor: "#2563eb",
+  },
+  lubrificadoBoxMark: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "800",
+    lineHeight: 18,
+  },
+  lubrificadoLabel: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#f8fafc",
+  },
   melosaResumoSignatures: {
     marginTop: 4,
+  },
+  resumoScrollContent: {
+    paddingBottom: 24,
   },
   melosaResumoRow: {
     flexDirection: "row",

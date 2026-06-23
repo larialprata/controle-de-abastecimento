@@ -184,10 +184,8 @@ function toTanqueExcelInput(m: LinhaTanque): TanqueExcelRowInput {
     obraNome: m.obra_nome,
     dataHora: m.data_hora,
     combustivelTipo: m.combustivel_tipo,
-    medidorTanqueInicial:
-      m.medidor_tanque_numero_inicial != null ? String(m.medidor_tanque_numero_inicial) : null,
-    medidorTanqueFinal:
-      m.medidor_tanque_numero_final != null ? String(m.medidor_tanque_numero_final) : null,
+    medidorTanqueInicial: null,
+    medidorTanqueFinal: null,
     litros: calcQuantidadeLitros(m),
     placaTexto: m.placa_texto != null ? String(m.placa_texto) : undefined,
   };
@@ -325,11 +323,8 @@ function TanqueBiScrollTable({
               ) : null}
               {isRetiradaTable ? (
                 <>
-                  <th className={thCls}>Med. ini.</th>
-                  <th className={thCls}>Foto med. ini.</th>
-                  <th className={thCls}>Med. fin.</th>
-                  <th className={thCls}>Foto med. fin.</th>
-                  <th className={thCls}>Confirmação</th>
+                  <th className={thCls}>Qtd. abast.</th>
+                  <th className={thCls}>Foto medidor</th>
                 </>
               ) : null}
               <th className={thCls}>Local</th>
@@ -401,16 +396,9 @@ function TanqueBiScrollTable({
                       <td className={tdPhotoCls}>
                         {photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.")}
                       </td>
-                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.medidor_tanque_numero_inicial)}</td>
+                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.tanque_quantidade_abastecida)}</td>
                       <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "medidor_tanque_foto_inicial_storage_path"), "Med. ini.")}
-                      </td>
-                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.medidor_tanque_numero_final)}</td>
-                      <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "medidor_tanque_foto_final_storage_path"), "Med. fin.")}
-                      </td>
-                      <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "confirmacao_abastecimento_foto_storage_path"), "Confirm.")}
+                        {photo(storagePath(m, "tanque_quantidade_abastecida_storage_path"), "Medidor")}
                       </td>
                     </>
                   ) : null}

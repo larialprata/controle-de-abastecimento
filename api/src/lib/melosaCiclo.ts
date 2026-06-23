@@ -135,6 +135,20 @@ export function avaliarEnchimentoMelosa(
   return { volumeExcedente: 0, status: "ok" };
 }
 
+async function findCicloByRetiradaOperationId(
+  service: SupabaseClient,
+  operationId: string,
+): Promise<MelosaCicloRow | null> {
+  const { data, error } = await service
+    .from("melosa_ciclos")
+    .select("*")
+    .eq("retirada_operation_id", operationId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as MelosaCicloRow;
+}
+
 export async function criarCicloRetiradaTanque(
   service: SupabaseClient,
   params: {
@@ -147,6 +161,15 @@ export async function criarCicloRetiradaTanque(
 ): Promise<MelosaCicloRow> {
   const ativo = normalizeAtivo(params.ativoMelosa);
   if (!ativo) throw new Error("Ativo da melosa obrigatório para gerar ciclo.");
+
+  const existente = await findCicloByRetiradaOperationId(service, params.operationId);
+  if (existente) {
+    await service
+      .from("movimentacoes")
+      .update({ ciclo_id: existente.id })
+      .eq("operation_id", params.operationId);
+    return existente;
+  }
 
   const capacidade = await findCapacidadeMelosa(service, ativo);
   const cicloAnterior = await findCicloAnteriorMesmoAtivo(service, ativo);
@@ -198,6 +221,21 @@ export async function criarCicloRetiradaTanque(
     .single();
 
   if (insErr || !ciclo) {
+    const duplicate =
+      insErr?.code === "23505" ||
+      String(insErr?.message ?? "")
+        .toLowerCase()
+        .includes("melosa_ciclos_retirada_operation_id_key");
+    if (duplicate) {
+      const retry = await findCicloByRetiradaOperationId(service, params.operationId);
+      if (retry) {
+        await service
+          .from("movimentacoes")
+          .update({ ciclo_id: retry.id })
+          .eq("operation_id", params.operationId);
+        return retry;
+      }
+    }
     throw new Error(insErr?.message ?? "Falha ao criar ciclo da melosa.");
   }
 

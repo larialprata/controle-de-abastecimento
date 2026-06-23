@@ -21,11 +21,11 @@ export type MovimentacaoPayload = {
   lacre_tanque_storage_path?: string | null;
   lacre_melosa_numero?: string | null;
   lacre_melosa_storage_path?: string | null;
-  medidor_tanque_numero_inicial?: string | null;
-  medidor_tanque_foto_inicial_storage_path?: string | null;
-  medidor_tanque_numero_final?: string | null;
-  medidor_tanque_foto_final_storage_path?: string | null;
-  confirmacao_abastecimento_foto_storage_path?: string | null;
+  tanque_quantidade_abastecida?: string | null;
+  tanque_quantidade_abastecida_storage_path?: string | null;
+  tanque_operador_nome?: string | null;
+  tanque_assinatura_operador_storage_path?: string | null;
+  tanque_assinatura_melosa_storage_path?: string | null;
   retirada_horimetro_foto_storage_path?: string | null;
 
   melosa_km_registro?: number | null;
@@ -46,6 +46,7 @@ export type MovimentacaoPayload = {
   melosa_operador_nome?: string | null;
   melosa_assinatura_operador_storage_path?: string | null;
   melosa_assinatura_motorista_storage_path?: string | null;
+  melosa_lubrificado?: boolean | null;
 
   melosa_km_retirada?: number | null;
   melosa_combustivel_tipo_retirada?: string | null;

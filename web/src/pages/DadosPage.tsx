@@ -70,7 +70,7 @@ const tdCls =
 const tdPhotoCls =
   "border-b border-white/25 px-2 py-2 text-center align-middle dark:border-white/5";
 
-const TABLE_COL_COUNT = 25;
+const TABLE_COL_COUNT = 22;
 
 function truncPath(s: string, max = 36): string {
   if (s.length <= max) return s;
@@ -466,11 +466,8 @@ export default function DadosPage({ fixedTipo, title }: DadosPageProps) {
           isRetiradaTanque(m) ? await photoLink(m.lacre_tanque_storage_path) : "—",
           isRetiradaTanque(m) ? fmt(m.lacre_melosa_numero) : "—",
           isRetiradaTanque(m) ? await photoLink(m.lacre_melosa_storage_path) : "—",
-          isRetiradaTanque(m) ? fmt(m.medidor_tanque_numero_inicial) : "—",
-          isRetiradaTanque(m) ? await photoLink(m.medidor_tanque_foto_inicial_storage_path) : "—",
-          isRetiradaTanque(m) ? fmt(m.medidor_tanque_numero_final) : "—",
-          isRetiradaTanque(m) ? await photoLink(m.medidor_tanque_foto_final_storage_path) : "—",
-          isRetiradaTanque(m) ? await photoLink(m.confirmacao_abastecimento_foto_storage_path) : "—",
+          isRetiradaTanque(m) ? fmt(m.tanque_quantidade_abastecida) : "—",
+          isRetiradaTanque(m) ? await photoLink(m.tanque_quantidade_abastecida_storage_path) : "—",
           local,
           fmt(m.obs),
         ],
@@ -496,11 +493,8 @@ export default function DadosPage({ fixedTipo, title }: DadosPageProps) {
       "Foto lacre tanque",
       "Nº lacre melosa",
       "Foto lacre melosa",
-      "Medidor tanque ini.",
-      "Foto med. ini.",
-      "Medidor tanque fin.",
-      "Foto med. fin.",
-      "Foto confirmação",
+      "Qtd. abastecida",
+      "Foto medidor abastecimento",
       "Local",
       "OBS",
     ];
@@ -746,11 +740,8 @@ export default function DadosPage({ fixedTipo, title }: DadosPageProps) {
                   <th className={thCls}>Foto lacre T.</th>
                   <th className={thCls}>Lacre melosa</th>
                   <th className={thCls}>Foto lacre M.</th>
-                  <th className={thCls}>Med. ini.</th>
-                  <th className={thCls}>Foto med. ini.</th>
-                  <th className={thCls}>Med. fin.</th>
-                  <th className={thCls}>Foto med. fin.</th>
-                  <th className={thCls}>Confirmação</th>
+                  <th className={thCls}>Qtd. abast.</th>
+                  <th className={thCls}>Foto medidor</th>
                   <th className={thCls}>Local</th>
                   <th className={thCls}>Obs</th>
                 </tr>
@@ -837,24 +828,11 @@ export default function DadosPage({ fixedTipo, title }: DadosPageProps) {
                         {ret ? photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.") : "—"}
                       </td>
                       <td className={`${tdCls} max-w-[100px]`}>
-                        {ret ? fmt(m.medidor_tanque_numero_inicial) : "—"}
+                        {ret ? fmt(m.tanque_quantidade_abastecida) : "—"}
                       </td>
                       <td className={tdPhotoCls}>
                         {ret
-                          ? photo(storagePath(m, "medidor_tanque_foto_inicial_storage_path"), "Med. ini.")
-                          : "—"}
-                      </td>
-                      <td className={`${tdCls} max-w-[100px]`}>
-                        {ret ? fmt(m.medidor_tanque_numero_final) : "—"}
-                      </td>
-                      <td className={tdPhotoCls}>
-                        {ret
-                          ? photo(storagePath(m, "medidor_tanque_foto_final_storage_path"), "Med. fin.")
-                          : "—"}
-                      </td>
-                      <td className={tdPhotoCls}>
-                        {ret
-                          ? photo(storagePath(m, "confirmacao_abastecimento_foto_storage_path"), "Confirm.")
+                          ? photo(storagePath(m, "tanque_quantidade_abastecida_storage_path"), "Medidor")
                           : "—"}
                       </td>
                       <td className={`${tdCls} max-w-[200px]`}>{local}</td>

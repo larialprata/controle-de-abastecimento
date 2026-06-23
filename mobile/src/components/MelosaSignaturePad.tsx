@@ -7,6 +7,8 @@ export type MelosaSignaturePadProps = {
   isDarkMode: boolean;
   onSigned: (dataUrl: string) => void;
   onClear?: () => void;
+  /** Bloqueia scroll da tela enquanto o usuário desenha dentro do retângulo. */
+  onScrollLockChange?: (locked: boolean) => void;
 };
 
 function buildSignatureHtml(penColor: string, backgroundColor: string): string {
@@ -127,7 +129,13 @@ function buildSignatureHtml(penColor: string, backgroundColor: string): string {
 </html>`;
 }
 
-export default function MelosaSignaturePad({ label, isDarkMode, onSigned, onClear }: MelosaSignaturePadProps) {
+export default function MelosaSignaturePad({
+  label,
+  isDarkMode,
+  onSigned,
+  onClear,
+  onScrollLockChange,
+}: MelosaSignaturePadProps) {
   const webRef = useRef<WebView>(null);
   // Sempre papel branco + tinta preta — legível no ticket impresso e em qualquer tema do app.
   const html = useMemo(() => buildSignatureHtml("#000000", "#ffffff"), []);
@@ -136,16 +144,22 @@ export default function MelosaSignaturePad({ label, isDarkMode, onSigned, onClea
     (event: WebViewMessageEvent) => {
       try {
         const msg = JSON.parse(event.nativeEvent.data) as { type?: string; data?: string };
+        if (msg.type === "start") onScrollLockChange?.(true);
+        if (msg.type === "end") onScrollLockChange?.(false);
         if (msg.type === "ok" && msg.data) onSigned(msg.data);
-        if (msg.type === "clear") onClear?.();
+        if (msg.type === "clear") {
+          onScrollLockChange?.(false);
+          onClear?.();
+        }
       } catch {
         // ignore malformed messages
       }
     },
-    [onSigned, onClear],
+    [onSigned, onClear, onScrollLockChange],
   );
 
   const clearPad = () => {
+    onScrollLockChange?.(false);
     webRef.current?.injectJavaScript("window.clearSignature && window.clearSignature(); true;");
     onClear?.();
   };

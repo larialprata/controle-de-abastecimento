@@ -110,14 +110,17 @@ export function calcQuantidadeLitrosRetiradaTanqueFromMedidores(
   return Number.isFinite(diff) && diff > 0 ? diff : null;
 }
 
-/** Litros na movimentação de tanque: entrada usa `litros`; saída usa medidor final − inicial. */
+/** Litros na movimentação de tanque: entrada usa `litros`; saída usa quantidade abastecida. */
 export function resolveLitrosMovimentoTanque(row: {
   tipo?: string;
   litros?: unknown;
+  tanque_quantidade_abastecida?: unknown;
   medidor_tanque_numero_inicial?: unknown;
   medidor_tanque_numero_final?: unknown;
 }): number | null {
   if (row.tipo === "RETIRADA_TANQUE") {
+    const fromQuantidade = parseMedidorNumero(row.tanque_quantidade_abastecida);
+    if (fromQuantidade != null && fromQuantidade > 0) return fromQuantidade;
     const fromMedidor = calcQuantidadeLitrosRetiradaTanqueFromMedidores(
       row.medidor_tanque_numero_inicial,
       row.medidor_tanque_numero_final,

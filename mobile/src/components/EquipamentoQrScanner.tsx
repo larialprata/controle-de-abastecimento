@@ -1,5 +1,5 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { normalizeEquipamentoQrScan } from "../lib/equipamentoQr";
 import {
   ActivityIndicator,
@@ -44,7 +44,16 @@ export default function EquipamentoQrScanner({
     onClose();
   }, [onClose]);
 
+  useEffect(() => {
+    if (!visible) return;
+    handledRef.current = false;
+    setLocked(false);
+  }, [visible]);
+
   if (!visible) return null;
+
+  const closeBtnStyle = isDarkMode ? styles.closeBtnDark : styles.closeBtnLight;
+  const closeBtnTextStyle = isDarkMode ? styles.closeBtnTextDark : styles.closeBtnTextLight;
 
   return (
     <Modal visible animationType="slide" onRequestClose={handleClose}>
@@ -53,14 +62,17 @@ export default function EquipamentoQrScanner({
           <Text style={[styles.title, isDarkMode ? styles.textDark : styles.textLight]}>
             Ler QR do equipamento
           </Text>
-          <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
-            <Text style={styles.closeBtnText}>Fechar</Text>
+          <TouchableOpacity onPress={handleClose} style={closeBtnStyle} accessibilityRole="button" accessibilityLabel="Sair da leitura do QR code">
+            <Text style={closeBtnTextStyle}>Sair</Text>
           </TouchableOpacity>
         </View>
 
         {!permission ? (
           <View style={styles.center}>
             <ActivityIndicator size="large" color={isDarkMode ? "#fff" : "#0f172a"} />
+            <TouchableOpacity onPress={handleClose} style={styles.exitSecondaryBtn}>
+              <Text style={[styles.exitSecondaryBtnText, isDarkMode ? styles.textDark : styles.textLight]}>Cancelar</Text>
+            </TouchableOpacity>
           </View>
         ) : !permission.granted ? (
           <View style={styles.center}>
@@ -69,6 +81,9 @@ export default function EquipamentoQrScanner({
             </Text>
             <TouchableOpacity style={styles.primaryBtn} onPress={() => void requestPermission()}>
               <Text style={styles.primaryBtnText}>Permitir câmera</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleClose} style={styles.exitSecondaryBtn}>
+              <Text style={[styles.exitSecondaryBtnText, isDarkMode ? styles.textDark : styles.textLight]}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -79,7 +94,7 @@ export default function EquipamentoQrScanner({
               barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
               onBarcodeScanned={locked ? undefined : handleScan}
             />
-            <View style={styles.overlay}>
+            <View style={styles.overlay} pointerEvents="box-none">
               <View style={styles.frame} />
               <Text style={styles.overlayHint}>Aponte para o QR code do equipamento</Text>
             </View>
@@ -105,13 +120,22 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: "700", flex: 1 },
   textDark: { color: "#f8fafc" },
   textLight: { color: "#0f172a" },
-  closeBtn: {
+  closeBtnDark: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
     backgroundColor: "rgba(148,163,184,0.25)",
   },
-  closeBtnText: { fontWeight: "600", color: "#e2e8f0" },
+  closeBtnLight: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "rgba(15,23,42,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(15,23,42,0.12)",
+  },
+  closeBtnTextDark: { fontWeight: "600", color: "#f8fafc" },
+  closeBtnTextLight: { fontWeight: "600", color: "#0f172a" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 16 },
   hint: { textAlign: "center", fontSize: 15, lineHeight: 22 },
   primaryBtn: {
@@ -144,4 +168,12 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
+  exitSecondaryBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.45)",
+  },
+  exitSecondaryBtnText: { fontWeight: "600", fontSize: 15 },
 });

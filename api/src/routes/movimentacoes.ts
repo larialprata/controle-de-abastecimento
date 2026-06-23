@@ -111,6 +111,11 @@ const movimentoSchema = z.object({
   medidor_tanque_numero_final: z.string().optional().nullable(),
   medidor_tanque_foto_final_storage_path: z.string().optional().nullable(),
   confirmacao_abastecimento_foto_storage_path: z.string().optional().nullable(),
+  tanque_quantidade_abastecida: z.string().optional().nullable(),
+  tanque_quantidade_abastecida_storage_path: z.string().optional().nullable(),
+  tanque_operador_nome: z.string().optional().nullable(),
+  tanque_assinatura_operador_storage_path: z.string().optional().nullable(),
+  tanque_assinatura_melosa_storage_path: z.string().optional().nullable(),
   retirada_horimetro_foto_storage_path: z.string().optional().nullable(),
 
   melosa_km_registro: z.number().min(0).optional().nullable(),
@@ -141,6 +146,7 @@ const movimentoSchema = z.object({
   melosa_operador_nome: z.string().optional().nullable(),
   melosa_assinatura_operador_storage_path: z.string().optional().nullable(),
   melosa_assinatura_motorista_storage_path: z.string().optional().nullable(),
+  melosa_lubrificado: z.boolean().optional().nullable(),
   tanque_numero: tanqueNumeroSchema.optional().nullable(),
   local_latitude: z.number().optional().nullable(),
   local_longitude: z.number().optional().nullable(),
@@ -172,6 +178,8 @@ const melosaUpdateSchema = z
     medidor_tanque_numero_final: z.string().optional().nullable(),
     medidor_tanque_foto_final_storage_path: z.string().optional().nullable(),
     confirmacao_abastecimento_foto_storage_path: z.string().optional().nullable(),
+    tanque_quantidade_abastecida: z.string().optional().nullable(),
+    tanque_quantidade_abastecida_storage_path: z.string().optional().nullable(),
   retirada_horimetro_foto_storage_path: z.string().optional().nullable(),
     obs: z.string().optional().nullable(),
   })
@@ -225,6 +233,7 @@ const MELOSA_DB_COLUMN_KEYS = [
   "melosa_operador_nome",
   "melosa_assinatura_operador_storage_path",
   "melosa_assinatura_motorista_storage_path",
+  "melosa_lubrificado",
   "tanque_numero",
   "local_latitude",
   "local_longitude",
@@ -675,20 +684,15 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       if (!payload.lacre_melosa_storage_path?.trim()) {
         return res.status(400).json({ error: "lacre_melosa_storage_path é obrigatório" });
       }
-      if (!payload.medidor_tanque_numero_inicial?.trim()) {
-        return res.status(400).json({ error: "medidor_tanque_numero_inicial é obrigatório" });
+      if (!payload.tanque_quantidade_abastecida?.trim()) {
+        return res.status(400).json({ error: "tanque_quantidade_abastecida é obrigatório" });
       }
-      if (!payload.medidor_tanque_foto_inicial_storage_path?.trim()) {
-        return res.status(400).json({ error: "medidor_tanque_foto_inicial_storage_path é obrigatório" });
+      const litrosTanqueCalculados = parseMedidorMelosaNumero(payload.tanque_quantidade_abastecida);
+      if (litrosTanqueCalculados == null || litrosTanqueCalculados <= 0) {
+        return res.status(400).json({ error: "Quantidade abastecida inválida (informe litros maior que zero)" });
       }
-      if (!payload.medidor_tanque_numero_final?.trim()) {
-        return res.status(400).json({ error: "medidor_tanque_numero_final é obrigatório" });
-      }
-      if (!payload.medidor_tanque_foto_final_storage_path?.trim()) {
-        return res.status(400).json({ error: "medidor_tanque_foto_final_storage_path é obrigatório" });
-      }
-      if (!payload.confirmacao_abastecimento_foto_storage_path?.trim()) {
-        return res.status(400).json({ error: "confirmacao_abastecimento_foto_storage_path é obrigatório" });
+      if (!payload.tanque_quantidade_abastecida_storage_path?.trim()) {
+        return res.status(400).json({ error: "tanque_quantidade_abastecida_storage_path é obrigatório" });
       }
 
       const retiradaHorimetroFotoPath = payload.retirada_horimetro_foto_storage_path?.trim();
@@ -715,25 +719,40 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         return res.status(400).json({ error: "Arquivo do lacre da melosa não encontrado no Storage" });
       }
 
-      const { data: medidorInicialExists } = await service.storage
-        .from(envValidated.MEDIDOR_TANQUE_BUCKET)
-        .exists(payload.medidor_tanque_foto_inicial_storage_path);
-      if (medidorInicialExists !== true) {
-        return res.status(400).json({ error: "Foto inicial do medidor do tanque não encontrada no Storage" });
+      const quantidadeTanqueFotoOk = await storageObjectExists(
+        service,
+        envValidated.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+        payload.tanque_quantidade_abastecida_storage_path,
+      );
+      if (!quantidadeTanqueFotoOk) {
+        return res.status(400).json({
+          error: "Foto do medidor de abastecimento não encontrada no Storage",
+          bucket: envValidated.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+          path: payload.tanque_quantidade_abastecida_storage_path,
+        });
       }
 
-      const { data: medidorFinalExists } = await service.storage
-        .from(envValidated.MEDIDOR_TANQUE_BUCKET)
-        .exists(payload.medidor_tanque_foto_final_storage_path);
-      if (medidorFinalExists !== true) {
-        return res.status(400).json({ error: "Foto final do medidor do tanque não encontrada no Storage" });
+      if (!payload.tanque_assinatura_operador_storage_path?.trim()) {
+        return res.status(400).json({ error: "tanque_assinatura_operador_storage_path é obrigatório" });
       }
-
-      const { data: confirmacaoExists } = await service.storage
-        .from(envValidated.CONFIRMACAO_ABASTECIMENTO_BUCKET)
-        .exists(payload.confirmacao_abastecimento_foto_storage_path);
-      if (confirmacaoExists !== true) {
-        return res.status(400).json({ error: "Foto junto ao tanque não encontrada no Storage" });
+      if (!payload.tanque_assinatura_melosa_storage_path?.trim()) {
+        return res.status(400).json({ error: "tanque_assinatura_melosa_storage_path é obrigatório" });
+      }
+      const tanqueAssinaturaOperadorOk = await storageObjectExists(
+        service,
+        envValidated.MELOSA_ASSINATURAS_BUCKET,
+        payload.tanque_assinatura_operador_storage_path,
+      );
+      if (!tanqueAssinaturaOperadorOk) {
+        return res.status(400).json({ error: "Assinatura do operador do tanque não encontrada no Storage" });
+      }
+      const tanqueAssinaturaMelosaOk = await storageObjectExists(
+        service,
+        envValidated.MELOSA_ASSINATURAS_BUCKET,
+        payload.tanque_assinatura_melosa_storage_path,
+      );
+      if (!tanqueAssinaturaMelosaOk) {
+        return res.status(400).json({ error: "Assinatura do responsável pela melosa não encontrada no Storage" });
       }
     }
 
@@ -863,6 +882,7 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         melosa_operador_nome: payload.melosa_operador_nome?.trim() || null,
         melosa_assinatura_operador_storage_path: payload.melosa_assinatura_operador_storage_path ?? null,
         melosa_assinatura_motorista_storage_path: payload.melosa_assinatura_motorista_storage_path ?? null,
+        melosa_lubrificado: payload.melosa_lubrificado === true ? true : null,
         tanque_numero: tanqueNum,
         local_latitude: payload.local_latitude ?? null,
         local_longitude: payload.local_longitude ?? null,
@@ -901,11 +921,8 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
 
     let litrosGravados = payload.litros;
     if (payload.tipo === "RETIRADA_TANQUE") {
-      const litrosMedidor = litrosRetiradaTanqueFromMedidores(
-        payload.medidor_tanque_numero_inicial,
-        payload.medidor_tanque_numero_final,
-      );
-      if (litrosMedidor != null && litrosMedidor > 0) litrosGravados = litrosMedidor;
+      const litrosQuantidade = parseMedidorMelosaNumero(payload.tanque_quantidade_abastecida);
+      if (litrosQuantidade != null && litrosQuantidade > 0) litrosGravados = litrosQuantidade;
     }
 
     const insertRow = {
@@ -926,11 +943,13 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       lacre_tanque_storage_path: payload.lacre_tanque_storage_path ?? null,
       lacre_melosa_numero: payload.lacre_melosa_numero ?? null,
       lacre_melosa_storage_path: payload.lacre_melosa_storage_path ?? null,
-      medidor_tanque_numero_inicial: payload.medidor_tanque_numero_inicial ?? null,
-      medidor_tanque_foto_inicial_storage_path: payload.medidor_tanque_foto_inicial_storage_path ?? null,
-      medidor_tanque_numero_final: payload.medidor_tanque_numero_final ?? null,
-      medidor_tanque_foto_final_storage_path: payload.medidor_tanque_foto_final_storage_path ?? null,
-      confirmacao_abastecimento_foto_storage_path: payload.confirmacao_abastecimento_foto_storage_path ?? null,
+      tanque_quantidade_abastecida: payload.tanque_quantidade_abastecida ?? null,
+      tanque_quantidade_abastecida_storage_path: payload.tanque_quantidade_abastecida_storage_path ?? null,
+      tanque_operador_nome: payload.tipo === "RETIRADA_TANQUE" ? payload.tanque_operador_nome ?? null : null,
+      tanque_assinatura_operador_storage_path:
+        payload.tipo === "RETIRADA_TANQUE" ? payload.tanque_assinatura_operador_storage_path ?? null : null,
+      tanque_assinatura_melosa_storage_path:
+        payload.tipo === "RETIRADA_TANQUE" ? payload.tanque_assinatura_melosa_storage_path ?? null : null,
       retirada_horimetro_foto_storage_path: payload.retirada_horimetro_foto_storage_path ?? null,
 
       placa_texto: needsVeiculoMeta ? placaNorm : null,
