@@ -37,7 +37,6 @@ type MelosaRowEquipamento = {
 
 /** Busca descrição no cadastro para montar o ticket (patrimônio + descrição). */
 export async function enrichMelosaRowsWithEquipamentoDescricao<T extends MelosaRowEquipamento>(
-  token: string,
   rows: T[],
   lookup: (
     ativo: string,

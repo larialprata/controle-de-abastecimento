@@ -427,7 +427,6 @@ export default function MelosaBIPage() {
       });
 
       const withDescricao = await enrichMelosaRowsWithEquipamentoDescricao(
-        token,
         selectedWithNumeros,
         async (ativo, obraCodigo) => {
           const tryLookup = async (obra: number | null) => {
