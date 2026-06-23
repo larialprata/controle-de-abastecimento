@@ -2,25 +2,30 @@ function normalizeAtivoCompact(value: string): string {
   return value.trim().toUpperCase().replace(/\s+/g, "");
 }
 
-/** Rótulo de equipamento no ticket: descrição completa, com ativo quando forem distintos. */
+function pickDescricaoEquipamento(patrimonio: string, descricao: string): string {
+  const descricaoText = descricao.trim();
+  if (!descricaoText) return "";
+  if (patrimonio && normalizeAtivoCompact(descricaoText) === patrimonio) return "";
+  return descricaoText;
+}
+
+/**
+ * Rótulo do equipamento no ticket BI: `PATRIMONIO - Descrição`
+ * Ex.: EHRER03 - Escavadeira Hidráulica
+ */
 export function fmtEquipamentoTicketLabel(
   ativo: unknown,
   descricao: unknown,
   fallbackAtivo?: unknown,
 ): string {
-  const ativoText = String(ativo ?? fallbackAtivo ?? "").trim();
-  const descricaoText = String(descricao ?? "").trim();
-  if (!ativoText && !descricaoText) return "—";
+  const ativoRaw = String(ativo ?? fallbackAtivo ?? "").trim();
+  const patrimonio = ativoRaw ? normalizeAtivoCompact(ativoRaw) : "";
+  const descricaoUtil = pickDescricaoEquipamento(patrimonio, String(descricao ?? ""));
 
-  const descricaoEhAtivo =
-    Boolean(descricaoText && ativoText) &&
-    normalizeAtivoCompact(descricaoText) === normalizeAtivoCompact(ativoText);
-
-  if (descricaoText && !descricaoEhAtivo) {
-    return ativoText ? `${ativoText} — ${descricaoText}` : descricaoText;
-  }
-  if (descricaoText) return descricaoText;
-  return ativoText;
+  if (patrimonio && descricaoUtil) return `${patrimonio} - ${descricaoUtil}`;
+  if (descricaoUtil) return descricaoUtil;
+  if (patrimonio) return patrimonio;
+  return "—";
 }
 
 type MelosaRowEquipamento = {
@@ -30,7 +35,7 @@ type MelosaRowEquipamento = {
   obra_codigo?: number;
 };
 
-/** Preenche ativo_equipamento_nome a partir do cadastro quando o registro não tem descrição salva. */
+/** Busca descrição no cadastro para montar o ticket (patrimônio + descrição). */
 export async function enrichMelosaRowsWithEquipamentoDescricao<T extends MelosaRowEquipamento>(
   token: string,
   rows: T[],
@@ -43,7 +48,6 @@ export async function enrichMelosaRowsWithEquipamentoDescricao<T extends MelosaR
   const pending: { ativo: string; obra: number | null; key: string }[] = [];
 
   for (const row of rows) {
-    if (String(row.ativo_equipamento_nome ?? "").trim()) continue;
     const ativo = String(row.ativo_equipamento_texto ?? row.fornecedor_texto ?? "").trim();
     if (!ativo) continue;
     const obra = typeof row.obra_codigo === "number" ? row.obra_codigo : null;
@@ -56,19 +60,26 @@ export async function enrichMelosaRowsWithEquipamentoDescricao<T extends MelosaR
   await Promise.all(
     pending.map(async ({ ativo, obra, key }) => {
       const found = await lookup(ativo, obra);
-      const nome = found?.nome?.trim();
+      const patrimonio = normalizeAtivoCompact(ativo);
+      const nome = pickDescricaoEquipamento(patrimonio, found?.nome ?? "");
       if (nome) cache.set(key, nome);
     }),
   );
 
   return rows.map((row) => {
-    if (String(row.ativo_equipamento_nome ?? "").trim()) return row;
     const ativo = String(row.ativo_equipamento_texto ?? row.fornecedor_texto ?? "").trim();
     if (!ativo) return row;
     const obra = typeof row.obra_codigo === "number" ? row.obra_codigo : null;
     const key = `${normalizeAtivoCompact(ativo)}:${obra ?? ""}`;
-    const nome = cache.get(key);
-    if (!nome) return row;
-    return { ...row, ativo_equipamento_nome: nome };
+    const nomeCadastro = cache.get(key);
+    if (nomeCadastro) {
+      return { ...row, ativo_equipamento_nome: nomeCadastro };
+    }
+    const nomeSalvo = pickDescricaoEquipamento(
+      normalizeAtivoCompact(ativo),
+      String(row.ativo_equipamento_nome ?? ""),
+    );
+    if (nomeSalvo) return { ...row, ativo_equipamento_nome: nomeSalvo };
+    return row;
   });
 }

@@ -430,16 +430,22 @@ export default function MelosaBIPage() {
         token,
         selectedWithNumeros,
         async (ativo, obraCodigo) => {
-          try {
-            const json = (await apiPost("/v1/equipamentos/qr/lookup", token, {
-              qr: ativo,
-              obra_codigo: obraCodigo,
-            })) as { equipamento?: { nome?: string | null } };
-            const nome = json.equipamento?.nome?.trim();
-            return nome ? { nome } : null;
-          } catch {
-            return null;
-          }
+          const tryLookup = async (obra: number | null) => {
+            try {
+              const json = (await apiPost("/v1/equipamentos/qr/lookup", token, {
+                qr: ativo,
+                obra_codigo: obra,
+              })) as { equipamento?: { nome?: string | null } };
+              const nome = json.equipamento?.nome?.trim();
+              return nome ? { nome } : null;
+            } catch {
+              return null;
+            }
+          };
+          const comObra = await tryLookup(obraCodigo);
+          if (comObra?.nome) return comObra;
+          if (obraCodigo != null) return tryLookup(null);
+          return null;
         },
       );
 
