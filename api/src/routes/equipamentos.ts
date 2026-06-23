@@ -6,6 +6,7 @@ import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { parseObraCodigoInput, parseObraReferencia } from "../lib/obraCodigo";
 import {
   buildEquipamentoExternoQrUrl,
+  expandAtivoSearchNeedles,
   findEquipamentoExterno,
   isEquipamentosExternosConfigured,
   normalizeAtivoPlacaExterno,
@@ -139,7 +140,7 @@ async function loadAbastEquipamentoByAtivo(
   const norm = normalizeAtivoPlacaExterno(ativo);
   if (!norm) return null;
 
-  const searchNeedles = [...new Set([ativo.trim(), ativo.trim().toUpperCase(), norm].filter(Boolean))];
+  const searchNeedles = expandAtivoSearchNeedles(ativo);
 
   async function findInScope(scopeObra?: number | null) {
     for (const needle of searchNeedles) {
@@ -158,7 +159,23 @@ async function loadAbastEquipamentoByAtivo(
         return { ativo: match.ativo, nome: match.nome, empresa: match.empresa };
       }
     }
-    return null;
+
+    let fallbackQuery = service
+      .from("equipamentos")
+      .select("ativo, nome, empresa")
+      .eq("tipo", "EQUIPAMENTO");
+    if (scopeObra != null && scopeObra > 0) {
+      fallbackQuery = fallbackQuery.eq("obra_codigo", scopeObra);
+    }
+    const { data: rows, error: fallbackError } = await fallbackQuery;
+    if (fallbackError) throw fallbackError;
+    const fallbackMatch = (rows ?? []).find((row) => normalizeAtivoPlacaExterno(row.ativo) === norm);
+    if (!fallbackMatch) return null;
+    return {
+      ativo: fallbackMatch.ativo,
+      nome: fallbackMatch.nome,
+      empresa: fallbackMatch.empresa,
+    };
   }
 
   if (obraCodigo != null && obraCodigo > 0) {

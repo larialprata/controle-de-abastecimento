@@ -13,6 +13,30 @@ export function normalizeAtivoPlacaExterno(value: string): string {
   return value.trim().toUpperCase().replace(/\s+/g, "");
 }
 
+/** Variantes para busca quando o patrimônio pode ter ou não espaço (ex.: EHRER03 ↔ EHRER 03). */
+export function expandAtivoSearchNeedles(ativo: string): string[] {
+  const trimmed = ativo.trim();
+  const norm = normalizeAtivoPlacaExterno(ativo);
+  if (!norm) return [];
+
+  const needles = new Set<string>();
+  if (trimmed) needles.add(trimmed);
+  const upper = trimmed.toUpperCase();
+  if (upper) needles.add(upper);
+  needles.add(norm);
+
+  const lettersThenRest = norm.match(/^([A-Z]+)(.+)$/);
+  if (lettersThenRest) {
+    needles.add(`${lettersThenRest[1]} ${lettersThenRest[2]}`);
+  }
+
+  return [...needles];
+}
+
+export function ativosPatrimonioEquivalentes(a: string, b: string): boolean {
+  return normalizeAtivoPlacaExterno(a) === normalizeAtivoPlacaExterno(b);
+}
+
 export function normalizeObraCodeExterno(value: number | string | null | undefined): string | null {
   if (value == null) return null;
   const raw = String(value).trim();
