@@ -8,6 +8,7 @@ import {
   buildEquipamentoExternoQrUrl,
   expandAtivoSearchNeedles,
   findEquipamentoExterno,
+  equipamentosExternosConnectionMode,
   isEquipamentosExternosConfigured,
   normalizeAtivoPlacaExterno,
 } from "../lib/equipamentosExternos";
@@ -85,25 +86,14 @@ async function resolveEquipamentoQrResponse(input: {
   nome?: string | null;
   obra_codigo?: number | null;
   tipo?: "EQUIPAMENTO" | "MELOSA" | "TANQUE";
-  /** Equipamento cadastrado no Controle Abast: gera QR interno CONTROLE_ABAST */
-  preferAbastQr?: boolean;
+  /** Cadastrado no Controle Abast — com match no Controle de Equipamentos usa QR externo */
+  existsInAbast?: boolean;
 }) {
   const ativo = input.ativo.trim();
   const tipo = input.tipo === "MELOSA" ? "MELOSA" : "EQUIPAMENTO";
+  const inAbast = input.existsInAbast ?? false;
 
-  if (input.preferAbastQr) {
-    const qrContent = `CONTROLE_ABAST:${tipo}:${ativo}`;
-    return {
-      ativo,
-      nome: input.nome ?? ativo,
-      obra_codigo: input.obra_codigo ?? null,
-      source: "abast" as const,
-      qr_content: qrContent,
-      externo: null,
-    };
-  }
-
-  const externo = await findEquipamentoExterno(ativo, input.obra_codigo ?? null);
+  const externo = inAbast ? await findEquipamentoExterno(ativo, input.obra_codigo ?? null) : null;
   if (externo) {
     const qrContent = buildEquipamentoExternoQrUrl(externo.qr_token, EQUIPAMENTOS_QR_PUBLIC_BASE_URL);
     return {
@@ -117,6 +107,9 @@ async function resolveEquipamentoQrResponse(input: {
         ativo_placa: externo.ativo_placa,
         obra_code: externo.obra_code,
         qr_token: externo.qr_token,
+        name: externo.name,
+        company_name: externo.company_name,
+        contract_name: externo.contract_name,
       },
     };
   }
@@ -242,6 +235,7 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
 router.get("/equipamentos/qr/status", requireAuth, async (_req: AuthedRequest, res) => {
   return res.json({
     externo_configurado: isEquipamentosExternosConfigured(),
+    conexao: equipamentosExternosConnectionMode(),
     public_base_url: EQUIPAMENTOS_QR_PUBLIC_BASE_URL || null,
   });
 });
@@ -295,7 +289,7 @@ router.post("/equipamentos/qr/resolve", requireAuth, async (req: AuthedRequest, 
         nome: item.nome,
         obra_codigo: item.obra_codigo ?? null,
         tipo: item.tipo,
-        preferAbastQr: true,
+        existsInAbast: true,
       }),
     ),
   );
@@ -322,7 +316,7 @@ router.get("/equipamentos/:ativo/qr", requireAuth, async (req: AuthedRequest, re
     nome: existing?.nome ?? ativo,
     obra_codigo: obra_codigo ?? existing?.obra_codigo ?? null,
     tipo: existing?.tipo === "MELOSA" ? "MELOSA" : "EQUIPAMENTO",
-    preferAbastQr: Boolean(existing),
+    existsInAbast: Boolean(existing),
   });
 
   return res.json({ qr });

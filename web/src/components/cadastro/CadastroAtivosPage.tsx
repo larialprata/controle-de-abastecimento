@@ -220,11 +220,14 @@ export default function CadastroAtivosPage({
       );
       await downloadEquipamentosQrHtml(
         resolved.map((qr) => ({
-          ativo: qr.ativo,
+          ativo: qr.externo?.ativo_placa?.trim() || qr.ativo,
           nome: qr.nome,
           tipo: fixedTipo,
           qr_content: qr.qr_content,
           source: qr.source,
+          company_name: qr.externo?.company_name ?? null,
+          contract_name: qr.externo?.contract_name ?? null,
+          qr_token: qr.externo?.qr_token ?? null,
         })),
         `QR codes — ${title}`,
       );

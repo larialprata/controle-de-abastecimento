@@ -14,6 +14,9 @@ export type EquipamentoQrResolved = {
     ativo_placa: string;
     obra_code: string | null;
     qr_token: string;
+    name?: string | null;
+    company_name?: string | null;
+    contract_name?: string | null;
   } | null;
 };
 

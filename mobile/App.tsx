@@ -40,7 +40,12 @@ import { lightTheme } from "./src/theme/light";
 import EquipamentoQrScanner from "./src/components/EquipamentoQrScanner";
 import MelosaSignaturePad from "./src/components/MelosaSignaturePad";
 import { labelEquipamentoEmpresa } from "./src/lib/equipamentoEmpresa";
-import { normalizeEquipamentoQrScan, parseAbastEquipamentoQrAtivo } from "./src/lib/equipamentoQr";
+import {
+  buildEquipamentoQrLookupPayload,
+  normalizeEquipamentoQrScan,
+  parseAbastEquipamentoQrAtivo,
+  parseEquipamentoQrContent,
+} from "./src/lib/equipamentoQr";
 import { normalizeAtivoPatrimonio } from "./src/lib/equipamentoAtivo";
 import { base64ToArrayBuffer, parseBase64DataUrl } from "./src/lib/signatureImage";
 
@@ -315,6 +320,7 @@ const CenteredScrollView = forwardRef<
     viewportHeightOverride?: number;
     keyboardDismissMode?: "none" | "on-drag" | "interactive";
     scrollEnabled?: boolean;
+    nestedScrollEnabled?: boolean;
   }
 >(function CenteredScrollView(
   {
@@ -326,6 +332,7 @@ const CenteredScrollView = forwardRef<
     viewportHeightOverride,
     keyboardDismissMode = "on-drag",
     scrollEnabled = true,
+    nestedScrollEnabled,
   },
   ref
 ) {
@@ -366,7 +373,7 @@ const CenteredScrollView = forwardRef<
         ]}
         keyboardShouldPersistTaps="always"
         keyboardDismissMode={keyboardDismissMode}
-        nestedScrollEnabled={false}
+        nestedScrollEnabled={nestedScrollEnabled ?? scrollEnabled}
         scrollEnabled={false}
         bounces={false}
         showsVerticalScrollIndicator={false}
@@ -394,7 +401,7 @@ const CenteredScrollView = forwardRef<
       ]}
       keyboardShouldPersistTaps="always"
       keyboardDismissMode={keyboardDismissMode}
-      nestedScrollEnabled={scrollEnabled}
+      nestedScrollEnabled={nestedScrollEnabled ?? scrollEnabled}
       scrollEnabled={scrollEnabled}
       bounces={scrollEnabled}
       showsVerticalScrollIndicator={scrollEnabled}
@@ -419,6 +426,7 @@ const FormScreenScroll = forwardRef<
     layoutKey?: string;
     keyboardDismissMode?: "none" | "on-drag" | "interactive";
     scrollEnabled?: boolean;
+    nestedScrollEnabled?: boolean;
   }
 >(function FormScreenScroll(
   {
@@ -428,6 +436,7 @@ const FormScreenScroll = forwardRef<
     layoutKey,
     keyboardDismissMode = "on-drag",
     scrollEnabled = true,
+    nestedScrollEnabled,
   },
   ref
 ) {
@@ -454,6 +463,7 @@ const FormScreenScroll = forwardRef<
       viewportHeightOverride={scrollAreaHeight}
       keyboardDismissMode={keyboardDismissMode}
       scrollEnabled={scrollEnabled}
+      nestedScrollEnabled={nestedScrollEnabled}
     >
       {children}
     </CenteredScrollView>
@@ -637,6 +647,7 @@ export default function App() {
   const [melosaHorimetroEquipamentoNumero, setMelosaHorimetroEquipamentoNumero] = useState("");
   const [melosaHorimetroEquipamentoFotoUri, setMelosaHorimetroEquipamentoFotoUri] = useState<string | null>(null);
   const [melosaNaoTenhoHorimetro, setMelosaNaoTenhoHorimetro] = useState(false);
+  const [melosaHorimetroMotivo, setMelosaHorimetroMotivo] = useState<"" | "QUEBRADO" | "INEXISTENTE">("");
   const [melosaLubrificado, setMelosaLubrificado] = useState(false);
   const [melosaMotoristaEquipamentoTexto, setMelosaMotoristaEquipamentoTexto] = useState("");
   const [melosaEquipamentoOperadorFotoUri, setMelosaEquipamentoOperadorFotoUri] = useState<string | null>(null);
@@ -660,8 +671,7 @@ export default function App() {
   const [placaTexto, setPlacaTexto] = useState("");
   const [fornecedorTexto, setFornecedorTexto] = useState("");
   const [equipamentoTexto, setEquipamentoTexto] = useState("");
-  const [horimetroHodometroTexto, setHorimetroHodometroTexto] = useState("");
-  const [horimetroFotoUri, setHorimetroFotoUri] = useState<string | null>(null);
+  const [retiradaMotoristaMelosaTexto, setRetiradaMotoristaMelosaTexto] = useState("");
   const [numeroLacreTanque, setNumeroLacreTanque] = useState("");
   const [numeroLacreMelosa, setNumeroLacreMelosa] = useState("");
   const [lacreTanqueFotoUri, setLacreTanqueFotoUri] = useState<string | null>(null);
@@ -839,8 +849,7 @@ export default function App() {
     setPlacaTexto("");
     setFornecedorTexto("");
     setEquipamentoTexto("");
-    setHorimetroHodometroTexto("");
-    setHorimetroFotoUri(null);
+    setRetiradaMotoristaMelosaTexto("");
     setNumeroLacreTanque("");
     setNumeroLacreMelosa("");
     setLacreTanqueFotoUri(null);
@@ -887,6 +896,7 @@ export default function App() {
     setMelosaQuantidadeAbastecidaTexto("");
     setMelosaQuantidadeAbastecidaFotoUri(null);
     setMelosaNaoTenhoHorimetro(false);
+    setMelosaHorimetroMotivo("");
     setMelosaLubrificado(false);
     setMelosaHorimetroEquipamentoNumero("");
     setMelosaHorimetroEquipamentoFotoUri(null);
@@ -907,6 +917,8 @@ export default function App() {
     ativo: string;
     nome: string | null;
     empresa: string | null;
+    contrato?: string | null;
+    obra_externa?: string | null;
     source: string;
   };
 
@@ -931,19 +943,40 @@ export default function App() {
 
   async function fetchMelosaEquipamentoByQr(qr: string): Promise<MelosaEquipamentoLookup | null> {
     if (!session?.access_token || !qr.trim()) return null;
+    const { equipamento } = await apiPost<{ equipamento: MelosaEquipamentoLookup }>(
+      "/v1/equipamentos/qr/lookup",
+      session.access_token,
+      {
+        qr: qr.trim(),
+        obra_codigo: melosaObraCodigo,
+      },
+    );
+    return equipamento;
+  }
+
+  async function lookupMelosaEquipamentoFromQrScan(qrData: string): Promise<MelosaEquipamentoLookup> {
+    const normalized = normalizeEquipamentoQrScan(qrData);
+    const primary = buildEquipamentoQrLookupPayload(qrData) || normalized || qrData.trim();
+
     try {
-      const { equipamento } = await apiPost<{ equipamento: MelosaEquipamentoLookup }>(
-        "/v1/equipamentos/qr/lookup",
-        session.access_token,
-        {
-          qr: qr.trim(),
-          obra_codigo: melosaObraCodigo,
-        },
-      );
-      return equipamento;
-    } catch {
-      return null;
+      const equipamento = await fetchMelosaEquipamentoByQr(primary);
+      if (equipamento?.ativo?.trim()) return equipamento;
+    } catch (firstError) {
+      const parsed = parseEquipamentoQrContent(normalized || qrData);
+      if (parsed?.kind === "token" && parsed.token !== primary) {
+        const equipamento = await fetchMelosaEquipamentoByQr(parsed.token);
+        if (equipamento?.ativo?.trim()) return equipamento;
+      }
+      throw firstError;
     }
+
+    const parsed = parseEquipamentoQrContent(normalized || qrData);
+    if (parsed?.kind === "token") {
+      const equipamento = await fetchMelosaEquipamentoByQr(parsed.token);
+      if (equipamento?.ativo?.trim()) return equipamento;
+    }
+
+    throw new Error("Equipamento não encontrado.");
   }
 
   async function fetchMelosaEquipamentoByAtivo(ativo: string): Promise<MelosaEquipamentoLookup | null> {
@@ -984,11 +1017,7 @@ export default function App() {
 
     setMelosaEquipamentoQrLoading(true);
     try {
-      const qrNormalized = normalizeEquipamentoQrScan(qrData);
-      const equipamento = await fetchMelosaEquipamentoByQr(qrNormalized || qrData.trim());
-      if (!equipamento?.ativo?.trim()) {
-        throw new Error("Equipamento não encontrado.");
-      }
+      const equipamento = await lookupMelosaEquipamentoFromQrScan(qrData);
       skipMelosaAtivoLookupRef.current = true;
       setMelosaFornecedorTexto(equipamento.ativo);
       applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true });
@@ -1001,9 +1030,11 @@ export default function App() {
             : "cadastro local";
       const descricao = pickMelosaEquipamentoDescricao(equipamento.ativo, equipamento.nome);
       const descricaoLabel = descricao ? `\nDescrição: ${descricao}` : "";
+      const contratoLabel = equipamento.contrato?.trim() ? `\nContrato: ${equipamento.contrato.trim()}` : "";
+      const obraLabel = equipamento.obra_externa?.trim() ? `\nObra: ${equipamento.obra_externa.trim()}` : "";
       Alert.alert(
         "Equipamento identificado",
-        `Ativo: ${equipamento.ativo}\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}${descricaoLabel}\n\nFonte: ${origem}`,
+        `Ativo: ${equipamento.ativo}\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}${descricaoLabel}${contratoLabel}${obraLabel}\n\nFonte: ${origem}`,
       );
     } catch (e: unknown) {
       const ativoLocal = parseAbastEquipamentoQrAtivo(qrData);
@@ -1028,7 +1059,11 @@ export default function App() {
         return;
       }
       setMelosaEquipamentoQrOpen(false);
-      Alert.alert("QR não reconhecido", e instanceof Error ? e.message : "Não foi possível identificar o equipamento.");
+      const apiHint =
+        e instanceof Error && e.message.includes("não reconhecido")
+          ? "\n\nVerifique se a API está com EQUIPAMENTOS_DB_URL ou EQUIPAMENTOS_SUPABASE_SERVICE_ROLE_KEY configurados."
+          : "";
+      Alert.alert("QR não reconhecido", `${e instanceof Error ? e.message : "Não foi possível identificar o equipamento."}${apiHint}`);
     } finally {
       setMelosaEquipamentoQrLoading(false);
     }
@@ -1293,40 +1328,6 @@ export default function App() {
     const asset = result.assets?.[0];
     if (!asset?.uri) return;
     setLacreMelosaFotoUri(asset.uri);
-  }
-
-  async function pickHorimetroFotoFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do horímetro.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setHorimetroFotoUri(asset.uri);
-  }
-
-  async function pickHorimetroFotoFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do horímetro.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setHorimetroFotoUri(asset.uri);
   }
 
   async function pickTanqueQuantidadeAbastecidaFromLibrary() {
@@ -1902,6 +1903,10 @@ export default function App() {
       Alert.alert("Insumo obrigatório", "Selecione o tipo de insumo.");
       return;
     }
+    if (!retiradaMotoristaMelosaTexto.trim()) {
+      Alert.alert("Motorista obrigatório", "Informe o nome do motorista da melosa.");
+      return;
+    }
     setMessage(null);
     setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "detalhes" });
   }
@@ -2100,7 +2105,6 @@ export default function App() {
     let tanqueQuantidadeAbastecidaStoragePath: string | null = null;
     let tanqueAssinaturaOperadorStoragePath: string | null = null;
     let tanqueAssinaturaMelosaStoragePath: string | null = null;
-    let retiradaHorimetroFotoStoragePath: string | null = null;
 
     if (isEntradaTanqueObra) {
       const NOTA_BUCKET = "notas";
@@ -2126,7 +2130,6 @@ export default function App() {
       const LACRE_TANQUE_BUCKET = "lacre_tanque";
       const LACRE_MELOSA_BUCKET = "lacre_melosa";
       const FOTO_QUANTIDADE_ABASTECIDA_BUCKET = "foto_quantidade_abastecida";
-      const RETIRADA_HORIMETRO_BUCKET = "retirada_horimetro";
       const TANQUE_ASSINATURAS_BUCKET = "melosa_assinaturas";
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
@@ -2164,18 +2167,6 @@ export default function App() {
       const assinaturaOperadorPath = `${userId}/tanque/assinaturas/operador/${operationId}.png`;
       const assinaturaMelosaPath = `${userId}/tanque/assinaturas/melosa/${operationId}.png`;
 
-      const hasHorimetroFoto = !!horimetroFotoUri;
-      let horimetroPath: string | null = null;
-      let horimetroBytes: ArrayBuffer | null = null;
-      let horimetroContentType: string | null = null;
-      if (hasHorimetroFoto) {
-        const horimetroExt = extFromUri(horimetroFotoUri as string);
-        horimetroPath = `${userId}/horimetro/${operationId}.${horimetroExt}`;
-        const tmp = await readImageUriAsArrayBuffer(horimetroFotoUri as string);
-        horimetroBytes = tmp.arrayBuffer;
-        horimetroContentType = tmp.contentType;
-      }
-
       const { arrayBuffer: tanqueBytes, contentType: tanqueContentType } = await readImageUriAsArrayBuffer(lacreTanqueFotoUri as string);
       const { arrayBuffer: melosaBytes, contentType: melosaContentType } = await readImageUriAsArrayBuffer(lacreMelosaFotoUri as string);
       const { arrayBuffer: quantidadeBytes, contentType: quantidadeContentType } = await readImageUriAsArrayBuffer(
@@ -2197,15 +2188,6 @@ export default function App() {
         }),
       ];
 
-      if (hasHorimetroFoto && horimetroPath && horimetroBytes && horimetroContentType) {
-        uploads.unshift(
-          supabase.storage.from(RETIRADA_HORIMETRO_BUCKET).upload(horimetroPath, horimetroBytes, {
-            contentType: horimetroContentType,
-            upsert: false,
-          }),
-        );
-      }
-
       await Promise.all(uploads);
 
       await uploadBase64ToBucket(
@@ -2221,9 +2203,6 @@ export default function App() {
         "assinatura do responsável pela melosa",
       );
 
-      if (hasHorimetroFoto && horimetroPath) {
-        retiradaHorimetroFotoStoragePath = horimetroPath;
-      }
       lacreTanqueStoragePath = tanquePath;
       lacreMelosaStoragePath = melosaPath;
       tanqueQuantidadeAbastecidaStoragePath = quantidadePath;
@@ -2238,7 +2217,7 @@ export default function App() {
       data_hora: new Date().toISOString(),
       litros,
       tanque_texto: isRetiradaTanque
-        ? horimetroHodometroTexto.trim() || null
+        ? retiradaMotoristaMelosaTexto.trim() || null
         : tanqueTexto.trim()
           ? tanqueTexto.trim()
           : null,
@@ -2260,7 +2239,7 @@ export default function App() {
       tanque_operador_nome: isRetiradaTanque ? driverFullName.trim() || null : null,
       tanque_assinatura_operador_storage_path: isRetiradaTanque ? tanqueAssinaturaOperadorStoragePath : null,
       tanque_assinatura_melosa_storage_path: isRetiradaTanque ? tanqueAssinaturaMelosaStoragePath : null,
-      retirada_horimetro_foto_storage_path: isRetiradaTanque ? retiradaHorimetroFotoStoragePath : null,
+      retirada_horimetro_foto_storage_path: null,
 
       local_latitude: localLatitude,
       local_longitude: localLongitude,
@@ -2501,10 +2480,13 @@ export default function App() {
       melosa_comprovante_storage_path: null,
       melosa_quantidade_abastecida: melosaQuantidadeAbastecidaTexto.trim(),
       melosa_quantidade_abastecida_storage_path: quantidadePath,
-      melosa_horimetro_equipamento_abastecido_numero:
-        incluirHorimetro && melosaHorimetroEquipamentoNumero.trim()
-          ? melosaHorimetroEquipamentoNumero.trim()
-          : null,
+      melosa_horimetro_equipamento_abastecido_numero: incluirHorimetro
+        ? melosaHorimetroEquipamentoNumero.trim() || null
+        : melosaHorimetroMotivo === "QUEBRADO"
+          ? "Quebrado"
+          : melosaHorimetroMotivo === "INEXISTENTE"
+            ? "Inexistente"
+            : null,
       melosa_horimetro_equipamento_abastecido_storage_path: incluirHorimetro ? horimetroPath ?? null : null,
       melosa_motorista_equipamento_abastecido: melosaMotoristaEquipamentoTexto.trim(),
       melosa_equipamento_operador_storage_path: operadorPath,
@@ -2591,10 +2573,17 @@ export default function App() {
     }
     setMessage(null);
     setMelosaNaoTenhoHorimetro(false);
+    setMelosaHorimetroMotivo("");
     setScreen({ name: "melosa", step: "horimetro" });
   }
 
   function continueMelosaHorimetro() {
+    if (melosaNaoTenhoHorimetro) {
+      if (!melosaHorimetroMotivo) {
+        Alert.alert("Motivo obrigatório", "Selecione Quebrado ou Inexistente.");
+        return;
+      }
+    }
     if (!melosaMotoristaEquipamentoTexto.trim()) {
       Alert.alert("Motorista obrigatório", "Informe o motorista do equipamento abastecido.");
       return;
@@ -3097,7 +3086,11 @@ export default function App() {
     const obraResumoLabel = obraResumo ? `${obraResumo.codigo} - ${obraResumo.nome}` : String(melosaObraCodigo);
     const equipamentoDescricaoResumo = melosaEquipamentoNomeTexto.trim() || "—";
     const horimetroResumoLabel = melosaNaoTenhoHorimetro
-      ? "—"
+      ? melosaHorimetroMotivo === "QUEBRADO"
+        ? "Quebrado"
+        : melosaHorimetroMotivo === "INEXISTENTE"
+          ? "Inexistente"
+          : "—"
       : melosaHorimetroEquipamentoNumero.trim() || "—";
     const quantidadeResumoValor = melosaQuantidadeAbastecidaTexto.trim() || "—";
     const insumoResumoLabel = melosaWdrCombustivelTipo === "GASOLINA" ? "Gasolina" : "Diesel";
@@ -3179,6 +3172,7 @@ export default function App() {
             <FormScreenScroll
               layoutKey={melosaStep}
               scrollEnabled={!signatureScrollLocked}
+              nestedScrollEnabled={isResumo}
               preferCenter={!isResumo}
               keyboardDismissMode={isResumo ? "none" : "on-drag"}
               contentContainerStyle={isResumo ? styles.resumoScrollContent : undefined}
@@ -3384,6 +3378,8 @@ export default function App() {
                         if (semHorimetro) {
                           setMelosaHorimetroEquipamentoNumero("");
                           setMelosaHorimetroEquipamentoFotoUri(null);
+                        } else {
+                          setMelosaHorimetroMotivo("");
                         }
                       }}
                       style={[
@@ -3462,7 +3458,57 @@ export default function App() {
                         </TouchableOpacity>
                       </View>
                     </>
-                  ) : null}
+                  ) : (
+                    <>
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
+                        Motivo (obrigatório)
+                      </Text>
+                      <View style={styles.horimetroMotivoRow}>
+                        <TouchableOpacity
+                          style={[
+                            styles.horimetroMotivoChip,
+                            !isDarkMode ? styles.horimetroMotivoChipLight : styles.horimetroMotivoChipDark,
+                            melosaHorimetroMotivo === "QUEBRADO" ? styles.horimetroMotivoChipSelected : null,
+                          ]}
+                          onPress={() => setMelosaHorimetroMotivo("QUEBRADO")}
+                          disabled={busy}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected: melosaHorimetroMotivo === "QUEBRADO" }}
+                        >
+                          <Text
+                            style={[
+                              styles.horimetroMotivoChipText,
+                              !isDarkMode ? styles.horimetroMotivoChipTextLight : null,
+                              melosaHorimetroMotivo === "QUEBRADO" ? styles.horimetroMotivoChipTextSelected : null,
+                            ]}
+                          >
+                            Quebrado
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.horimetroMotivoChip,
+                            !isDarkMode ? styles.horimetroMotivoChipLight : styles.horimetroMotivoChipDark,
+                            melosaHorimetroMotivo === "INEXISTENTE" ? styles.horimetroMotivoChipSelected : null,
+                          ]}
+                          onPress={() => setMelosaHorimetroMotivo("INEXISTENTE")}
+                          disabled={busy}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected: melosaHorimetroMotivo === "INEXISTENTE" }}
+                        >
+                          <Text
+                            style={[
+                              styles.horimetroMotivoChipText,
+                              !isDarkMode ? styles.horimetroMotivoChipTextLight : null,
+                              melosaHorimetroMotivo === "INEXISTENTE" ? styles.horimetroMotivoChipTextSelected : null,
+                            ]}
+                          >
+                            Inexistente
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
                     Motorista do equipamento abastecido
@@ -3568,14 +3614,13 @@ export default function App() {
                     </Text>
                   </View>
 
-                  <ScrollView
-                    style={styles.melosaResumoSummaryScroll}
-                    nestedScrollEnabled={false}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                    bounces={false}
-                  >
-                    <View style={[styles.melosaResumoBox, !isDarkMode ? styles.melosaResumoBoxLight : styles.melosaResumoBoxDark]}>
+                  <View style={[styles.melosaResumoBox, !isDarkMode ? styles.melosaResumoBoxLight : styles.melosaResumoBoxDark]}>
+                    <ScrollView
+                      style={styles.melosaResumoSummaryScroll}
+                      contentContainerStyle={styles.melosaResumoSummaryScrollContent}
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator
+                    >
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                         Obra
@@ -3632,8 +3677,8 @@ export default function App() {
                         {horimetroResumoLabel}
                       </Text>
                     </View>
-                    </View>
-                  </ScrollView>
+                    </ScrollView>
+                  </View>
 
                   <TouchableOpacity
                     style={styles.lubrificadoRow}
@@ -3808,6 +3853,7 @@ export default function App() {
             <FormScreenScroll
               layoutKey={isRetiradaTanque ? retiradaStep : tipoAtual ?? "form"}
               scrollEnabled={!signatureScrollLocked}
+              nestedScrollEnabled={isRetiradaResumo}
               preferCenter={!isRetiradaResumo}
               keyboardDismissMode={isRetiradaResumo ? "none" : "on-drag"}
               contentContainerStyle={isRetiradaResumo ? styles.resumoScrollContent : undefined}
@@ -3902,39 +3948,17 @@ export default function App() {
                     </>
                   )}
 
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Horímetro</Text>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                    Nome do Motorista Melosa
+                  </Text>
                   <TextInput
-                    value={horimetroHodometroTexto}
-                    onChangeText={setHorimetroHodometroTexto}
+                    value={retiradaMotoristaMelosaTexto}
+                    onChangeText={setRetiradaMotoristaMelosaTexto}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: 1542,3 h"
+                    placeholder="Ex.: João Silva"
                     placeholderTextColor={inputPlaceholderColor}
-                    keyboardType="decimal-pad"
+                    autoCapitalize="words"
                   />
-
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto do horímetro</Text>
-                  <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
-                    {horimetroFotoUri ? (
-                      <>
-                        <Image source={{ uri: horimetroFotoUri }} style={styles.photoPreviewFull} />
-                        <TouchableOpacity style={styles.photoRemove} onPress={() => setHorimetroFotoUri(null)} disabled={busy}>
-                          <Text style={styles.photoRemoveText}>Remover</Text>
-                        </TouchableOpacity>
-                      </>
-                    ) : (
-                      <Text style={[styles.photoPlaceholder, !isDarkMode ? styles.photoPlaceholderLight : null]}>
-                        Selecione a foto do horímetro
-                      </Text>
-                    )}
-                  </View>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
-                    <TouchableOpacity style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]} onPress={pickHorimetroFotoFromLibrary} disabled={busy}>
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]} onPress={pickHorimetroFotoFromCamera} disabled={busy}>
-                      <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
-                    </TouchableOpacity>
-                  </View>
                 </>
               ) : null}
 
@@ -4179,14 +4203,13 @@ export default function App() {
                     </Text>
                   </View>
 
-                  <ScrollView
-                    style={styles.melosaResumoSummaryScroll}
-                    nestedScrollEnabled={false}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                    bounces={false}
-                  >
-                    <View style={[styles.melosaResumoBox, !isDarkMode ? styles.melosaResumoBoxLight : styles.melosaResumoBoxDark]}>
+                  <View style={[styles.melosaResumoBox, !isDarkMode ? styles.melosaResumoBoxLight : styles.melosaResumoBoxDark]}>
+                    <ScrollView
+                      style={styles.melosaResumoSummaryScroll}
+                      contentContainerStyle={styles.melosaResumoSummaryScrollContent}
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator
+                    >
                       <View style={styles.melosaResumoRow}>
                         <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                           Obra
@@ -4213,10 +4236,10 @@ export default function App() {
                       </View>
                       <View style={styles.melosaResumoRow}>
                         <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
-                          Horímetro
+                          Motorista melosa
                         </Text>
                         <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
-                          {horimetroHodometroTexto.trim() || "—"}
+                          {retiradaMotoristaMelosaTexto.trim() || "—"}
                         </Text>
                       </View>
                       <View style={styles.melosaResumoRow}>
@@ -4235,8 +4258,8 @@ export default function App() {
                           {numeroLacreMelosa.trim() || "—"}
                         </Text>
                       </View>
-                    </View>
-                  </ScrollView>
+                    </ScrollView>
+                  </View>
 
                   <View style={styles.melosaResumoSignatures} collapsable={false}>
                     <MelosaSignaturePad
@@ -4247,7 +4270,7 @@ export default function App() {
                       onScrollLockChange={setSignatureScrollLocked}
                     />
                     <MelosaSignaturePad
-                      label={`Responsável pela melosa (${placaTexto.trim() || "—"})`}
+                      label={`Motorista melosa (${retiradaMotoristaMelosaTexto.trim() || "—"})`}
                       isDarkMode={isDarkMode}
                       onSigned={setTanqueAssinaturaMelosaDataUrl}
                       onClear={() => setTanqueAssinaturaMelosaDataUrl(null)}
@@ -4989,6 +5012,46 @@ const styles = StyleSheet.create({
     color: lightTheme.textSecondary,
   },
 
+  horimetroMotivoRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 6,
+  },
+  horimetroMotivoChip: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 10,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  horimetroMotivoChipLight: {
+    borderColor: lightTheme.borderSubtle,
+    backgroundColor: lightTheme.surfaceMuted,
+  },
+  horimetroMotivoChipDark: {
+    borderColor: "rgba(148,163,184,0.35)",
+    backgroundColor: "rgba(15,23,42,0.45)",
+  },
+  horimetroMotivoChipSelected: {
+    borderColor: "#2563eb",
+    backgroundColor: "rgba(37,99,235,0.15)",
+  },
+  horimetroMotivoChipText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#f8fafc",
+    textAlign: "center",
+  },
+  horimetroMotivoChipTextLight: {
+    color: lightTheme.textPrimary,
+  },
+  horimetroMotivoChipTextSelected: {
+    color: "#2563eb",
+  },
+
   melosaResumoBox: {
     marginTop: 10,
     padding: 12,
@@ -5059,8 +5122,10 @@ const styles = StyleSheet.create({
   melosaResumoQuantidadeInsumoLight: { color: "#475569" },
   melosaResumoQuantidadeInsumoDark: { color: "#94a3b8" },
   melosaResumoSummaryScroll: {
-    maxHeight: 190,
-    marginTop: 4,
+    maxHeight: 240,
+  },
+  melosaResumoSummaryScrollContent: {
+    gap: 8,
   },
   lubrificadoRow: {
     flexDirection: "row",
@@ -5104,7 +5169,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   resumoScrollContent: {
-    paddingBottom: 24,
+    paddingBottom: 48,
+    flexGrow: 1,
   },
   melosaResumoRow: {
     flexDirection: "row",

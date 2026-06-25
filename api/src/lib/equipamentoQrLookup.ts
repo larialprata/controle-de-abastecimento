@@ -11,8 +11,20 @@ export type EquipamentoQrLookupResult = {
   ativo: string;
   nome: string | null;
   empresa: string | null;
+  contrato: string | null;
+  obra_externa: string | null;
   source: "abast" | "externo";
 };
+
+function ensureQrUrlScheme(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^[a-z0-9.-]+\/q\//i.test(trimmed) || /^\/q\//i.test(trimmed)) {
+    return `https://${trimmed.replace(/^\/+/, "")}`;
+  }
+  return trimmed;
+}
 
 function normalizeQrScanText(raw: string): string {
   let text = raw.trim().replace(/^\uFEFF/, "");
@@ -27,7 +39,7 @@ function normalizeQrScanText(raw: string): string {
     }
   }
 
-  return text;
+  return ensureQrUrlScheme(text);
 }
 
 function parseAbastQrContent(text: string): { kind: "abast"; ativo: string } | null {
@@ -89,15 +101,34 @@ type AbastEquipamentoRow = {
 async function resolveDadosExternos(
   ativo: string,
   obraCodigo?: number | null,
-): Promise<{ nome: string | null; empresa: string | null }> {
+): Promise<{
+  nome: string | null;
+  empresa: string | null;
+  contrato: string | null;
+  obra_externa: string | null;
+}> {
   let row = await findEquipamentoExterno(ativo, obraCodigo ?? null);
   if (!row?.ativo_placa && obraCodigo != null) {
     row = await findEquipamentoExterno(ativo, null);
   }
-  if (!row) return { nome: null, empresa: null };
+  if (!row) {
+    return { nome: null, empresa: null, contrato: null, obra_externa: null };
+  }
   return {
     nome: row.name?.trim() || null,
     empresa: normalizeEquipamentoEmpresa(row.company_name),
+    contrato: row.contract_name?.trim() || null,
+    obra_externa: row.obra_code?.trim() || null,
+  };
+}
+
+function externoMetaFromRow(row: {
+  contract_name?: string | null;
+  obra_code?: string | null;
+} | null | undefined): { contrato: string | null; obra_externa: string | null } {
+  return {
+    contrato: row?.contract_name?.trim() || null,
+    obra_externa: row?.obra_code?.trim() || null,
   };
 }
 
@@ -126,6 +157,8 @@ function buildLookupResult(input: {
   abastEmpresa: string | null | undefined;
   externoNome: string | null | undefined;
   externoEmpresa: string | null | undefined;
+  externoContrato?: string | null;
+  externoObra?: string | null;
   source: "abast" | "externo";
 }): EquipamentoQrLookupResult {
   return {
@@ -134,6 +167,8 @@ function buildLookupResult(input: {
     empresa:
       normalizeEquipamentoEmpresa(input.abastEmpresa) ??
       normalizeEquipamentoEmpresa(input.externoEmpresa),
+    contrato: input.externoContrato?.trim() || null,
+    obra_externa: input.externoObra?.trim() || null,
     source: input.source,
   };
 }
@@ -156,6 +191,8 @@ export async function lookupEquipamentoFromQr(
         abastEmpresa: abast.empresa,
         externoNome: externos.nome,
         externoEmpresa: externos.empresa,
+        externoContrato: externos.contrato,
+        externoObra: externos.obra_externa,
         source: "abast",
       });
     }
@@ -167,6 +204,8 @@ export async function lookupEquipamentoFromQr(
       ativo: parsed.ativo.trim(),
       nome: null,
       empresa: null,
+      contrato: null,
+      obra_externa: null,
       source: "abast",
     };
   }
@@ -178,6 +217,7 @@ export async function lookupEquipamentoFromQr(
   const externo = await findEquipamentoExternoByQrToken(parsed.token);
   if (!externo?.ativo_placa) return null;
 
+  const externoMeta = externoMetaFromRow(externo);
   const ativo = normalizeAtivoPlacaExterno(externo.ativo_placa);
   const obra = obraCodigo ?? (externo.obra_code ? Number(String(externo.obra_code).replace(/\D/g, "")) || null : null);
   const abast = await loadAbastEquipamento(ativo, obra);
@@ -189,6 +229,8 @@ export async function lookupEquipamentoFromQr(
       abastEmpresa: abast.empresa,
       externoNome: externo.name,
       externoEmpresa: externo.company_name,
+      externoContrato: externoMeta.contrato,
+      externoObra: externoMeta.obra_externa,
       source: "abast",
     });
   }
@@ -199,6 +241,8 @@ export async function lookupEquipamentoFromQr(
     abastEmpresa: null,
     externoNome: externo.name,
     externoEmpresa: externo.company_name,
+    externoContrato: externoMeta.contrato,
+    externoObra: externoMeta.obra_externa,
     source: "externo",
   });
 }
@@ -220,6 +264,8 @@ export async function lookupEquipamentoByAtivo(
       abastEmpresa: abast.empresa,
       externoNome: externos.nome,
       externoEmpresa: externos.empresa,
+      externoContrato: externos.contrato,
+      externoObra: externos.obra_externa,
       source: "abast",
     });
   }
@@ -228,22 +274,28 @@ export async function lookupEquipamentoByAtivo(
   if (!externo?.ativo_placa) {
     const externoSemObra = obraCodigo != null ? await findEquipamentoExterno(norm, null) : null;
     if (!externoSemObra?.ativo_placa) return null;
+    const metaSemObra = externoMetaFromRow(externoSemObra);
     return buildLookupResult({
       ativo: normalizeAtivoPlacaExterno(externoSemObra.ativo_placa),
       abastNome: null,
       abastEmpresa: null,
       externoNome: externoSemObra.name,
       externoEmpresa: externoSemObra.company_name,
+      externoContrato: metaSemObra.contrato,
+      externoObra: metaSemObra.obra_externa,
       source: "externo",
     });
   }
 
+  const meta = externoMetaFromRow(externo);
   return buildLookupResult({
     ativo: normalizeAtivoPlacaExterno(externo.ativo_placa),
     abastNome: null,
     abastEmpresa: null,
     externoNome: externo.name,
     externoEmpresa: externo.company_name,
+    externoContrato: meta.contrato,
+    externoObra: meta.obra_externa,
     source: "externo",
   });
 }

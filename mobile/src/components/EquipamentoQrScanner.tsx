@@ -96,7 +96,7 @@ export default function EquipamentoQrScanner({
             />
             <View style={styles.overlay} pointerEvents="box-none">
               <View style={styles.frame} />
-              <Text style={styles.overlayHint}>Aponte para o QR code do equipamento</Text>
+              <Text style={styles.overlayHint}>QR do Controle de Equipamentos ou do Abast</Text>
             </View>
           </View>
         )}
