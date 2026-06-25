@@ -7,6 +7,7 @@
     "icons:android": "npm run icons:generate && npx expo prebuild --platform android --no-install",
     "preandroid": "node scripts/sync-android-autolinking.cjs",
     "prestart": "node scripts/sync-android-autolinking.cjs",
+    "android:device": "powershell -ExecutionPolicy Bypass -File ./scripts/prepare-android-device.ps1 && npx expo run:android",
     "repair:deps": "powershell -ExecutionPolicy Bypass -File ./scripts/repair-monorepo-deps.ps1",
     "start": "npx expo start",
     "android": "npx expo run:android",

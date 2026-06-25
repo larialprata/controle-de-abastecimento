@@ -7,7 +7,12 @@ import { useAuth } from "../state/AuthContext";
 import { apiGet, apiPost } from "../lib/api";
 import { fmtTicketNumero, ticketNumeroParaFiltro } from "../lib/ticketNumero";
 import { downloadMelosaDescarbonizeExcel, type MelosaExcelRowInput } from "../lib/melosaDescarbonizeExcel";
-import { enrichMelosaTicketRowsWithSignatures } from "../lib/melosaPhotoUrl";
+import {
+  downloadMelosaBiResumoExcel,
+  type MelosaBiResumoRow,
+} from "../lib/melosaBiResumoExcel";
+import { enrichMelosaTicketRowsWithSignatures, fetchMelosaPhotoSignedUrl } from "../lib/melosaPhotoUrl";
+import { labelEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { fmtEquipamentoTicketLabel, enrichMelosaRowsWithEquipamentoDescricao } from "../lib/equipamentoTicketLabel";
 import { biTableRowKey, resolveSelectedRows } from "../lib/biSelection";
 import {
@@ -41,6 +46,7 @@ type LinhaMelosa = Record<string, unknown> & {
   ativo_melosa_texto?: string | null;
   ativo_equipamento_texto?: string | null;
   ativo_equipamento_nome?: string | null;
+  ativo_equipamento_empresa?: string | null;
   tanque_numero?: number | string | null;
   melosa_combustivel_tipo_registro?: string | null;
   melosa_combustivel_tipo_retirada?: string | null;
@@ -71,6 +77,62 @@ function toMelosaExcelInput(m: LinhaMelosa): MelosaExcelRowInput {
     quantidadeAbastecida: m.melosa_quantidade_abastecida,
     placaTexto: m.ativo_melosa_texto ?? m.placa_texto,
   };
+}
+
+function empresaEquipamentoParaResumo(m: LinhaMelosa): string {
+  const raw =
+    typeof m.ativo_equipamento_empresa === "string" ? m.ativo_equipamento_empresa : null;
+  const label = labelEquipamentoEmpresa(raw);
+  return label === "—" ? "Sem empresa" : label;
+}
+
+function toMelosaBiResumoRow(m: LinhaMelosa): MelosaBiResumoRow {
+  const obraCodigo = typeof m.obra_codigo === "number" ? m.obra_codigo : undefined;
+  const responsavelMelosa =
+    typeof m.melosa_operador_nome === "string" && m.melosa_operador_nome.trim()
+      ? m.melosa_operador_nome.trim()
+      : typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
+        ? m.usuario_full_name.trim()
+        : null;
+  const motorista = m.melosa_motorista_equipamento_abastecido;
+  return {
+    empresa: empresaEquipamentoParaResumo(m),
+    obraCodigo,
+    obraNome: m.obra_nome,
+    dataHora: m.data_hora,
+    ativoMelosa: fmtAtivoPlaca(m) !== "—" ? fmtAtivoPlaca(m) : null,
+    ativoEquipamento: fmtAtivoEquipamento(m) !== "—" ? fmtAtivoEquipamento(m) : null,
+    insumo: fmtInsumoMel(m) !== "—" ? fmtInsumoMel(m) : null,
+    quantidadeLitros: calcQuantidadeLitros(m),
+    responsavelEquipamento:
+      motorista != null && String(motorista).trim() ? String(motorista).trim() : null,
+    responsavelMelosa,
+    local: fmtLocal(m) !== "—" ? fmtLocal(m) : null,
+  };
+}
+
+async function enrichMelosaBiResumoRowsWithPhotoUrls(
+  rows: MelosaBiResumoRow[],
+  linhas: LinhaMelosa[],
+  token: string,
+): Promise<MelosaBiResumoRow[]> {
+  const cache = new Map<string, string | null>();
+  const urlFor = async (path?: string) => {
+    const p = path?.trim();
+    if (!p) return null;
+    if (cache.has(p)) return cache.get(p) ?? null;
+    const url = await fetchMelosaPhotoSignedUrl(token, p);
+    cache.set(p, url);
+    return url;
+  };
+
+  return Promise.all(
+    rows.map(async (row, index) => {
+      const m = linhas[index];
+      const fotoQuantidadeUrl = await urlFor(storagePath(m, "melosa_quantidade_abastecida_storage_path"));
+      return { ...row, fotoQuantidadeUrl };
+    }),
+  );
 }
 
 function fmt(v: unknown): string {
@@ -530,6 +592,28 @@ export default function MelosaBIPage() {
     }
   }, [apiBase, load, selectedOperationIds, token]);
 
+  const handleExportExcelResumo = useCallback(async () => {
+    if (filtradas.length === 0) {
+      window.alert("Não há registros para exportar.");
+      return;
+    }
+    if (!token?.trim()) {
+      window.alert("Sessão expirada. Faça login novamente.");
+      return;
+    }
+    try {
+      const baseRows = filtradas.map((m) => toMelosaBiResumoRow(m));
+      const rows = await enrichMelosaBiResumoRowsWithPhotoUrls(baseRows, filtradas, token);
+      await downloadMelosaBiResumoExcel(rows, {
+        periodoDe: dataDe,
+        periodoAte: dataAte,
+        filenamePrefix: "bi-melosa-resumo",
+      });
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : "Erro ao exportar Excel resumo");
+    }
+  }, [dataAte, dataDe, filtradas, token]);
+
   const handleExportExcel = useCallback(async () => {
     if (filtradas.length === 0) {
       window.alert("Não há registros para exportar.");
@@ -552,8 +636,8 @@ export default function MelosaBIPage() {
       <header className={`${glassPanel} px-5 py-5 text-center md:text-left`}>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">BI — Melosa</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-          Quantidade (L) informada no app na retirada melosa. O Excel usa a planilha modelo do projeto (cores e
-          cabeçalhos intactos); só os dados são preenchidos a partir da linha 2.
+          Quantidade (L) informada no app na retirada melosa. Use <strong>Exportar Excel Resumo</strong> para a planilha
+          organizada por empresa do equipamento; <strong>Descarbonize</strong> preenche o modelo GHG a partir da linha 2.
         </p>
       </header>
 
@@ -571,13 +655,22 @@ export default function MelosaBIPage() {
         </div>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>Exportação</span>
-          <button
-            type="button"
-            onClick={handleExportExcel}
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700"
-          >
-            Exportar Excel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleExportExcelResumo}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700"
+            >
+              Exportar Excel Resumo
+            </button>
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700"
+            >
+              Exportar Excel Descarbonize
+            </button>
+          </div>
         </div>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>De</span>
