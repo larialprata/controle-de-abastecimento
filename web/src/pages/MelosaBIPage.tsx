@@ -54,11 +54,13 @@ type LinhaMelosa = Record<string, unknown> & {
   melosa_quantidade_abastecida_storage_path?: string | null;
   melosa_equipamento_operador_storage_path?: string | null;
   melosa_horimetro_equipamento_abastecido_numero?: string | null;
+  melosa_horimetro_equipamento_abastecido_storage_path?: string | null;
   melosa_motorista_equipamento_abastecido?: string | null;
   melosa_operador_nome?: string | null;
   melosa_assinatura_operador_storage_path?: string | null;
   melosa_assinatura_motorista_storage_path?: string | null;
   melosa_categoria?: string | null;
+  melosa_lubrificado?: boolean | null;
   litros?: number | string | null;
   local_latitude?: number | string | null;
   local_longitude?: number | string | null;
@@ -188,6 +190,14 @@ function fmtQuantidade(m: LinhaMelosa): string {
   return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 3 }).format(q);
 }
 
+function fmtHorimetro(m: LinhaMelosa): string {
+  return fmt(m.melosa_horimetro_equipamento_abastecido_numero);
+}
+
+function fmtLubrificado(m: LinhaMelosa): string {
+  return m.melosa_lubrificado === true ? "Sim" : "—";
+}
+
 function fmtInsumoMel(m: LinhaMelosa): string {
   const ret = m.melosa_combustivel_tipo_retirada;
   const reg = m.melosa_combustivel_tipo_registro;
@@ -311,7 +321,7 @@ function municipioFromAddress(v: unknown): string {
 }
 
 const PAGE_SIZE = 500;
-const TABLE_COL_COUNT = 11;
+const TABLE_COL_COUNT = 15;
 const TABLE_SCROLL_MAX_HEIGHT = "min(28.5rem, 52vh)";
 
 const labelCls =
@@ -775,7 +785,7 @@ export default function MelosaBIPage() {
           </p>
         </div>
         <div className="min-w-0 overflow-auto" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
-          <table className="w-full min-w-[1080px] border-collapse text-sm">
+          <table className="w-full min-w-[1320px] border-collapse text-sm">
             <thead>
               <tr className="text-left align-middle">
                 <th className={`${thCls} w-10`}>
@@ -804,6 +814,10 @@ export default function MelosaBIPage() {
                   <th className={`${thCls} min-w-[120px]`}>Ativo equipamento</th>
                   <th className={`${thCls} min-w-[88px]`}>Insumo</th>
                   <th className={`${thCls} min-w-[100px]`}>Quantidade (L)</th>
+                  <th className={`${thCls} min-w-[100px]`}>Foto qtd. (L)</th>
+                  <th className={`${thCls} min-w-[88px]`}>Horímetro</th>
+                  <th className={`${thCls} min-w-[100px]`}>Foto horímetro</th>
+                  <th className={`${thCls} min-w-[88px]`}>Lubrificado</th>
                   <th className={`${thCls} min-w-[100px]`}>Foto operador</th>
                   <th className={`${thCls} min-w-[180px]`}>Local</th>
                 </tr>
@@ -854,6 +868,22 @@ export default function MelosaBIPage() {
                       </td>
                       <td className={`${tdCls} whitespace-nowrap`}>{fmtInsumoMel(m)}</td>
                       <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "melosa_quantidade_abastecida_storage_path"), "Qtd. (L)")}
+                      </td>
+                      <td className={`${tdCls} whitespace-nowrap`}>{fmtHorimetro(m)}</td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "melosa_horimetro_equipamento_abastecido_storage_path"), "Horímetro")}
+                      </td>
+                      <td
+                        className={`${tdCls} whitespace-nowrap text-center ${
+                          m.melosa_lubrificado === true
+                            ? "font-semibold text-emerald-700 dark:text-emerald-400"
+                            : ""
+                        }`}
+                      >
+                        {fmtLubrificado(m)}
+                      </td>
                       <td className={tdPhotoCls}>
                         {photo(storagePath(m, "melosa_equipamento_operador_storage_path"), "Operador")}
                       </td>
