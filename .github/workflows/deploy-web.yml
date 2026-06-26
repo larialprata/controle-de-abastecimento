@@ -29,6 +29,22 @@ jobs:
           rm -f ../package-lock.json
           npm install
 
+      - name: Validar secrets do build
+        run: |
+          if [ -z "$VITE_GOOGLE_MAPS_API_KEY" ]; then
+            echo "::error::Defina o secret VITE_GOOGLE_MAPS_API_KEY em Settings → Secrets → Actions (só o valor AIza..., sem aspas nem nome da variável)."
+            exit 1
+          fi
+          case "$VITE_GOOGLE_MAPS_API_KEY" in
+            AIza*) ;;
+            *)
+              echo "::error::VITE_GOOGLE_MAPS_API_KEY inválido: deve começar com AIza (copie só a chave do Google Cloud)."
+              exit 1
+              ;;
+          esac
+        env:
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
+
       - name: Build do frontend
         working-directory: web
         run: npm run build

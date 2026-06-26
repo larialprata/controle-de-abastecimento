@@ -126,10 +126,15 @@ function MovementsMapInner({ points, apiKey }: InnerProps) {
   if (loadError) {
     return (
       <div
-        className={`flex items-center justify-center bg-slate-900/5 px-4 text-center text-sm text-red-700 dark:bg-white/5 dark:text-red-300 ${containerClass}`}
+        className={`flex flex-col items-center justify-center gap-2 bg-slate-900/5 px-4 py-6 text-center text-sm text-red-700 dark:bg-white/5 dark:text-red-300 ${containerClass}`}
       >
-        Não foi possível carregar o Google Maps. Confirme a chave, a Maps JavaScript API e a faturação no
-        Google Cloud.
+        <p className="font-medium">Não foi possível carregar o Google Maps (InvalidKey).</p>
+        <p className="max-w-lg text-xs leading-relaxed text-red-600/90 dark:text-red-200/90">
+          No Google Cloud → Credenciais → sua chave: (1) ative a <strong>Maps JavaScript API</strong> no projeto; (2) em
+          &quot;Restrições de aplicativo&quot; use <strong>Referenciadores HTTP</strong> (não endereços IP — IP só
+          funciona em APIs de servidor); (3) inclua <code className="rounded bg-black/10 px-1">http://localhost:*</code>{" "}
+          e o domínio de produção; (4) em &quot;Restrições de API&quot;, inclua Maps JavaScript API.
+        </p>
       </div>
     );
   }
