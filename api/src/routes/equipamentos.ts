@@ -15,6 +15,7 @@ import {
 import { lookupEquipamentoFromQr } from "../lib/equipamentoQrLookup";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
+import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
 
 const router = Router();
 
@@ -200,6 +201,8 @@ async function validateObraCodigo(
 }
 
 router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
+  if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+
   const tipoRaw = typeof req.query.tipo === "string" ? req.query.tipo.toUpperCase() : undefined;
   const obraRaw = typeof req.query.obra_codigo === "string" ? req.query.obra_codigo : undefined;
   const mobilidadeRaw =
@@ -208,7 +211,12 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     typeof req.query.empresa === "string" ? normalizeEquipamentoEmpresa(req.query.empresa) : null;
 
   const service = createSupabaseServiceRole();
+  const obraScope = await getUserObraCodigos(service, req.userId);
   let query = service.from("equipamentos").select(EQUIPAMENTO_SELECT).order("ativo");
+
+  if (obraScope) {
+    query = query.or(`tipo.eq.MELOSA,obra_codigo.in.(${obraScope.join(",")})`);
+  }
 
   if (tipoRaw === "TANQUE" || tipoRaw === "MELOSA" || tipoRaw === "EQUIPAMENTO") {
     query = query.eq("tipo", tipoRaw);

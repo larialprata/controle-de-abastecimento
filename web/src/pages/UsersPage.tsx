@@ -21,8 +21,11 @@ type AdminUserRow = {
   cnh_storage_path: string | null;
   access_platform: AccessPlatform;
   web_permissions: WebPageKey[];
+  obra_codigos: number[];
   created_at: string | null;
 };
+
+type ObraRow = { codigo: number; nome: string };
 
 function isWebUser(u: AdminUserRow) {
   return u.role !== "admin" && u.access_platform === "web";
@@ -58,6 +61,11 @@ export default function UsersPage() {
   const [permDraft, setPermDraft] = useState<WebPageKey[]>(DEFAULT_WEB_PERMISSIONS);
   const [permSaving, setPermSaving] = useState(false);
   const [permError, setPermError] = useState<string | null>(null);
+  const [obras, setObras] = useState<ObraRow[]>([]);
+  const [obraUser, setObraUser] = useState<AdminUserRow | null>(null);
+  const [obraDraft, setObraDraft] = useState<number[]>([]);
+  const [obraSaving, setObraSaving] = useState(false);
+  const [obraError, setObraError] = useState<string | null>(null);
 
   async function load() {
     if (!token) return;
@@ -73,8 +81,19 @@ export default function UsersPage() {
     }
   }
 
+  async function loadObras() {
+    if (!token) return;
+    try {
+      const json = await apiGet<{ obras: ObraRow[] }>("/v1/obras", token);
+      setObras(json.obras ?? []);
+    } catch {
+      setObras([]);
+    }
+  }
+
   useEffect(() => {
     load();
+    loadObras();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -148,6 +167,55 @@ export default function UsersPage() {
     } finally {
       setPermSaving(false);
     }
+  }
+
+  function openObraModal(user: AdminUserRow) {
+    setObraUser(user);
+    setObraDraft([...(user.obra_codigos ?? [])]);
+    setObraError(null);
+  }
+
+  function closeObraModal() {
+    if (obraSaving) return;
+    setObraUser(null);
+    setObraError(null);
+  }
+
+  function toggleObraDraft(codigo: number, checked: boolean) {
+    setObraDraft((prev) => {
+      const set = new Set(prev);
+      if (checked) set.add(codigo);
+      else set.delete(codigo);
+      return Array.from(set).sort((a, b) => a - b);
+    });
+  }
+
+  async function saveUserObras() {
+    if (!token || !obraUser) return;
+    setObraSaving(true);
+    setObraError(null);
+    try {
+      await apiPost(`/v1/admin/users/${obraUser.id}/obras`, token, { obra_codigos: obraDraft });
+      setObraUser(null);
+      await load();
+    } catch (err: unknown) {
+      setObraError(err instanceof Error ? err.message : "Erro ao guardar obras");
+    } finally {
+      setObraSaving(false);
+    }
+  }
+
+  function formatObraLabel(codigos: number[]): string {
+    if (!codigos.length) return "Todas";
+    if (codigos.length <= 2) {
+      return codigos
+        .map((c) => {
+          const obra = obras.find((o) => o.codigo === c);
+          return obra ? `${c} — ${obra.nome}` : String(c);
+        })
+        .join(", ");
+    }
+    return `${codigos.length} obra(s)`;
   }
 
   const openAddModal = useCallback(() => {
@@ -224,7 +292,7 @@ export default function UsersPage() {
       <header className={`mb-6 p-5 ${glassPanel}`}>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">Usuários</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
-          Utilizador Web: defina quais páginas do painel cada um pode ver. Admin vê tudo.
+          Utilizador Web: defina quais páginas e obras (contratos) cada um pode ver. Admin vê tudo.
         </p>
       </header>
 
@@ -283,6 +351,9 @@ export default function UsersPage() {
                   </th>
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Páginas web
+                  </th>
+                  <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
+                    Obras
                   </th>
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Motorista
@@ -346,6 +417,19 @@ export default function UsersPage() {
                           <span className="text-xs text-slate-500 dark:text-slate-400">Todas</span>
                         ) : (
                           <span className="text-xs text-slate-500 dark:text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="border-b border-slate-100 px-4 py-3 align-middle dark:border-white/5">
+                        {u.role === "admin" ? (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">Todas</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => openObraModal(u)}
+                            className="text-left text-sm font-semibold text-violet-700 hover:underline dark:text-violet-300"
+                          >
+                            {formatObraLabel(u.obra_codigos ?? [])}
+                          </button>
                         )}
                       </td>
                       <td className="border-b border-slate-100 px-4 py-3 align-middle dark:border-white/5">
@@ -496,7 +580,7 @@ export default function UsersPage() {
                 })}
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                    <td colSpan={8} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
                       Nenhum utilizador.
                     </td>
                   </tr>
@@ -734,6 +818,84 @@ export default function UsersPage() {
                 className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-600/20 transition hover:bg-sky-700 disabled:opacity-50"
               >
                 {permSaving ? "A guardar…" : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {obraUser ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="obra-user-title"
+        >
+          <div className={`w-full max-w-md p-6 ${glassPanel}`}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 id="obra-user-title" className="text-lg font-bold text-slate-900 dark:text-white">
+                  Obras permitidas
+                </h2>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{obraUser.email ?? obraUser.id}</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Nenhuma selecionada = acesso a todas as obras. Com seleção, o utilizador só vê e regista dados dessas obras.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeObraModal}
+                disabled={obraSaving}
+                className="rounded-lg p-1 text-slate-500 hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" aria-hidden />
+              </button>
+            </div>
+
+            {obraError ? (
+              <div className="mb-4 rounded-lg border border-red-300/80 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+                {obraError}
+              </div>
+            ) : null}
+
+            <div className="max-h-64 space-y-2 overflow-y-auto">
+              {obras.length === 0 ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">Nenhuma obra cadastrada.</p>
+              ) : (
+                obras.map((obra) => (
+                  <label key={obra.codigo} className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={obraDraft.includes(obra.codigo)}
+                      disabled={obraSaving}
+                      onChange={(e) => toggleObraDraft(obra.codigo, e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+                    />
+                    <span className="text-sm text-slate-700 dark:text-slate-300">
+                      {obra.codigo} — {obra.nome}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeObraModal}
+                disabled={obraSaving}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-black/5 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-white/10"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={saveUserObras}
+                disabled={obraSaving}
+                className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-600/20 transition hover:bg-violet-700 disabled:opacity-50"
+              >
+                {obraSaving ? "A guardar…" : "Guardar"}
               </button>
             </div>
           </div>

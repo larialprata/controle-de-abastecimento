@@ -4,6 +4,7 @@ import { createSupabaseServiceRole } from "../lib/supabase";
 import { parseObraCodigoInput } from "../lib/obraCodigo";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
+import { getUserObraCodigos } from "../lib/userObras";
 
 const router = Router();
 
@@ -32,9 +33,15 @@ const updateObraSchema = z
 
 const obraSelect = "codigo, nome, empresa";
 
-router.get("/obras", requireAuth, async (_req: AuthedRequest, res) => {
+router.get("/obras", requireAuth, async (req: AuthedRequest, res) => {
+  if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
   const service = createSupabaseServiceRole();
-  const { data, error } = await service.from("obras").select(obraSelect).order("codigo");
+  let query = service.from("obras").select(obraSelect).order("codigo");
+
+  const obraScope = await getUserObraCodigos(service, req.userId);
+  if (obraScope) query = query.in("codigo", obraScope);
+
+  const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
   return res.json({ obras: data ?? [] });
 });

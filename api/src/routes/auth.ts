@@ -6,6 +6,7 @@ import { envValidated } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { canAccessClientPlatform, parseClientPlatform } from "../lib/accessPlatform";
 import { DEFAULT_WEB_PERMISSIONS } from "../lib/webPermissions";
+import { getUserObraCodigos } from "../lib/userObras";
 
 const router = Router();
 
@@ -363,6 +364,7 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
         role: "admin",
         access_platform: profRow.access_platform ?? "both",
         web_permissions: profRow.web_permissions ?? DEFAULT_WEB_PERMISSIONS,
+        obra_codigos: null,
       });
     }
 
@@ -391,10 +393,13 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
       }
     }
 
+    const obra_codigos = await getUserObraCodigos(service, req.userId);
+
     return res.json({
       ok: true,
       web_permissions: profRow?.web_permissions ?? DEFAULT_WEB_PERMISSIONS,
       access_platform: profRow?.access_platform ?? "app",
+      obra_codigos,
     });
   } catch (err: any) {
     if (err instanceof HttpError) {

@@ -4,6 +4,7 @@ import { createSupabaseServiceRole } from "../lib/supabase";
 import { litrosSobraAtualCiclo, relinkFilhosAoExcluirCiclo, type MelosaCicloRow } from "../lib/melosaCiclo";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
+import { getUserObraCodigos } from "../lib/userObras";
 
 const router = Router();
 
@@ -18,7 +19,9 @@ function toNum(v: unknown): number {
 
 router.get("/melosa-ciclos", requireAuth, async (req: AuthedRequest, res) => {
   try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
     const service = createSupabaseServiceRole();
+    const obraScope = await getUserObraCodigos(service, req.userId);
     const ativo = typeof req.query.ativo === "string" ? req.query.ativo.trim() : "";
     const apenasSuspeitos = req.query.suspeitos === "1" || req.query.suspeitos === "true";
     const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 100;
@@ -32,6 +35,7 @@ router.get("/melosa-ciclos", requireAuth, async (req: AuthedRequest, res) => {
 
     if (ativo) query = query.ilike("ativo_melosa_texto", ativo);
     if (apenasSuspeitos) query = query.eq("status", "suspeito");
+    if (obraScope) query = query.in("obra_codigo", obraScope);
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: error.message });

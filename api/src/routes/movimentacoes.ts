@@ -6,6 +6,7 @@ import { parseMedidorNumero } from "../lib/melosaMedidorContinuidade";
 import { envValidated } from "../config";
 import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
+import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
 
 const router = Router();
 
@@ -301,6 +302,7 @@ router.get("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     const fetchCount = Math.max(offset + limit, 1);
 
     const admin = await isAdmin(service, req.userId);
+    const obraScope = await getUserObraCodigos(service, req.userId);
 
     const origemParam = String(req.query.origem ?? "all").toLowerCase();
     const isTanque = origemParam === "tanque";
@@ -319,7 +321,11 @@ router.get("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         .order("data_hora", { ascending: false })
         .range(0, fetchCount - 1);
 
-      if (!admin) movimentacoesQuery.eq("usuario_id", req.userId);
+      if (obraScope) {
+        movimentacoesQuery.in("obra_codigo", obraScope);
+      } else if (!admin) {
+        movimentacoesQuery.eq("usuario_id", req.userId);
+      }
 
       const { data: dataMovs, error: movsError } = await movimentacoesQuery;
       if (movsError) throw movsError;
@@ -333,7 +339,11 @@ router.get("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         .order("data_hora", { ascending: false })
         .range(0, fetchCount - 1);
 
-      if (!admin) melosaQuery.eq("usuario_id", req.userId);
+      if (obraScope) {
+        melosaQuery.in("obra_codigo", obraScope);
+      } else if (!admin) {
+        melosaQuery.eq("usuario_id", req.userId);
+      }
 
       const { data: dataMelosas, error: melosasError } = await melosaQuery;
       if (melosasError) throw melosasError;
@@ -622,6 +632,14 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     const melosaDriver = await isMelosaDriver(service, req.userId);
 
     const payload = parsed.data;
+
+    try {
+      await assertUserObraAccess(service, req.userId, payload.obra_codigo);
+    } catch (e) {
+      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+
     const isTanqueTipo = payload.tipo === "ENTRADA_TANQUE_OBRA" || payload.tipo === "RETIRADA_TANQUE";
     if (melosaDriver && isTanqueTipo) {
       return res.status(403).json({ error: "Perfil Melosa: somente movimentações da Melosa são permitidas." });

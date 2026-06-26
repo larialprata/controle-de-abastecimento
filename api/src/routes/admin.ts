@@ -4,6 +4,7 @@ import { createSupabaseServiceRole, createSupabaseAnonWithToken } from "../lib/s
 import { envValidated } from "../config";
 import { requireAdmin, type AuthedRequest } from "../middleware/requireAdmin";
 import { DEFAULT_WEB_PERMISSIONS, FULL_WEB_USER_PERMISSIONS, normalizeWebPermissions } from "../lib/webPermissions";
+import { listObraCodigosForUsers, setUserObraCodigos } from "../lib/userObras";
 
 const router = Router();
 
@@ -29,6 +30,7 @@ router.get("/users", requireAdmin, async (req: AuthedRequest, res) => {
     if ("error" in profs && profs.error) throw profs.error;
 
     const profById = new Map((profs.data ?? []).map((r: any) => [r.user_id, r]));
+    const obrasByUser = await listObraCodigosForUsers(service, userIds);
 
     const payload = users.map((u) => ({
       id: u.id,
@@ -39,6 +41,7 @@ router.get("/users", requireAdmin, async (req: AuthedRequest, res) => {
       cnh_storage_path: profById.get(u.id)?.cnh_storage_path ?? null,
       access_platform: profById.get(u.id)?.access_platform ?? "app",
       web_permissions: normalizeWebPermissions(profById.get(u.id)?.web_permissions),
+      obra_codigos: obrasByUser.get(u.id) ?? [],
       created_at: u.created_at,
     }));
 
@@ -77,6 +80,10 @@ const updateAccessPlatformSchema = z.object({
 
 const updateWebPermissionsSchema = z.object({
   web_permissions: z.array(z.string()).min(1),
+});
+
+const updateUserObrasSchema = z.object({
+  obra_codigos: z.array(z.number().int().positive()),
 });
 
 function placeholderCpfFromUserId(userId: string) {
@@ -286,6 +293,33 @@ router.post("/users/:userId/melosa", requireAdmin, async (req: AuthedRequest, re
   } catch (err: any) {
     // eslint-disable-next-line no-console
     console.error("[API] /v1/admin/users/:userId/melosa error:", err);
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+router.post("/users/:userId/obras", requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const parsed = updateUserObrasSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    const { userId } = req.params;
+    const service = createSupabaseServiceRole();
+    const { data: existing, error: exErr } = await service
+      .from("profiles")
+      .select("user_id, role")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (exErr) return res.status(500).json({ error: exErr.message });
+    if (!existing) return res.status(404).json({ error: "Perfil não encontrado para este usuário" });
+    if (existing.role === "admin") {
+      return res.status(400).json({ error: "Administradores têm acesso a todas as obras." });
+    }
+
+    await setUserObraCodigos(service, userId, parsed.data.obra_codigos);
+    return res.json({ ok: true, obra_codigos: parsed.data.obra_codigos });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error("[API] /v1/admin/users/:userId/obras error:", err);
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
 });

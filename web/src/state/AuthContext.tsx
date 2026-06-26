@@ -17,6 +17,10 @@ type AuthContextValue = {
   isAdmin: boolean;
   accessPlatform: string | null;
   webPermissions: WebPageKey[];
+  /** null = todas as obras; array = só essas obras */
+  obraCodigos: number[] | null;
+  hasObraRestriction: boolean;
+  canAccessObra: (obraCodigo: number) => boolean;
   canAccessPage: (pageKey: WebPageKey) => boolean;
   authError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
@@ -39,6 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [accessPlatform, setAccessPlatform] = useState<string | null>(null);
   const [webPermissions, setWebPermissions] = useState<WebPageKey[]>(DEFAULT_WEB_PERMISSIONS);
+  const [obraCodigos, setObraCodigos] = useState<number[] | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const user = session?.user ?? null;
@@ -51,6 +56,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  const applyObraCodigos = useCallback((codigos: number[] | null | undefined) => {
+    if (codigos == null) {
+      setObraCodigos(null);
+      return;
+    }
+    const normalized = Array.from(new Set(codigos.filter((c) => Number.isFinite(c)))).sort((a, b) => a - b);
+    setObraCodigos(normalized.length > 0 ? normalized : null);
+  }, []);
 
   const refreshProfileInternal = useCallback(
     async (sess: Session) => {
@@ -66,11 +80,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const validateWebSession = useCallback(
     async (sess: Session) => {
-      await apiPost("/v1/auth/ensure-role", sess.access_token, { role: "user", platform: "web" });
+      const ensure = await apiPost("/v1/auth/ensure-role", sess.access_token, { role: "user", platform: "web" });
       await refreshProfileInternal(sess);
+      applyObraCodigos((ensure as { obra_codigos?: number[] | null }).obra_codigos);
       setAuthError(null);
     },
-    [refreshProfileInternal]
+    [refreshProfileInternal, applyObraCodigos]
   );
 
   const rejectSession = useCallback(async (message: string) => {
@@ -80,8 +95,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAdmin(false);
     setAccessPlatform(null);
     setWebPermissions(DEFAULT_WEB_PERMISSIONS);
+    setObraCodigos(null);
     setAuthError(message);
   }, []);
+
+  const hasObraRestriction = obraCodigos != null && obraCodigos.length > 0;
+
+  const canAccessObra = useCallback(
+    (obraCodigo: number) => {
+      if (!hasObraRestriction) return true;
+      return obraCodigos!.includes(obraCodigo);
+    },
+    [hasObraRestriction, obraCodigos]
+  );
 
   const canAccessPage = useCallback(
     (pageKey: WebPageKey) => canAccessWebPage(isAdmin, accessPlatform, webPermissions, pageKey),
@@ -122,6 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAdmin(false);
         setAccessPlatform(null);
         setWebPermissions(DEFAULT_WEB_PERMISSIONS);
+        setObraCodigos(null);
         setAuthError(null);
       }
 
@@ -186,6 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAdmin(false);
     setAccessPlatform(null);
     setWebPermissions(DEFAULT_WEB_PERMISSIONS);
+    setObraCodigos(null);
     setAuthError(null);
   }
 
@@ -200,6 +228,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAdmin,
       accessPlatform,
       webPermissions,
+      obraCodigos,
+      hasObraRestriction,
+      canAccessObra,
       canAccessPage,
       authError,
       signIn,
@@ -208,7 +239,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshProfile,
       clearAuthError,
     }),
-    [loading, session, user, token, isAdmin, accessPlatform, webPermissions, canAccessPage, authError, clearAuthError]
+    [loading, session, user, token, isAdmin, accessPlatform, webPermissions, obraCodigos, hasObraRestriction, canAccessObra, canAccessPage, authError, clearAuthError]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
