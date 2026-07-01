@@ -64,6 +64,30 @@ async function findMelosaStorageFile(
   return null;
 }
 
+const TANQUE_PHOTO_BUCKETS = [
+  envValidated.NOTAS_BUCKET,
+  envValidated.LACRE_TANQUE_BUCKET,
+  envValidated.LACRE_MELOSA_BUCKET,
+  envValidated.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+  envValidated.MEDIDOR_TANQUE_BUCKET,
+  envValidated.CONFIRMACAO_ABASTECIMENTO_BUCKET,
+  envValidated.RETIRADA_HORIMETRO_BUCKET,
+] as const;
+
+async function findTanqueStorageFile(
+  service: ReturnType<typeof createSupabaseServiceRole>,
+  rawPath: string,
+): Promise<{ bucket: string; path: string } | null> {
+  const path = rawPath.trim().replace(/^\/+/, "");
+  if (!path) return null;
+
+  for (const bucket of TANQUE_PHOTO_BUCKETS) {
+    const exists = await storageObjectExists(service, bucket, path);
+    if (exists) return { bucket, path };
+  }
+  return null;
+}
+
 function mimeFromStoragePath(storagePath: string): string {
   const ext = storagePath.split(".").pop()?.toLowerCase();
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -460,20 +484,16 @@ router.get("/tanque/photo-url", requireAuth, async (req: AuthedRequest, res) => 
     if (!rawPath) return res.status(400).json({ error: "path é obrigatório" });
 
     const service = createSupabaseServiceRole();
-    const buckets = [
-      envValidated.NOTAS_BUCKET,
-      envValidated.LACRE_TANQUE_BUCKET,
-      envValidated.LACRE_MELOSA_BUCKET,
-      envValidated.MEDIDOR_TANQUE_BUCKET,
-      envValidated.CONFIRMACAO_ABASTECIMENTO_BUCKET,
-    ];
+    const found = await findTanqueStorageFile(service, rawPath);
+    if (!found) return res.status(404).json({ error: "Foto não encontrada no Storage" });
 
-    for (const bucket of buckets) {
-      const { data, error } = await service.storage.from(bucket).createSignedUrl(rawPath, 3600);
-      if (!error && data?.signedUrl) return res.json({ url: data.signedUrl, bucket });
+    const { data, error } = await service.storage.from(found.bucket).createSignedUrl(found.path, 3600);
+    if (error || !data?.signedUrl) {
+      return res.status(404).json({ error: error?.message ?? "Foto não encontrada no Storage" });
     }
-
-    return res.status(404).json({ error: "Foto não encontrada no Storage" });
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    return res.json({ url: data.signedUrl, bucket: found.bucket });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
