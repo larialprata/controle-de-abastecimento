@@ -14,7 +14,6 @@ import {
 import { useAuth } from "../../state/AuthContext";
 import { useTheme } from "../../state/ThemeContext";
 import { glassSidebar } from "../../lib/glass";
-import { navItemToPageKey } from "../../lib/webPermissions";
 
 export const APP_VERSION = "1.0.0";
 
@@ -37,13 +36,10 @@ const NAV: NavItem[] = [
 ];
 
 export default function Sidebar() {
-  const { signOut, isAdmin, canAccessPage } = useAuth();
+  const { signOut, isAdmin } = useAuth();
   const { theme, setTheme } = useTheme();
 
-  const items = NAV.filter((item) => {
-    if (item.adminOnly) return isAdmin;
-    return canAccessPage(navItemToPageKey(item.to));
-  });
+  const items = NAV.filter((item) => !item.adminOnly || isAdmin);
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     [

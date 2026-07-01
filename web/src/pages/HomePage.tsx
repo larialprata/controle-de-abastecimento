@@ -14,7 +14,7 @@ import {
 import DashboardCard from "../components/dashboard/DashboardCard";
 import MelosaFluxoPanel from "../components/dashboard/MelosaFluxoPanel";
 import { useAuth } from "../state/AuthContext";
-import { apiDelete, apiGet } from "../lib/api";
+import { apiDelete, apiGet, apiPost } from "../lib/api";
 import { fmtLitrosDashboard } from "../lib/combustivelControle";
 import {
   downloadDashboardCiclosExcel,
@@ -201,13 +201,10 @@ export default function HomePage() {
     setDeleteError(null);
     try {
       if (deleteTarget.kind === "ciclos") {
-        const idsOrdenados = [...deleteTarget.ids].sort((a, b) => {
-          const ca = ciclos.find((c) => c.id === a);
-          const cb = ciclos.find((c) => c.id === b);
-          return (ca?.ciclo_numero ?? 0) - (cb?.ciclo_numero ?? 0);
-        });
-        for (const id of idsOrdenados) {
-          await apiDelete(`/v1/melosa-ciclos/${id}`, token);
+        if (deleteTarget.ids.length === 1) {
+          await apiDelete(`/v1/melosa-ciclos/${deleteTarget.ids[0]}`, token);
+        } else {
+          await apiPost("/v1/melosa-ciclos/bulk-delete", token, { ids: deleteTarget.ids });
         }
       } else if (deleteTarget.kind === "desvios") {
         await Promise.all(
@@ -230,7 +227,7 @@ export default function HomePage() {
     } finally {
       setDeleteSaving(false);
     }
-  }, [deleteTarget, load, token, ciclos]);
+  }, [deleteTarget, load, token]);
 
   useEffect(() => {
     load();

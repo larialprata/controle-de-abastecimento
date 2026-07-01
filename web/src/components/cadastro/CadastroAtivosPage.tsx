@@ -99,6 +99,7 @@ export default function CadastroAtivosPage({
   const [formEmpresa, setFormEmpresa] = useState("");
   const [filtroMobilidade, setFiltroMobilidade] = useState<"" | EquipamentoMobilidade>("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
+  const [filtroObraCodigo, setFiltroObraCodigo] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [importModo, setImportModo] = useState<"upsert" | "criar">("upsert");
   const [importRows, setImportRows] = useState<EquipamentoImportRow[]>([]);
@@ -162,7 +163,15 @@ export default function CadastroAtivosPage({
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase();
     const filtroEmpresaNorm = normalizeEquipamentoEmpresa(filtroEmpresa);
+    const obraFiltro = filtroObraCodigo.trim() ? Number(filtroObraCodigo) : null;
     return equipamentos.filter((e) => {
+      if (obraFiltro != null && Number.isFinite(obraFiltro)) {
+        if (obraFiltro === 0) {
+          if (e.obra_codigo != null) return false;
+        } else if (e.obra_codigo !== obraFiltro) {
+          return false;
+        }
+      }
       if (filtroMobilidade && e.mobilidade !== filtroMobilidade) return false;
       if (
         filtroEmpresaNorm &&
@@ -178,7 +187,7 @@ export default function CadastroAtivosPage({
         (e.empresa ? labelEquipamentoEmpresa(e.empresa).toLowerCase().includes(q) : false)
       );
     });
-  }, [equipamentos, busca, filtroMobilidade, filtroEmpresa]);
+  }, [equipamentos, busca, filtroMobilidade, filtroEmpresa, filtroObraCodigo]);
 
   const showSelection = canWrite && enableBulkSelect;
   const allFiltradasSelected =
@@ -215,12 +224,16 @@ export default function CadastroAtivosPage({
   }, []);
 
   const handleExportQrCodes = useCallback(async () => {
-    if (!token || filtradas.length === 0) return;
+    const base =
+      selectedAtivos.size > 0
+        ? filtradas.filter((e) => selectedAtivos.has(e.ativo))
+        : filtradas;
+    if (!token || base.length === 0) return;
     setQrExporting(true);
     try {
       const resolved = await resolveEquipamentosQrBatch(
         token,
-        filtradas.map((e) => ({
+        base.map((e) => ({
           ativo: e.ativo,
           nome: e.nome,
           obra_codigo: e.obra_codigo,
@@ -245,7 +258,12 @@ export default function CadastroAtivosPage({
     } finally {
       setQrExporting(false);
     }
-  }, [filtradas, fixedTipo, title, token]);
+  }, [filtradas, fixedTipo, selectedAtivos, title, token]);
+
+  const qrExportCount =
+    selectedAtivos.size > 0
+      ? filtradas.filter((e) => selectedAtivos.has(e.ativo)).length
+      : filtradas.length;
 
   const isEditing = editingAtivoOriginal != null;
 
@@ -626,11 +644,15 @@ export default function CadastroAtivosPage({
             <button
               type="button"
               onClick={() => void handleExportQrCodes()}
-              disabled={loading || qrExporting || filtradas.length === 0}
+              disabled={loading || qrExporting || qrExportCount === 0}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
             >
               <QrCode className="h-4 w-4" aria-hidden />
-              {qrExporting ? "A exportar…" : `Exportar QR (${filtradas.length})`}
+              {qrExporting
+                ? "A exportar…"
+                : selectedAtivos.size > 0
+                  ? `Exportar QR selecionados (${qrExportCount})`
+                  : `Exportar QR (${qrExportCount})`}
             </button>
           </div>
         ) : null}
@@ -672,6 +694,27 @@ export default function CadastroAtivosPage({
           </div>
         ) : null}
 
+        {showObra ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Obra
+            </span>
+            <select
+              className={glassField}
+              value={filtroObraCodigo}
+              onChange={(e) => setFiltroObraCodigo(e.target.value)}
+            >
+              <option value="">Todas</option>
+              <option value="0">Sem obra vinculada</option>
+              {obrasFormulario.map((o) => (
+                <option key={o.codigo} value={String(o.codigo)}>
+                  {o.codigo} — {o.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
         <div className="min-w-[200px] flex-1 flex-col gap-1 sm:max-w-md">
           <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Pesquisar
@@ -697,7 +740,7 @@ export default function CadastroAtivosPage({
           <p className="text-sm text-slate-600 dark:text-slate-400">
             <strong className="text-slate-900 dark:text-white">{filtradas.length}</strong>{" "}
             {filtradas.length === 1 ? "registro" : "registros"}
-            {busca.trim() || filtroMobilidade || filtroEmpresa ? " (filtrado)" : ""} ·{" "}
+            {busca.trim() || filtroMobilidade || filtroEmpresa || filtroObraCodigo ? " (filtrado)" : ""} ·{" "}
             <strong className="text-slate-900 dark:text-white">{selectedAtivos.size}</strong> selecionado
             {selectedAtivos.size === 1 ? "" : "s"}
           </p>

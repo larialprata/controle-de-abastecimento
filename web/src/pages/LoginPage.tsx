@@ -5,41 +5,18 @@ import ThemeToggle from "../components/ThemeToggle";
 import { useAuth } from "../state/AuthContext";
 import { glassPanel } from "../lib/glass";
 
-function MicrosoftIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 23 23" aria-hidden>
-      <path fill="#f35325" d="M1 1h10v10H1z" />
-      <path fill="#81bc06" d="M12 1h10v10H12z" />
-      <path fill="#05a6f0" d="M1 12h10v10H1z" />
-      <path fill="#ffba08" d="M12 12h10v10H12z" />
-    </svg>
-  );
-}
-
 export default function LoginPage() {
-  const { signIn, signInWithOutlook, loading, session, authError, clearAuthError } = useAuth();
+  const { signIn, loading, session, authError, clearAuthError } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [oauthBusy, setOauthBusy] = useState(false);
   const [fieldsEditable, setFieldsEditable] = useState(false);
 
   useEffect(() => {
     if (session && !loading) navigate("/", { replace: true });
   }, [session, loading, navigate]);
-
-  useEffect(() => {
-    const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
-    if (!hash) return;
-    const params = new URLSearchParams(hash);
-    const oauthErr = params.get("error_description") ?? params.get("error");
-    if (oauthErr) {
-      setError(decodeURIComponent(oauthErr.replace(/\+/g, " ")));
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }, []);
 
   useEffect(() => {
     if (authError) setError(authError);
@@ -59,21 +36,6 @@ export default function LoginPage() {
       setSubmitting(false);
     }
   }
-
-  async function onOutlookLogin() {
-    setError(null);
-    clearAuthError();
-    setOauthBusy(true);
-    try {
-      await signInWithOutlook();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Falha ao abrir login Microsoft");
-      setOauthBusy(false);
-    }
-  }
-
-  const busy = submitting || oauthBusy;
-  const oauthProcessing = loading && oauthBusy;
 
   return (
     <div className="relative min-h-screen overflow-hidden">
@@ -96,8 +58,7 @@ export default function LoginPage() {
             </div>
             <h1 className="text-xl font-bold text-slate-900 dark:text-white">Controle de abastecimento</h1>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-              Entre com <strong className="font-semibold text-slate-700 dark:text-slate-300">email e senha</strong> ou com{" "}
-              <strong className="font-semibold text-slate-700 dark:text-slate-300">Outlook</strong>
+              Entre com email e senha para acessar o painel.
             </p>
           </div>
 
@@ -107,7 +68,7 @@ export default function LoginPage() {
             </div>
           ) : null}
 
-          <form className="mb-6 grid gap-4" onSubmit={onSubmit} autoComplete="off">
+          <form className="grid gap-4" onSubmit={onSubmit} autoComplete="off">
             <label className="grid gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
               Email
               <input
@@ -143,31 +104,12 @@ export default function LoginPage() {
             </label>
             <button
               type="submit"
-              disabled={busy || loading}
+              disabled={submitting || loading}
               className="mt-2 rounded-lg bg-accent py-3 text-sm font-bold text-white shadow-sm transition hover:bg-accent-hover disabled:opacity-50"
             >
-              {submitting ? "A entrar…" : "Entrar com email e senha"}
+              {submitting ? "A entrar…" : "Entrar"}
             </button>
           </form>
-
-          <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center" aria-hidden>
-              <div className="w-full border-t border-slate-200 dark:border-white/10" />
-            </div>
-            <div className="relative flex justify-center text-xs font-semibold uppercase tracking-wide">
-              <span className="bg-white/80 px-2 text-slate-500 dark:bg-transparent dark:text-slate-400">ou</span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onOutlookLogin}
-            disabled={busy}
-            className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white py-3 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50 dark:border-white/10 dark:bg-[#0d1117] dark:text-slate-100 dark:hover:bg-white/5"
-          >
-            <MicrosoftIcon />
-            {oauthBusy ? (oauthProcessing ? "A validar login…" : "A redirecionar…") : "Entrar com Outlook"}
-          </button>
         </div>
       </div>
     </div>

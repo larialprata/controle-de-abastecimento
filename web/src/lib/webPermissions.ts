@@ -54,15 +54,12 @@ export function normalizeWebWritePermissions(
 }
 
 export function canAccessWebPage(
-  isAdmin: boolean,
-  accessPlatform: string | null | undefined,
-  permissions: string[] | null | undefined,
-  pageKey: WebPageKey
+  _isAdmin: boolean,
+  _accessPlatform: string | null | undefined,
+  _permissions: string[] | null | undefined,
+  _pageKey: WebPageKey
 ): boolean {
-  if (isAdmin) return true;
-  if (accessPlatform !== "web") return false;
-  const perms = normalizeWebPermissions(permissions);
-  return perms.includes(pageKey);
+  return true;
 }
 
 export function canWriteWebPage(

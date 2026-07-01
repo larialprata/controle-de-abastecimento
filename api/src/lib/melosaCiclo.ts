@@ -256,6 +256,41 @@ export function litrosSobraAtualCiclo(ciclo: MelosaCicloRow): number {
   return Math.max(0, toNum(ciclo.litros_retirada) - toNum(ciclo.litros_abastecidos));
 }
 
+/** Encontra o ciclo anterior ainda existente, ignorando IDs já excluídos ou ausentes. */
+export async function resolverCicloAnteriorValido(
+  service: SupabaseClient,
+  anteriorId: string | null,
+  idsIgnorados: Set<string> = new Set(),
+): Promise<{ id: string | null; numero: number | null }> {
+  let cur = anteriorId;
+  const visitados = new Set<string>();
+
+  while (cur) {
+    if (visitados.has(cur)) break;
+    visitados.add(cur);
+
+    if (idsIgnorados.has(cur)) {
+      const { data } = await service
+        .from("melosa_ciclos")
+        .select("ciclo_anterior_id")
+        .eq("id", cur)
+        .maybeSingle();
+      cur = data?.ciclo_anterior_id ?? null;
+      continue;
+    }
+
+    const { data } = await service
+      .from("melosa_ciclos")
+      .select("id, ciclo_anterior_numero")
+      .eq("id", cur)
+      .maybeSingle();
+    if (!data) return { id: null, numero: null };
+    return { id: data.id, numero: data.ciclo_anterior_numero ?? null };
+  }
+
+  return { id: null, numero: null };
+}
+
 /** Ao excluir um ciclo, os filhos passam a apontar para o anterior do excluído e recalculam sobra/status. */
 export async function relinkFilhosAoExcluirCiclo(
   service: SupabaseClient,
@@ -263,7 +298,11 @@ export async function relinkFilhosAoExcluirCiclo(
     MelosaCicloRow,
     "id" | "ativo_melosa_texto" | "ciclo_anterior_id" | "ciclo_anterior_numero" | "data_hora"
   >,
+  idsIgnorados: Set<string> = new Set(),
 ): Promise<number> {
+  const ignorados = new Set(idsIgnorados);
+  ignorados.add(cicloExcluido.id);
+
   const { data: filhos, error: filhosErr } = await service
     .from("melosa_ciclos")
     .select("*")
@@ -272,11 +311,14 @@ export async function relinkFilhosAoExcluirCiclo(
   if (filhosErr) throw new Error(filhosErr.message);
   if (!filhos?.length) return 0;
 
+  const { id: novoAnteriorId, numero: novoAnteriorNumero } = await resolverCicloAnteriorValido(
+    service,
+    cicloExcluido.ciclo_anterior_id,
+    ignorados,
+  );
+
   let atualizados = 0;
   for (const filho of filhos as MelosaCicloRow[]) {
-    const novoAnteriorId = cicloExcluido.ciclo_anterior_id;
-    const novoAnteriorNumero = cicloExcluido.ciclo_anterior_numero;
-
     let litrosSobraAnterior = 0;
     if (novoAnteriorId) {
       const { data: anterior } = await service
@@ -326,4 +368,84 @@ export async function relinkFilhosAoExcluirCiclo(
   }
 
   return atualizados;
+}
+
+export async function excluirMelosaCiclo(
+  service: SupabaseClient,
+  id: string,
+  idsIgnorados: Set<string> = new Set(),
+): Promise<{
+  id: string;
+  ciclo_numero: number;
+  ativo_melosa_texto: string;
+  filhos_atualizados: number;
+}> {
+  const { data: ciclo, error: findErr } = await service
+    .from("melosa_ciclos")
+    .select(
+      "id, ciclo_numero, retirada_operation_id, ativo_melosa_texto, ciclo_anterior_id, ciclo_anterior_numero, data_hora",
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (findErr) throw new Error(findErr.message);
+  if (!ciclo) throw new Error("Ciclo não encontrado");
+
+  const filhosAtualizados = await relinkFilhosAoExcluirCiclo(
+    service,
+    ciclo as MelosaCicloRow,
+    idsIgnorados,
+  );
+
+  const { error: unlinkMelosaErr } = await service
+    .from("melosa_movimentacoes")
+    .update({ ciclo_id: null })
+    .eq("ciclo_id", id);
+  if (unlinkMelosaErr) throw new Error(unlinkMelosaErr.message);
+
+  const { error: unlinkMovErr } = await service
+    .from("movimentacoes")
+    .update({ ciclo_id: null })
+    .eq("ciclo_id", id);
+  if (unlinkMovErr) throw new Error(unlinkMovErr.message);
+
+  const { error: deleteRetiradaErr } = await service
+    .from("movimentacoes")
+    .delete()
+    .eq("operation_id", ciclo.retirada_operation_id);
+  if (deleteRetiradaErr) throw new Error(deleteRetiradaErr.message);
+
+  const { error: deleteCicloErr } = await service.from("melosa_ciclos").delete().eq("id", id);
+  if (deleteCicloErr) throw new Error(deleteCicloErr.message);
+
+  return {
+    id,
+    ciclo_numero: ciclo.ciclo_numero,
+    ativo_melosa_texto: ciclo.ativo_melosa_texto,
+    filhos_atualizados: filhosAtualizados,
+  };
+}
+
+export async function excluirMelosaCiclosEmLote(
+  service: SupabaseClient,
+  ids: string[],
+): Promise<Array<{ id: string; ciclo_numero: number; ativo_melosa_texto: string; filhos_atualizados: number }>> {
+  const unicos = Array.from(new Set(ids.map((x) => x.trim()).filter(Boolean)));
+  if (unicos.length === 0) return [];
+
+  const { data: rows, error } = await service
+    .from("melosa_ciclos")
+    .select("id, ciclo_numero")
+    .in("id", unicos);
+  if (error) throw new Error(error.message);
+
+  const ordenados = [...(rows ?? [])].sort((a, b) => b.ciclo_numero - a.ciclo_numero);
+  const idsIgnorados = new Set(unicos);
+  const resultados = [];
+
+  for (const row of ordenados) {
+    resultados.push(await excluirMelosaCiclo(service, row.id, idsIgnorados));
+  }
+
+  return resultados;
 }

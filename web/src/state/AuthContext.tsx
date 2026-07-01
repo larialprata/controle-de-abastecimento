@@ -3,7 +3,6 @@ import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { apiPost } from "../lib/api";
 import {
-  canAccessWebPage,
   canWriteWebPage,
   DEFAULT_WEB_PERMISSIONS,
   normalizeWebPermissions,
@@ -21,7 +20,6 @@ type AuthContextValue = {
   accessPlatform: string | null;
   webPermissions: WebPageKey[];
   webWritePermissions: WebWritePageKey[];
-  /** null = todas as obras; array = só essas obras */
   obraCodigos: number[] | null;
   hasObraRestriction: boolean;
   canAccessObra: (obraCodigo: number) => boolean;
@@ -29,7 +27,6 @@ type AuthContextValue = {
   canWriteOnPage: (pageKey: WebWritePageKey) => boolean;
   authError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
-  signInWithOutlook: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   clearAuthError: () => void;
@@ -88,30 +85,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
       applyProfileRow(data);
     },
-    [applyProfileRow]
+    [applyProfileRow],
   );
 
-  const validateWebSession = useCallback(
+  const bootstrapSession = useCallback(
     async (sess: Session) => {
-      const ensure = await apiPost("/v1/auth/ensure-role", sess.access_token, { role: "user", platform: "web" });
+      const ensure = await apiPost("/v1/auth/ensure-role", sess.access_token, { role: "user" });
       await refreshProfileInternal(sess);
       applyObraCodigos((ensure as { obra_codigos?: number[] | null }).obra_codigos);
       setAuthError(null);
     },
-    [refreshProfileInternal, applyObraCodigos]
+    [refreshProfileInternal, applyObraCodigos],
   );
-
-  const rejectSession = useCallback(async (message: string) => {
-    await supabase.auth.signOut();
-    setSession(null);
-    setToken(null);
-    setIsAdmin(false);
-    setAccessPlatform(null);
-    setWebPermissions(DEFAULT_WEB_PERMISSIONS);
-    setWebWritePermissions([]);
-    setObraCodigos(null);
-    setAuthError(message);
-  }, []);
 
   const hasObraRestriction = obraCodigos != null && obraCodigos.length > 0;
 
@@ -120,13 +105,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!hasObraRestriction) return true;
       return obraCodigos!.includes(obraCodigo);
     },
-    [hasObraRestriction, obraCodigos]
+    [hasObraRestriction, obraCodigos],
   );
 
-  const canAccessPage = useCallback(
-    (pageKey: WebPageKey) => canAccessWebPage(isAdmin, accessPlatform, webPermissions, pageKey),
-    [isAdmin, accessPlatform, webPermissions],
-  );
+  const canAccessPage = useCallback((_pageKey: WebPageKey) => true, []);
 
   const canWriteOnPage = useCallback(
     (pageKey: WebWritePageKey) =>
@@ -148,9 +130,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (nextSession) {
           try {
-            await validateWebSession(nextSession);
+            await bootstrapSession(nextSession);
           } catch (err) {
-            if (!cancelled) await rejectSession(authErrorMessage(err));
+            if (!cancelled) {
+              setAuthError(authErrorMessage(err));
+              await refreshProfileInternal(nextSession);
+            }
           }
         }
       } finally {
@@ -160,32 +145,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       setToken(nextSession?.access_token ?? null);
 
-      if (event === "SIGNED_OUT") {
+      if (!nextSession) {
         setIsAdmin(false);
         setAccessPlatform(null);
         setWebPermissions(DEFAULT_WEB_PERMISSIONS);
         setWebWritePermissions([]);
         setObraCodigos(null);
         setAuthError(null);
+        return;
       }
 
-      // OAuth: após redirect o Supabase dispara SIGNED_IN — validar em background.
-      if (event === "SIGNED_IN" && nextSession) {
-        void validateWebSession(nextSession).catch((err) => {
-          void rejectSession(authErrorMessage(err));
-        });
-      }
+      void bootstrapSession(nextSession).catch((err) => {
+        setAuthError(authErrorMessage(err));
+        void refreshProfileInternal(nextSession);
+      });
     });
 
     return () => {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, [rejectSession, validateWebSession]);
+  }, [bootstrapSession, refreshProfileInternal]);
 
   async function refreshProfile() {
     if (!session) return;
@@ -201,29 +185,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.session?.access_token ?? null);
 
     if (data.session) {
-      try {
-        await validateWebSession(data.session);
-      } catch (ensureErr) {
-        await rejectSession(authErrorMessage(ensureErr));
-        throw ensureErr;
-      }
+      await bootstrapSession(data.session);
     }
-  }
-
-  async function signInWithOutlook() {
-    setAuthError(null);
-    const redirectTo = `${window.location.origin}/login`;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "azure",
-      options: {
-        redirectTo,
-        scopes: "email openid profile",
-        queryParams: {
-          prompt: "select_account",
-        },
-      },
-    });
-    if (error) throw new Error(error.message);
   }
 
   async function signOut() {
@@ -258,12 +221,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canWriteOnPage,
       authError,
       signIn,
-      signInWithOutlook,
       signOut,
       refreshProfile,
       clearAuthError,
     }),
-    [loading, session, user, token, isAdmin, accessPlatform, webPermissions, webWritePermissions, obraCodigos, hasObraRestriction, canAccessObra, canAccessPage, canWriteOnPage, authError, clearAuthError]
+    [
+      loading,
+      session,
+      user,
+      token,
+      isAdmin,
+      accessPlatform,
+      webPermissions,
+      webWritePermissions,
+      obraCodigos,
+      hasObraRestriction,
+      canAccessObra,
+      canAccessPage,
+      canWriteOnPage,
+      authError,
+      clearAuthError,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

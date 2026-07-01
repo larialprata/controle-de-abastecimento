@@ -2,8 +2,6 @@ import { requireEnv } from "./env";
 
 const API_URL = requireEnv("VITE_API_URL");
 
-const CLIENT_PLATFORM_HEADER = { "X-Client-Platform": "web" } as const;
-
 function formatApiError(json: unknown, status: number): string {
   if (json == null || typeof json !== "object") return `HTTP ${status}`;
   const rec = json as Record<string, unknown>;
@@ -26,7 +24,6 @@ export async function apiPost(path: string, token: string, body?: unknown) {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      ...CLIENT_PLATFORM_HEADER,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -37,7 +34,7 @@ export async function apiPost(path: string, token: string, body?: unknown) {
 
 export async function apiGet<T>(path: string, token: string): Promise<T> {
     const res = await fetch(`${API_URL}${path}`, {
-    headers: { Authorization: `Bearer ${token}`, ...CLIENT_PLATFORM_HEADER },
+    headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
   const json = await res.json().catch(() => ({}));
@@ -51,7 +48,6 @@ export async function apiPatch(path: string, token: string, body?: unknown) {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      ...CLIENT_PLATFORM_HEADER,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -63,7 +59,7 @@ export async function apiPatch(path: string, token: string, body?: unknown) {
 export async function apiDelete(path: string, token: string) {
   const res = await fetch(`${API_URL}${path}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${token}`, ...CLIENT_PLATFORM_HEADER },
+    headers: { Authorization: `Bearer ${token}` },
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);

@@ -1,7 +1,8 @@
-import { Request, Response, NextFunction } from "express";
-import { createSupabaseAnonWithToken } from "../lib/supabase";
+import { Response, NextFunction } from "express";
+import { createSupabaseAnonWithToken, createSupabaseServiceRole } from "../lib/supabase";
+import type { AuthedRequest } from "./requireAuth";
 
-export type AuthedRequest = Request & { userId?: string };
+export type { AuthedRequest };
 
 export async function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
@@ -17,7 +18,8 @@ export async function requireAdmin(req: AuthedRequest, res: Response, next: Next
 
     req.userId = authUser.id;
 
-    const { data: profRow, error: profError } = await supabase
+    const service = createSupabaseServiceRole();
+    const { data: profRow, error: profError } = await service
       .from("profiles")
       .select("role")
       .eq("user_id", authUser.id)
@@ -31,4 +33,3 @@ export async function requireAdmin(req: AuthedRequest, res: Response, next: Next
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
 }
-
