@@ -3,8 +3,8 @@ import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { parseObraCodigoInput } from "../lib/obraCodigo";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
-import { requireAdmin } from "../middleware/requireAdmin";
 import { getUserObraCodigos } from "../lib/userObras";
+import { assertCanWriteWebPage, loadWebWriteProfile, WebWriteAccessError } from "../lib/webWriteAccess";
 
 const router = Router();
 
@@ -46,7 +46,7 @@ router.get("/obras", requireAuth, async (req: AuthedRequest, res) => {
   return res.json({ obras: data ?? [] });
 });
 
-router.post("/obras", requireAdmin, async (req: AuthedRequest, res) => {
+router.post("/obras", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = createObraSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
@@ -55,6 +55,14 @@ router.post("/obras", requireAdmin, async (req: AuthedRequest, res) => {
   const codigo = parsed.data.codigo;
   const { nome, empresa } = parsed.data;
   const service = createSupabaseServiceRole();
+
+  try {
+    const profile = await loadWebWriteProfile(service, req.userId!);
+    assertCanWriteWebPage(profile, "contratos");
+  } catch (e) {
+    if (e instanceof WebWriteAccessError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
 
   const { data: existing } = await service.from("obras").select("codigo").eq("codigo", codigo).maybeSingle();
   if (existing) {
@@ -70,7 +78,7 @@ router.post("/obras", requireAdmin, async (req: AuthedRequest, res) => {
   return res.status(201).json({ obra: data });
 });
 
-router.patch("/obras/:codigo", requireAdmin, async (req: AuthedRequest, res) => {
+router.patch("/obras/:codigo", requireAuth, async (req: AuthedRequest, res) => {
   const codigo = Number(req.params.codigo);
   if (!Number.isFinite(codigo) || codigo <= 0) {
     return res.status(400).json({ error: "Código inválido." });
@@ -82,6 +90,15 @@ router.patch("/obras/:codigo", requireAdmin, async (req: AuthedRequest, res) => 
   }
 
   const service = createSupabaseServiceRole();
+
+  try {
+    const profile = await loadWebWriteProfile(service, req.userId!);
+    assertCanWriteWebPage(profile, "contratos");
+  } catch (e) {
+    if (e instanceof WebWriteAccessError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+
   const { data: existing } = await service.from("obras").select("codigo").eq("codigo", codigo).maybeSingle();
   if (!existing) {
     return res.status(404).json({ error: `Obra ${codigo} não encontrada.` });
@@ -110,13 +127,22 @@ async function countObraReferencias(service: ReturnType<typeof createSupabaseSer
   return counts;
 }
 
-router.delete("/obras/:codigo", requireAdmin, async (req: AuthedRequest, res) => {
+router.delete("/obras/:codigo", requireAuth, async (req: AuthedRequest, res) => {
   const codigo = Number(req.params.codigo);
   if (!Number.isFinite(codigo) || codigo <= 0) {
     return res.status(400).json({ error: "Código inválido." });
   }
 
   const service = createSupabaseServiceRole();
+
+  try {
+    const profile = await loadWebWriteProfile(service, req.userId!);
+    assertCanWriteWebPage(profile, "contratos");
+  } catch (e) {
+    if (e instanceof WebWriteAccessError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+
   const { data: existing } = await service.from("obras").select("codigo").eq("codigo", codigo).maybeSingle();
   if (!existing) {
     return res.status(404).json({ error: `Obra ${codigo} não encontrada.` });

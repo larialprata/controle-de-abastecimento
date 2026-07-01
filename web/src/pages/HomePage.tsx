@@ -12,6 +12,7 @@ import {
   TrendingDown,
 } from "lucide-react";
 import DashboardCard from "../components/dashboard/DashboardCard";
+import MelosaFluxoPanel from "../components/dashboard/MelosaFluxoPanel";
 import { useAuth } from "../state/AuthContext";
 import { apiDelete, apiGet } from "../lib/api";
 import { fmtLitrosDashboard } from "../lib/combustivelControle";
@@ -334,9 +335,10 @@ export default function HomePage() {
               Controle de melosas
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-slate-400">
-              Cada retirada do tanque gera um ID global. O sistema compara a sobra do ciclo anterior com o novo
-              enchimento e alerta quando ultrapassa a capacidade. Abastecimentos são conferidos pelo medidor
-              acumulado.
+              Acompanhe o combustível do tanque até os equipamentos: a melosa enche no tanque, abastece
+              equipamentos até esvaziar o que tem (sem devolver ao tanque) e o sistema alerta quando um novo
+              enchimento ultrapassa a capacidade (ex.: 3.500 L + 2.000 L = 5.500 L, máx. 5.000 L → 500 L
+              sem explicação).
             </p>
           </div>
           <details className="max-w-xs text-sm text-slate-600 dark:text-slate-400">
@@ -344,11 +346,11 @@ export default function HomePage() {
               Como funciona
             </summary>
             <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
-              <li>ID global sequencial por enchimento (retirada do tanque).</li>
-              <li>ID anterior = último ciclo da mesma melosa.</li>
-              <li>Sobra = enchimento anterior − abastecimentos − devoluções.</li>
-              <li>Alerta se sobra + enchimento &gt; capacidade.</li>
-              <li>Medidor inicial deve igualar o final anterior.</li>
+              <li>Tanque recebe combustível (entrada) e perde nas retiradas para melosas.</li>
+              <li>Melosa enche na retirada e só esvazia nos abastecimentos de equipamentos.</li>
+              <li>Saldo na melosa = enchimentos − abastecimentos (estimado pelos registros).</li>
+              <li>Alerta se saldo + novo enchimento &gt; capacidade cadastrada da melosa.</li>
+              <li>Medidor acumulado: inicial deve igualar o final do abastecimento anterior.</li>
             </ul>
           </details>
         </div>
@@ -379,6 +381,8 @@ export default function HomePage() {
           />
         </div>
       </section>
+
+      <MelosaFluxoPanel token={token} ativosDisponiveis={ativosUnicos} ativoInicial={filtroAtivo} />
 
       {/* Alertas */}
       <section className={`${glassPanel} p-4 md:p-5`}>

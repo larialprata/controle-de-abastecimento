@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download, Pencil, Plus, QrCode, Trash2, Upload, X } from "lucide-react";
 import { useAuth } from "../../state/AuthContext";
+import type { WebWritePageKey } from "../../lib/webPermissions";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api";
 import { resolveMobilidadeEquipamento } from "../../lib/equipamentoMobilidade";
 import {
@@ -55,6 +56,7 @@ export type CadastroAtivosPageProps = {
   enableImport?: boolean;
   enableBulkSelect?: boolean;
   enableQrCode?: boolean;
+  writePageKey: WebWritePageKey;
 };
 
 export default function CadastroAtivosPage({
@@ -71,8 +73,10 @@ export default function CadastroAtivosPage({
   enableImport = false,
   enableBulkSelect = false,
   enableQrCode = false,
+  writePageKey,
 }: CadastroAtivosPageProps) {
-  const { token, isAdmin } = useAuth();
+  const { token, canWriteOnPage, canAccessObra } = useAuth();
+  const canWrite = canWriteOnPage(writePageKey);
   const [equipamentos, setEquipamentos] = useState<EquipamentoRow[]>([]);
   const [obras, setObras] = useState<ObraRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -114,6 +118,11 @@ export default function CadastroAtivosPage({
   const showObra = fixedTipo === "EQUIPAMENTO";
 
   const obrasPorCodigo = useMemo(() => new Map(obras.map((o) => [o.codigo, o.nome])), [obras]);
+
+  const obrasFormulario = useMemo(
+    () => obras.filter((o) => canAccessObra(o.codigo)),
+    [obras, canAccessObra],
+  );
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -171,7 +180,7 @@ export default function CadastroAtivosPage({
     });
   }, [equipamentos, busca, filtroMobilidade, filtroEmpresa]);
 
-  const showSelection = isAdmin && enableBulkSelect;
+  const showSelection = canWrite && enableBulkSelect;
   const allFiltradasSelected =
     filtradas.length > 0 && filtradas.every((e) => selectedAtivos.has(e.ativo));
   const someFiltradasSelected = filtradas.some((e) => selectedAtivos.has(e.ativo));
@@ -535,7 +544,7 @@ export default function CadastroAtivosPage({
     (showEmpresa ? 1 : 0) +
     (showMobilidade ? 1 : 0) +
     (showCapacidade ? 1 : 0) +
-    (isAdmin ? 1 : 0);
+    (canWrite ? 1 : 0);
 
   return (
     <div>
@@ -567,7 +576,7 @@ export default function CadastroAtivosPage({
           </button>
         </div>
 
-        {isAdmin ? (
+        {canWrite ? (
           <div className="flex flex-col gap-1">
             <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Cadastro
@@ -583,7 +592,7 @@ export default function CadastroAtivosPage({
           </div>
         ) : null}
 
-        {isAdmin && enableImport ? (
+        {canWrite && enableImport ? (
           <div className="flex flex-col gap-1">
             <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Planilha
@@ -764,7 +773,7 @@ export default function CadastroAtivosPage({
                     Capacidade (L)
                   </th>
                 ) : null}
-                {isAdmin ? (
+                {canWrite ? (
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Ações
                   </th>
@@ -842,7 +851,7 @@ export default function CadastroAtivosPage({
                           : "—"}
                       </td>
                     ) : null}
-                    {isAdmin ? (
+                    {canWrite ? (
                       <td className="border-b border-slate-100 px-4 py-3 text-right dark:border-white/5">
                         <div className="inline-flex items-center gap-1">
                           <button
@@ -957,7 +966,7 @@ export default function CadastroAtivosPage({
                     disabled={formSaving}
                   >
                     <option value="">Sem vínculo com obra</option>
-                    {obras.map((o) => (
+                    {obrasFormulario.map((o) => (
                       <option key={o.codigo} value={String(o.codigo)}>
                         {o.codigo} - {o.nome}
                       </option>

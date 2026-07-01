@@ -186,6 +186,10 @@ create table if not exists public.profiles (
       web_permissions <@ array['dashboard', 'contratos', 'melosas', 'equipamentos', 'bi_tanque', 'bi_melosa']::text[]
       and 'dashboard' = any (web_permissions)
     ),
+  web_write_permissions text[] not null default array[]::text[]
+    check (
+      web_write_permissions <@ array['contratos', 'melosas', 'equipamentos']::text[]
+    ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

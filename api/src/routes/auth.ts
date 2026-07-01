@@ -5,7 +5,7 @@ import { createSupabaseServiceRole } from "../lib/supabase";
 import { envValidated } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { canAccessClientPlatform, parseClientPlatform } from "../lib/accessPlatform";
-import { DEFAULT_WEB_PERMISSIONS } from "../lib/webPermissions";
+import { DEFAULT_WEB_PERMISSIONS, normalizeWebWritePermissions } from "../lib/webPermissions";
 import { getUserObraCodigos } from "../lib/userObras";
 
 const router = Router();
@@ -341,7 +341,7 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
 
     let { data: profRow, error: profRoleError } = await service
       .from("profiles")
-      .select("role, active, access_platform, web_permissions")
+      .select("role, active, access_platform, web_permissions, web_write_permissions")
       .eq("user_id", req.userId)
       .maybeSingle();
 
@@ -351,7 +351,7 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
       await ensureWebProfileForOAuthUser(service, req.userId);
       const refetch = await service
         .from("profiles")
-        .select("role, active, access_platform, web_permissions")
+        .select("role, active, access_platform, web_permissions, web_write_permissions")
         .eq("user_id", req.userId)
         .maybeSingle();
       if (refetch.error) return res.status(500).json({ error: refetch.error.message });
@@ -364,6 +364,10 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
         role: "admin",
         access_platform: profRow.access_platform ?? "both",
         web_permissions: profRow.web_permissions ?? DEFAULT_WEB_PERMISSIONS,
+        web_write_permissions: normalizeWebWritePermissions(
+          profRow.web_permissions,
+          profRow.web_write_permissions,
+        ),
         obra_codigos: null,
       });
     }
@@ -398,6 +402,10 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
     return res.json({
       ok: true,
       web_permissions: profRow?.web_permissions ?? DEFAULT_WEB_PERMISSIONS,
+      web_write_permissions: normalizeWebWritePermissions(
+        profRow?.web_permissions,
+        profRow?.web_write_permissions,
+      ),
       access_platform: profRow?.access_platform ?? "app",
       obra_codigos,
     });

@@ -16,6 +16,7 @@ export default function MelosasPage() {
       ativoHint="Este ativo aparecerá no app mobile para seleção da melosa."
       emptyMessage="Nenhuma melosa cadastrada."
       addLabel="Adicionar melosa"
+      writePageKey="melosas"
     />
   );
 }

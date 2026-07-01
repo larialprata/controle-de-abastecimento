@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createSupabaseServiceRole, createSupabaseAnonWithToken } from "../lib/supabase";
 import { envValidated } from "../config";
 import { requireAdmin, type AuthedRequest } from "../middleware/requireAdmin";
-import { DEFAULT_WEB_PERMISSIONS, FULL_WEB_USER_PERMISSIONS, normalizeWebPermissions } from "../lib/webPermissions";
+import { DEFAULT_WEB_PERMISSIONS, FULL_WEB_USER_PERMISSIONS, normalizeWebPermissions, normalizeWebWritePermissions } from "../lib/webPermissions";
 import { listObraCodigosForUsers, setUserObraCodigos } from "../lib/userObras";
 
 const router = Router();
@@ -23,7 +23,7 @@ router.get("/users", requireAdmin, async (req: AuthedRequest, res) => {
     const profs = userIds.length
       ? await service
           .from("profiles")
-          .select("user_id, role, active, is_melosa, cnh_storage_path, access_platform, web_permissions")
+          .select("user_id, role, active, is_melosa, cnh_storage_path, access_platform, web_permissions, web_write_permissions")
           .in("user_id", userIds)
       : { data: [], error: null };
 
@@ -41,6 +41,10 @@ router.get("/users", requireAdmin, async (req: AuthedRequest, res) => {
       cnh_storage_path: profById.get(u.id)?.cnh_storage_path ?? null,
       access_platform: profById.get(u.id)?.access_platform ?? "app",
       web_permissions: normalizeWebPermissions(profById.get(u.id)?.web_permissions),
+      web_write_permissions: normalizeWebWritePermissions(
+        profById.get(u.id)?.web_permissions,
+        profById.get(u.id)?.web_write_permissions,
+      ),
       obra_codigos: obrasByUser.get(u.id) ?? [],
       created_at: u.created_at,
     }));
@@ -80,6 +84,7 @@ const updateAccessPlatformSchema = z.object({
 
 const updateWebPermissionsSchema = z.object({
   web_permissions: z.array(z.string()).min(1),
+  web_write_permissions: z.array(z.string()).optional(),
 });
 
 const updateUserObrasSchema = z.object({
@@ -248,6 +253,10 @@ router.post("/users/:userId/web-permissions", requireAdmin, async (req: AuthedRe
 
     const { userId } = req.params;
     const web_permissions = normalizeWebPermissions(parsed.data.web_permissions);
+    const web_write_permissions = normalizeWebWritePermissions(
+      web_permissions,
+      parsed.data.web_write_permissions ?? [],
+    );
 
     const service = createSupabaseServiceRole();
     const { data: existing, error: exErr } = await service
@@ -264,9 +273,12 @@ router.post("/users/:userId/web-permissions", requireAdmin, async (req: AuthedRe
       return res.status(400).json({ error: "Permissões de páginas web só se aplicam a Utilizador Web." });
     }
 
-    const { error } = await service.from("profiles").update({ web_permissions }).eq("user_id", userId);
+    const { error } = await service
+      .from("profiles")
+      .update({ web_permissions, web_write_permissions })
+      .eq("user_id", userId);
     if (error) return res.status(400).json({ error: error.message });
-    return res.json({ ok: true, web_permissions });
+    return res.json({ ok: true, web_permissions, web_write_permissions });
   } catch (err: any) {
     // eslint-disable-next-line no-console
     console.error("[API] /v1/admin/users/:userId/web-permissions error:", err);

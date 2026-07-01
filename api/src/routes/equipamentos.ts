@@ -14,8 +14,13 @@ import {
 } from "../lib/equipamentosExternos";
 import { lookupEquipamentoFromQr } from "../lib/equipamentoQrLookup";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
-import { requireAdmin } from "../middleware/requireAdmin";
 import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
+import {
+  assertCanWriteWebPage,
+  loadWebWriteProfile,
+  WebWriteAccessError,
+  writePageForEquipamentoTipo,
+} from "../lib/webWriteAccess";
 
 const router = Router();
 
@@ -330,15 +335,24 @@ router.get("/equipamentos/:ativo/qr", requireAuth, async (req: AuthedRequest, re
   return res.json({ qr });
 });
 
-router.post("/equipamentos", requireAdmin, async (req: AuthedRequest, res) => {
+router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = createEquipamentoSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
   }
 
   const { ativo, tipo, obra_codigo, capacidade_litros, mobilidade, empresa } = parsed.data;
-  const nome = parsed.data.nome?.trim() || ativo;
   const service = createSupabaseServiceRole();
+
+  try {
+    const profile = await loadWebWriteProfile(service, req.userId!);
+    assertCanWriteWebPage(profile, writePageForEquipamentoTipo(tipo));
+  } catch (e) {
+    if (e instanceof WebWriteAccessError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+
+  const nome = parsed.data.nome?.trim() || ativo;
 
   if (tipo === "MELOSA" && capacidade_litros != null && capacidade_litros <= 0) {
     return res.status(400).json({ error: "Capacidade da melosa deve ser maior que zero." });
@@ -349,6 +363,15 @@ router.post("/equipamentos", requireAdmin, async (req: AuthedRequest, res) => {
 
   const obraErr = await validateObraCodigo(service, obraCodigoNormalizado);
   if (obraErr) return res.status(400).json({ error: obraErr });
+
+  if (obraCodigoNormalizado != null && req.userId) {
+    try {
+      await assertUserObraAccess(service, req.userId, obraCodigoNormalizado);
+    } catch (e) {
+      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  }
 
   const { data: existing } = await service
     .from("equipamentos")
@@ -392,7 +415,7 @@ const importEquipamentosSchema = z.object({
   itens: z.array(importItemSchema).min(1).max(1000),
 });
 
-router.post("/equipamentos/import", requireAdmin, async (req: AuthedRequest, res) => {
+router.post("/equipamentos/import", requireAuth, async (req: AuthedRequest, res) => {
   const parsed = importEquipamentosSchema.safeParse(req.body);
   if (!parsed.success) {
     const fields = parsed.error.flatten().fieldErrors;
@@ -404,6 +427,14 @@ router.post("/equipamentos/import", requireAdmin, async (req: AuthedRequest, res
 
   const { modo, itens } = parsed.data;
   const service = createSupabaseServiceRole();
+
+  try {
+    const profile = await loadWebWriteProfile(service, req.userId!);
+    assertCanWriteWebPage(profile, "equipamentos");
+  } catch (e) {
+    if (e instanceof WebWriteAccessError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
 
   const { data: obras, error: obrasErr } = await service.from("obras").select("codigo, nome");
   if (obrasErr) return res.status(500).json({ error: obrasErr.message });
@@ -448,6 +479,18 @@ router.post("/equipamentos/import", requireAdmin, async (req: AuthedRequest, res
       if (obraErr) {
         erros.push({ linha, ativo, mensagem: obraErr });
         continue;
+      }
+      if (req.userId) {
+        try {
+          await assertUserObraAccess(service, req.userId, obra_codigo);
+        } catch (e) {
+          erros.push({
+            linha,
+            ativo,
+            mensagem: e instanceof ObraAccessError ? e.message : "Sem permissão para a obra.",
+          });
+          continue;
+        }
       }
     }
 
@@ -536,7 +579,7 @@ const updateEquipamentoSchema = z
     }
   });
 
-router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, res) => {
+router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res) => {
   const ativoAtual = decodeURIComponent(req.params.ativo ?? "").trim();
   if (!ativoAtual) {
     return res.status(400).json({ error: "Ativo inválido." });
@@ -561,6 +604,14 @@ router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, re
     return res.status(404).json({ error: `Equipamento ${ativoAtual} não encontrado.` });
   }
 
+  try {
+    const profile = await loadWebWriteProfile(service, req.userId!);
+    assertCanWriteWebPage(profile, writePageForEquipamentoTipo(existing.tipo));
+  } catch (e) {
+    if (e instanceof WebWriteAccessError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+
   const tipo = parsed.data.tipo ?? existing.tipo;
   const ativoNovo = parsed.data.ativo?.trim() ?? existing.ativo;
   const nomeRaw = parsed.data.nome !== undefined ? parsed.data.nome.trim() : (existing.nome ?? "");
@@ -581,6 +632,20 @@ router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, re
 
   const obraErr = await validateObraCodigo(service, tipo === "MELOSA" ? null : obra_codigo);
   if (obraErr) return res.status(400).json({ error: obraErr });
+
+  if (req.userId) {
+    try {
+      if (existing.obra_codigo != null) {
+        await assertUserObraAccess(service, req.userId, existing.obra_codigo);
+      }
+      if (obra_codigo != null && obra_codigo !== existing.obra_codigo) {
+        await assertUserObraAccess(service, req.userId, obra_codigo);
+      }
+    } catch (e) {
+      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  }
 
   let mobilidade: string | null;
   if (tipo !== "EQUIPAMENTO") {
@@ -631,7 +696,7 @@ router.patch("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, re
   return res.json({ equipamento: data });
 });
 
-router.delete("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, res) => {
+router.delete("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res) => {
   const ativo = decodeURIComponent(req.params.ativo ?? "").trim();
   if (!ativo) {
     return res.status(400).json({ error: "Ativo inválido." });
@@ -640,12 +705,25 @@ router.delete("/equipamentos/:ativo", requireAdmin, async (req: AuthedRequest, r
   const service = createSupabaseServiceRole();
   const { data: existing, error: findErr } = await service
     .from("equipamentos")
-    .select("ativo")
+    .select("ativo, tipo, obra_codigo")
     .eq("ativo", ativo)
     .maybeSingle();
   if (findErr) return res.status(500).json({ error: findErr.message });
   if (!existing) {
     return res.status(404).json({ error: `Equipamento ${ativo} não encontrado.` });
+  }
+
+  try {
+    const profile = await loadWebWriteProfile(service, req.userId!);
+    assertCanWriteWebPage(profile, writePageForEquipamentoTipo(existing.tipo));
+    if (existing.obra_codigo != null && req.userId) {
+      await assertUserObraAccess(service, req.userId, existing.obra_codigo);
+    }
+  } catch (e) {
+    if (e instanceof WebWriteAccessError || e instanceof ObraAccessError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    throw e;
   }
 
   const { error } = await service.from("equipamentos").delete().eq("ativo", ativo);

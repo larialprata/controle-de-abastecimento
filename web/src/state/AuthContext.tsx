@@ -4,9 +4,12 @@ import { supabase } from "../lib/supabase";
 import { apiPost } from "../lib/api";
 import {
   canAccessWebPage,
+  canWriteWebPage,
   DEFAULT_WEB_PERMISSIONS,
   normalizeWebPermissions,
+  normalizeWebWritePermissions,
   type WebPageKey,
+  type WebWritePageKey,
 } from "../lib/webPermissions";
 
 type AuthContextValue = {
@@ -17,11 +20,13 @@ type AuthContextValue = {
   isAdmin: boolean;
   accessPlatform: string | null;
   webPermissions: WebPageKey[];
+  webWritePermissions: WebWritePageKey[];
   /** null = todas as obras; array = só essas obras */
   obraCodigos: number[] | null;
   hasObraRestriction: boolean;
   canAccessObra: (obraCodigo: number) => boolean;
   canAccessPage: (pageKey: WebPageKey) => boolean;
+  canWriteOnPage: (pageKey: WebWritePageKey) => boolean;
   authError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithOutlook: () => Promise<void>;
@@ -43,18 +48,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [accessPlatform, setAccessPlatform] = useState<string | null>(null);
   const [webPermissions, setWebPermissions] = useState<WebPageKey[]>(DEFAULT_WEB_PERMISSIONS);
+  const [webWritePermissions, setWebWritePermissions] = useState<WebWritePageKey[]>([]);
   const [obraCodigos, setObraCodigos] = useState<number[] | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const user = session?.user ?? null;
 
   const applyProfileRow = useCallback(
-    (row: { role?: string | null; access_platform?: string | null; web_permissions?: unknown } | null) => {
+    (row: {
+      role?: string | null;
+      access_platform?: string | null;
+      web_permissions?: unknown;
+      web_write_permissions?: unknown;
+    } | null) => {
       setIsAdmin((row?.role ?? "user") === "admin");
       setAccessPlatform(row?.access_platform ?? null);
-      setWebPermissions(normalizeWebPermissions(row?.web_permissions));
+      const read = normalizeWebPermissions(row?.web_permissions);
+      setWebPermissions(read);
+      setWebWritePermissions(normalizeWebWritePermissions(read, row?.web_write_permissions));
     },
-    []
+    [],
   );
 
   const applyObraCodigos = useCallback((codigos: number[] | null | undefined) => {
@@ -70,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (sess: Session) => {
       const { data } = await supabase
         .from("profiles")
-        .select("role, access_platform, web_permissions")
+        .select("role, access_platform, web_permissions, web_write_permissions")
         .eq("user_id", sess.user.id)
         .maybeSingle();
       applyProfileRow(data);
@@ -95,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAdmin(false);
     setAccessPlatform(null);
     setWebPermissions(DEFAULT_WEB_PERMISSIONS);
+    setWebWritePermissions([]);
     setObraCodigos(null);
     setAuthError(message);
   }, []);
@@ -111,7 +125,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const canAccessPage = useCallback(
     (pageKey: WebPageKey) => canAccessWebPage(isAdmin, accessPlatform, webPermissions, pageKey),
-    [isAdmin, accessPlatform, webPermissions]
+    [isAdmin, accessPlatform, webPermissions],
+  );
+
+  const canWriteOnPage = useCallback(
+    (pageKey: WebWritePageKey) =>
+      canWriteWebPage(isAdmin, accessPlatform, webPermissions, webWritePermissions, pageKey),
+    [isAdmin, accessPlatform, webPermissions, webWritePermissions],
   );
 
   useEffect(() => {
@@ -148,6 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAdmin(false);
         setAccessPlatform(null);
         setWebPermissions(DEFAULT_WEB_PERMISSIONS);
+        setWebWritePermissions([]);
         setObraCodigos(null);
         setAuthError(null);
       }
@@ -213,6 +234,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAdmin(false);
     setAccessPlatform(null);
     setWebPermissions(DEFAULT_WEB_PERMISSIONS);
+    setWebWritePermissions([]);
     setObraCodigos(null);
     setAuthError(null);
   }
@@ -228,10 +250,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAdmin,
       accessPlatform,
       webPermissions,
+      webWritePermissions,
       obraCodigos,
       hasObraRestriction,
       canAccessObra,
       canAccessPage,
+      canWriteOnPage,
       authError,
       signIn,
       signInWithOutlook,
@@ -239,7 +263,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshProfile,
       clearAuthError,
     }),
-    [loading, session, user, token, isAdmin, accessPlatform, webPermissions, obraCodigos, hasObraRestriction, canAccessObra, canAccessPage, authError, clearAuthError]
+    [loading, session, user, token, isAdmin, accessPlatform, webPermissions, webWritePermissions, obraCodigos, hasObraRestriction, canAccessObra, canAccessPage, canWriteOnPage, authError, clearAuthError]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

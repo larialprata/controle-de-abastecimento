@@ -6,8 +6,11 @@ import { glassField, glassPanel } from "../lib/glass";
 import {
   DEFAULT_WEB_PERMISSIONS,
   normalizeWebPermissions,
+  normalizeWebWritePermissions,
   WEB_PAGES,
+  WEB_WRITE_PAGES,
   type WebPageKey,
+  type WebWritePageKey,
 } from "../lib/webPermissions";
 
 type AccessPlatform = "app" | "web" | "both";
@@ -21,6 +24,7 @@ type AdminUserRow = {
   cnh_storage_path: string | null;
   access_platform: AccessPlatform;
   web_permissions: WebPageKey[];
+  web_write_permissions: WebWritePageKey[];
   obra_codigos: number[];
   created_at: string | null;
 };
@@ -59,6 +63,7 @@ export default function UsersPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const [permUser, setPermUser] = useState<AdminUserRow | null>(null);
   const [permDraft, setPermDraft] = useState<WebPageKey[]>(DEFAULT_WEB_PERMISSIONS);
+  const [permWriteDraft, setPermWriteDraft] = useState<WebWritePageKey[]>([]);
   const [permSaving, setPermSaving] = useState(false);
   const [permError, setPermError] = useState<string | null>(null);
   const [obras, setObras] = useState<ObraRow[]>([]);
@@ -127,7 +132,9 @@ export default function UsersPage() {
 
   function openPermModal(user: AdminUserRow) {
     setPermUser(user);
-    setPermDraft(normalizeWebPermissions(user.web_permissions));
+    const read = normalizeWebPermissions(user.web_permissions);
+    setPermDraft(read);
+    setPermWriteDraft(normalizeWebWritePermissions(read, user.web_write_permissions));
     setPermError(null);
   }
 
@@ -150,6 +157,19 @@ export default function UsersPage() {
 
   function togglePermDraft(key: WebPageKey, checked: boolean) {
     togglePermissionList(setPermDraft, key, checked);
+    if (!checked) {
+      setPermWriteDraft((prev) => prev.filter((k) => k !== key));
+    }
+  }
+
+  function togglePermWriteDraft(key: WebWritePageKey, checked: boolean) {
+    if (!permDraft.includes(key)) return;
+    setPermWriteDraft((prev) => {
+      const set = new Set(prev);
+      if (checked) set.add(key);
+      else set.delete(key);
+      return WEB_WRITE_PAGES.map((p) => p.key).filter((k) => set.has(k));
+    });
   }
 
   async function saveWebPermissions() {
@@ -159,6 +179,7 @@ export default function UsersPage() {
     try {
       await apiPost(`/v1/admin/users/${permUser.id}/web-permissions`, token, {
         web_permissions: permDraft,
+        web_write_permissions: permWriteDraft,
       });
       setPermUser(null);
       await load();
@@ -292,7 +313,7 @@ export default function UsersPage() {
       <header className={`mb-6 p-5 ${glassPanel}`}>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">Usuários</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
-          Utilizador Web: defina quais páginas e obras (contratos) cada um pode ver. Admin vê tudo.
+          Utilizador Web: defina quais páginas e obras cada um pode ver, e em quais pode adicionar/editar.
         </p>
       </header>
 
@@ -784,22 +805,53 @@ export default function UsersPage() {
               </div>
             ) : null}
 
-            <div className="space-y-2">
-              {WEB_PAGES.map((page) => (
-                <label key={page.key} className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={permDraft.includes(page.key)}
-                    disabled={permSaving || page.key === "dashboard"}
-                    onChange={(e) => togglePermDraft(page.key, e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
-                  />
-                  <span className="text-sm text-slate-700 dark:text-slate-300">
-                    {page.label}
-                    {page.key === "dashboard" ? " (sempre)" : ""}
-                  </span>
-                </label>
-              ))}
+            <div className="space-y-4">
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Ver página
+                </p>
+                <div className="space-y-2">
+                  {WEB_PAGES.map((page) => (
+                    <label key={page.key} className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={permDraft.includes(page.key)}
+                        disabled={permSaving || page.key === "dashboard"}
+                        onChange={(e) => togglePermDraft(page.key, e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+                      />
+                      <span className="text-sm text-slate-700 dark:text-slate-300">
+                        {page.label}
+                        {page.key === "dashboard" ? " (sempre)" : ""}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Pode adicionar / editar / excluir
+                </p>
+                <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+                  Só aparece o botão de adicionar na página se a opção abaixo estiver marcada (e a página estiver
+                  liberada acima).
+                </p>
+                <div className="space-y-2">
+                  {WEB_WRITE_PAGES.map((page) => (
+                    <label key={page.key} className="flex cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={permWriteDraft.includes(page.key)}
+                        disabled={permSaving || !permDraft.includes(page.key)}
+                        onChange={(e) => togglePermWriteDraft(page.key, e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="text-sm text-slate-700 dark:text-slate-300">{page.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">

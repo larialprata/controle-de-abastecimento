@@ -22,6 +22,7 @@ export default function EquipamentosPage() {
       enableImport
       enableBulkSelect
       enableQrCode
+      writePageKey="equipamentos"
     />
   );
 }

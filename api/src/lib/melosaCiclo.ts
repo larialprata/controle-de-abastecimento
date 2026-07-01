@@ -86,35 +86,12 @@ async function sumAbastecimentosEntre(
     .reduce((acc, r) => acc + toNum(r.litros), 0);
 }
 
-async function sumDevolucoesEntre(
-  service: SupabaseClient,
-  ativoMelosa: string,
-  de: string,
-  ate: string,
-): Promise<number> {
-  const ativo = normalizeAtivo(ativoMelosa);
-  const { data } = await service
-    .from("movimentacoes")
-    .select("litros, placa_texto, placa_caminhao, tipo, data_hora")
-    .eq("tipo", "ENTRADA_TANQUE_OBRA")
-    .gt("data_hora", de)
-    .lt("data_hora", ate);
-
-  if (!data?.length) return 0;
-  return data
-    .filter((r) => {
-      const placa = normalizeAtivo(String(r.placa_texto ?? r.placa_caminhao ?? ""));
-      return placa === ativo;
-    })
-    .reduce((acc, r) => acc + toNum(r.litros), 0);
-}
-
 export function calcularSobraAnterior(
   litrosRetiradaAnterior: number,
   litrosAbastecidos: number,
-  litrosDevolvidos: number,
+  _litrosDevolvidos = 0,
 ): number {
-  return Math.max(0, litrosRetiradaAnterior - litrosAbastecidos - litrosDevolvidos);
+  return Math.max(0, litrosRetiradaAnterior - litrosAbastecidos);
 }
 
 export function avaliarEnchimentoMelosa(
@@ -182,8 +159,7 @@ export async function criarCicloRetiradaTanque(
       cicloAnterior.data_hora,
       params.dataHora,
     );
-    const devolv = await sumDevolucoesEntre(service, ativo, cicloAnterior.data_hora, params.dataHora);
-    litrosSobraAnterior = calcularSobraAnterior(toNum(cicloAnterior.litros_retirada), abast, devolv);
+    litrosSobraAnterior = calcularSobraAnterior(toNum(cicloAnterior.litros_retirada), abast);
   }
 
   const { volumeExcedente, status } = avaliarEnchimentoMelosa(
@@ -277,10 +253,7 @@ export async function vincularAbastecimentoAoCicloAberto(
 }
 
 export function litrosSobraAtualCiclo(ciclo: MelosaCicloRow): number {
-  return Math.max(
-    0,
-    toNum(ciclo.litros_retirada) - toNum(ciclo.litros_abastecidos) - toNum(ciclo.litros_devolvidos),
-  );
+  return Math.max(0, toNum(ciclo.litros_retirada) - toNum(ciclo.litros_abastecidos));
 }
 
 /** Ao excluir um ciclo, os filhos passam a apontar para o anterior do excluído e recalculam sobra/status. */
@@ -318,16 +291,9 @@ export async function relinkFilhosAoExcluirCiclo(
           String(anterior.data_hora),
           filho.data_hora,
         );
-        const devolv = await sumDevolucoesEntre(
-          service,
-          filho.ativo_melosa_texto,
-          String(anterior.data_hora),
-          filho.data_hora,
-        );
         litrosSobraAnterior = calcularSobraAnterior(
           toNum((anterior as MelosaCicloRow).litros_retirada),
           abast,
-          devolv,
         );
       }
     }

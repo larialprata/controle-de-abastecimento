@@ -22,7 +22,8 @@ function fmtEmpresa(v: ObraEmpresa | null | undefined): string {
 }
 
 export default function ContratosPage() {
-  const { token, isAdmin } = useAuth();
+  const { token, canWriteOnPage } = useAuth();
+  const canWrite = canWriteOnPage("contratos");
   const [obras, setObras] = useState<ObraRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,7 +182,7 @@ export default function ContratosPage() {
     if (obra) openEditModal(obra);
   }, [obras, openEditModal, selectedCodigos]);
 
-  const colCount = isAdmin ? 5 : 3;
+  const colCount = canWrite ? 5 : 3;
 
   return (
     <div>
@@ -216,7 +217,7 @@ export default function ContratosPage() {
           </button>
         </div>
 
-        {isAdmin ? (
+        {canWrite ? (
           <>
             <div className="flex flex-col gap-1">
               <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -310,7 +311,7 @@ export default function ContratosPage() {
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
               <tr>
-                {isAdmin ? (
+                {canWrite ? (
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     <input
                       type="checkbox"
@@ -330,7 +331,7 @@ export default function ContratosPage() {
                 <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                   Empresa
                 </th>
-                {isAdmin ? (
+                {canWrite ? (
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Ações
                   </th>
@@ -346,7 +347,7 @@ export default function ContratosPage() {
                     key={o.codigo}
                     className={`${zebra} ${selected ? "bg-blue-50/50 dark:bg-blue-950/20" : ""}`}
                   >
-                    {isAdmin ? (
+                    {canWrite ? (
                       <td className="border-b border-slate-100 px-4 py-3 dark:border-white/5">
                         <input
                           type="checkbox"
@@ -367,7 +368,7 @@ export default function ContratosPage() {
                         {fmtEmpresa(o.empresa)}
                       </span>
                     </td>
-                    {isAdmin ? (
+                    {canWrite ? (
                       <td className="border-b border-slate-100 px-4 py-3 dark:border-white/5">
                         <div className="flex flex-wrap gap-2">
                           <button

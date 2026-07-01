@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
+import { buildMelosaFluxo } from "../lib/melosaFluxo";
 import { litrosSobraAtualCiclo, relinkFilhosAoExcluirCiclo, type MelosaCicloRow } from "../lib/melosaCiclo";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
@@ -16,6 +17,30 @@ function toNum(v: unknown): number {
   }
   return 0;
 }
+
+router.get("/melosa-ciclos/fluxo", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+    const ativo = typeof req.query.ativo === "string" ? req.query.ativo.trim() : "";
+    if (!ativo) return res.status(400).json({ error: "Informe o parâmetro ativo (ex.: CCL1999)." });
+
+    const service = createSupabaseServiceRole();
+    const obraScope = await getUserObraCodigos(service, req.userId);
+    const obraCodigoRaw =
+      typeof req.query.obra_codigo === "string" ? Number(req.query.obra_codigo) : null;
+    const obraCodigo = obraCodigoRaw != null && Number.isFinite(obraCodigoRaw) ? obraCodigoRaw : null;
+
+    const fluxo = await buildMelosaFluxo(service, {
+      ativoMelosa: ativo,
+      obraCodigo,
+      obraScope,
+    });
+
+    return res.json(fluxo);
+  } catch (err: unknown) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : "Erro ao montar fluxo." });
+  }
+});
 
 router.get("/melosa-ciclos", requireAuth, async (req: AuthedRequest, res) => {
   try {

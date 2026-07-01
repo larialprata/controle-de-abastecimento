@@ -9,6 +9,15 @@ export const WEB_PAGES = [
 
 export type WebPageKey = (typeof WEB_PAGES)[number]["key"];
 
+/** Páginas de cadastro em que utilizador web pode criar/editar/excluir. */
+export const WEB_WRITE_PAGES = [
+  { key: "contratos", label: "Contratos" },
+  { key: "melosas", label: "Melosas" },
+  { key: "equipamentos", label: "Equipamentos" },
+] as const;
+
+export type WebWritePageKey = (typeof WEB_WRITE_PAGES)[number]["key"];
+
 export const DEFAULT_WEB_PERMISSIONS: WebPageKey[] = ["dashboard"];
 
 export function normalizeWebPermissions(input: unknown): WebPageKey[] {
@@ -24,6 +33,26 @@ export function normalizeWebPermissions(input: unknown): WebPageKey[] {
   return WEB_PAGES.map((p) => p.key).filter((k) => set.has(k));
 }
 
+export function normalizeWebWritePermissions(
+  readPermissions: unknown,
+  writeInput: unknown,
+): WebWritePageKey[] {
+  const read = new Set(normalizeWebPermissions(readPermissions));
+  if (!Array.isArray(writeInput)) return [];
+  const allowed = new Set(WEB_WRITE_PAGES.map((p) => p.key));
+  const set = new Set<WebWritePageKey>();
+  for (const item of writeInput) {
+    if (
+      typeof item === "string" &&
+      allowed.has(item as WebWritePageKey) &&
+      read.has(item as WebPageKey)
+    ) {
+      set.add(item as WebWritePageKey);
+    }
+  }
+  return WEB_WRITE_PAGES.map((p) => p.key).filter((k) => set.has(k));
+}
+
 export function canAccessWebPage(
   isAdmin: boolean,
   accessPlatform: string | null | undefined,
@@ -34,6 +63,20 @@ export function canAccessWebPage(
   if (accessPlatform !== "web") return false;
   const perms = normalizeWebPermissions(permissions);
   return perms.includes(pageKey);
+}
+
+export function canWriteWebPage(
+  isAdmin: boolean,
+  accessPlatform: string | null | undefined,
+  readPermissions: string[] | null | undefined,
+  writePermissions: string[] | null | undefined,
+  pageKey: WebWritePageKey,
+): boolean {
+  if (isAdmin) return true;
+  if (accessPlatform !== "web") return false;
+  const read = normalizeWebPermissions(readPermissions);
+  const write = normalizeWebWritePermissions(readPermissions, writePermissions);
+  return read.includes(pageKey) && write.includes(pageKey);
 }
 
 export function pathnameToPageKey(pathname: string): WebPageKey {
