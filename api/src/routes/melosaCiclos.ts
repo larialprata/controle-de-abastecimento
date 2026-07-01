@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { buildMelosaFluxo } from "../lib/melosaFluxo";
-import { excluirMelosaCiclo, excluirMelosaCiclosEmLote, litrosSobraAtualCiclo, type MelosaCicloRow } from "../lib/melosaCiclo";
+import { excluirMelosaCiclo, excluirMelosaCiclosEmLote, enriquecerCiclosParaListagem, avaliarEnchimentoMelosa, type MelosaCicloRow } from "../lib/melosaCiclo";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { getUserObraCodigos } from "../lib/userObras";
@@ -65,17 +65,33 @@ router.get("/melosa-ciclos", requireAuth, async (req: AuthedRequest, res) => {
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: error.message });
 
-    const ciclos = (data ?? []).map((row) => {
-      const c = row as MelosaCicloRow;
+    const rows = (data ?? []) as MelosaCicloRow[];
+    const metricas = await enriquecerCiclosParaListagem(service, rows);
+
+    const ciclos = rows.map((row) => {
+      const c = row;
+      const m = metricas.get(c.id);
+      const litrosAbastecidos = m?.litros_abastecidos ?? toNum(c.litros_abastecidos);
+      const litrosSobraAnterior = m?.litros_sobra_anterior ?? toNum(c.litros_sobra_anterior);
+      const litrosSobraAtual =
+        m?.litros_sobra_atual ??
+        Math.max(0, litrosSobraAnterior + toNum(c.litros_retirada) - litrosAbastecidos);
+      const capacidade = c.capacidade_litros != null ? toNum(c.capacidade_litros) : null;
+      const { volumeExcedente, status } = avaliarEnchimentoMelosa(
+        litrosSobraAnterior,
+        toNum(c.litros_retirada),
+        capacidade,
+      );
       return {
         ...c,
-        litros_sobra_atual: litrosSobraAtualCiclo(c),
+        litros_sobra_atual: litrosSobraAtual,
         litros_retirada: toNum(c.litros_retirada),
-        litros_sobra_anterior: toNum(c.litros_sobra_anterior),
-        litros_abastecidos: toNum(c.litros_abastecidos),
+        litros_sobra_anterior: litrosSobraAnterior,
+        litros_abastecidos: litrosAbastecidos,
         litros_devolvidos: toNum(c.litros_devolvidos),
-        capacidade_litros: c.capacidade_litros != null ? toNum(c.capacidade_litros) : null,
-        volume_excedente: toNum(c.volume_excedente),
+        capacidade_litros: capacidade,
+        volume_excedente: volumeExcedente,
+        status,
       };
     });
 

@@ -67,31 +67,68 @@ async function findCicloAnteriorMesmoAtivo(
   return data as MelosaCicloRow;
 }
 
-async function sumAbastecimentosEntre(
+function sumMovimentacoesNoIntervalo(
+  movimentacoes: Array<{ litros: number; data_hora: string }>,
+  de: string,
+  ate: string | null,
+): number {
+  return movimentacoes
+    .filter((m) => m.data_hora > de && (ate == null || m.data_hora < ate))
+    .reduce((acc, m) => acc + m.litros, 0);
+}
+
+async function fetchMovimentacoesMelosaDesde(
   service: SupabaseClient,
   ativoMelosa: string,
   de: string,
-  ate: string,
-): Promise<number> {
+): Promise<Array<{ litros: number; data_hora: string }>> {
   const ativo = normalizeAtivo(ativoMelosa);
   const { data } = await service
     .from("melosa_movimentacoes")
     .select("litros, ativo_melosa_texto, data_hora")
+    .ilike("ativo_melosa_texto", ativo)
     .gt("data_hora", de)
-    .lt("data_hora", ate);
+    .order("data_hora", { ascending: true });
 
-  if (!data?.length) return 0;
-  return data
-    .filter((r) => normalizeAtivo(String(r.ativo_melosa_texto ?? "")) === ativo)
-    .reduce((acc, r) => acc + toNum(r.litros), 0);
+  if (!data?.length) return [];
+  return data.map((r) => ({
+    litros: toNum(r.litros),
+    data_hora: String(r.data_hora),
+  }));
 }
 
+async function sumAbastecimentosEntre(
+  service: SupabaseClient,
+  ativoMelosa: string,
+  de: string,
+  ate: string | null,
+): Promise<number> {
+  const movs = await fetchMovimentacoesMelosaDesde(service, ativoMelosa, de);
+  return sumMovimentacoesNoIntervalo(movs, de, ate);
+}
+
+/** Volume na melosa logo após o enchimento do ciclo (sobra anterior + retirada do tanque). */
+export function litrosDisponivelNoCiclo(
+  ciclo: Pick<MelosaCicloRow, "litros_sobra_anterior" | "litros_retirada">,
+): number {
+  return toNum(ciclo.litros_sobra_anterior) + toNum(ciclo.litros_retirada);
+}
+
+/** Sobra restante após abastecimentos no intervalo (ex.: entre dois enchimentos). */
+export function calcularSobraAposAbastecimentos(
+  litrosDisponivelNoCiclo: number,
+  litrosAbastecidosNoIntervalo: number,
+): number {
+  return Math.max(0, litrosDisponivelNoCiclo - litrosAbastecidosNoIntervalo);
+}
+
+/** @deprecated Use litrosDisponivelNoCiclo + calcularSobraAposAbastecimentos */
 export function calcularSobraAnterior(
   litrosRetiradaAnterior: number,
   litrosAbastecidos: number,
   _litrosDevolvidos = 0,
 ): number {
-  return Math.max(0, litrosRetiradaAnterior - litrosAbastecidos);
+  return calcularSobraAposAbastecimentos(litrosRetiradaAnterior, litrosAbastecidos);
 }
 
 export function avaliarEnchimentoMelosa(
@@ -159,7 +196,7 @@ export async function criarCicloRetiradaTanque(
       cicloAnterior.data_hora,
       params.dataHora,
     );
-    litrosSobraAnterior = calcularSobraAnterior(toNum(cicloAnterior.litros_retirada), abast);
+    litrosSobraAnterior = calcularSobraAposAbastecimentos(litrosDisponivelNoCiclo(cicloAnterior), abast);
   }
 
   const { volumeExcedente, status } = avaliarEnchimentoMelosa(
@@ -246,14 +283,90 @@ export async function vincularAbastecimentoAoCicloAberto(
 
   if (updErr) throw new Error(updErr.message);
 
-  const novoAbast = toNum(ciclo.litros_abastecidos) + params.litrosAbastecidos;
-  await service.from("melosa_ciclos").update({ litros_abastecidos: novoAbast }).eq("id", ciclo.id);
+  const { data: proximoCiclo } = await service
+    .from("melosa_ciclos")
+    .select("data_hora")
+    .ilike("ativo_melosa_texto", ativo)
+    .gt("ciclo_numero", ciclo.ciclo_numero)
+    .order("ciclo_numero", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const abastRecalculado = await sumAbastecimentosEntre(
+    service,
+    ativo,
+    ciclo.data_hora,
+    proximoCiclo?.data_hora ?? null,
+  );
+  await service.from("melosa_ciclos").update({ litros_abastecidos: abastRecalculado }).eq("id", ciclo.id);
 
   return ciclo.id;
 }
 
-export function litrosSobraAtualCiclo(ciclo: MelosaCicloRow): number {
-  return Math.max(0, toNum(ciclo.litros_retirada) - toNum(ciclo.litros_abastecidos));
+export function litrosSobraAtualCiclo(
+  ciclo: Pick<MelosaCicloRow, "litros_sobra_anterior" | "litros_retirada" | "litros_abastecidos">,
+): number {
+  return calcularSobraAposAbastecimentos(litrosDisponivelNoCiclo(ciclo), toNum(ciclo.litros_abastecidos));
+}
+
+export type CicloMetricasEnriquecidas = {
+  litros_sobra_anterior: number;
+  litros_abastecidos: number;
+  litros_sobra_atual: number;
+};
+
+/** Recalcula sobra anterior, abastecido e sobra atual a partir das movimentações da melosa. */
+export async function enriquecerCiclosParaListagem(
+  service: SupabaseClient,
+  ciclos: MelosaCicloRow[],
+): Promise<Map<string, CicloMetricasEnriquecidas>> {
+  const resultado = new Map<string, CicloMetricasEnriquecidas>();
+  if (ciclos.length === 0) return resultado;
+
+  const ativos = Array.from(new Set(ciclos.map((c) => normalizeAtivo(c.ativo_melosa_texto))));
+
+  for (const ativo of ativos) {
+    const { data: chainData } = await service
+      .from("melosa_ciclos")
+      .select("*")
+      .ilike("ativo_melosa_texto", ativo)
+      .order("ciclo_numero", { ascending: true });
+
+    const chain = (chainData ?? []) as MelosaCicloRow[];
+    if (!chain.length) continue;
+
+    const movimentacoes = await fetchMovimentacoesMelosaDesde(service, ativo, chain[0].data_hora);
+
+    for (let i = 0; i < chain.length; i++) {
+      const ciclo = chain[i];
+      const ateAbast = chain[i + 1]?.data_hora ?? null;
+      const abast = sumMovimentacoesNoIntervalo(movimentacoes, ciclo.data_hora, ateAbast);
+
+      let sobraAnterior = 0;
+      if (i > 0) {
+        const anterior = chain[i - 1];
+        const abastEntreCiclos = sumMovimentacoesNoIntervalo(
+          movimentacoes,
+          anterior.data_hora,
+          ciclo.data_hora,
+        );
+        sobraAnterior = calcularSobraAposAbastecimentos(
+          litrosDisponivelNoCiclo(anterior),
+          abastEntreCiclos,
+        );
+      }
+
+      const sobraAtual = calcularSobraAposAbastecimentos(litrosDisponivelNoCiclo({ ...ciclo, litros_sobra_anterior: sobraAnterior }), abast);
+
+      resultado.set(ciclo.id, {
+        litros_sobra_anterior: sobraAnterior,
+        litros_abastecidos: abast,
+        litros_sobra_atual: sobraAtual,
+      });
+    }
+  }
+
+  return resultado;
 }
 
 /** Encontra o ciclo anterior ainda existente, ignorando IDs já excluídos ou ausentes. */
@@ -333,8 +446,8 @@ export async function relinkFilhosAoExcluirCiclo(
           String(anterior.data_hora),
           filho.data_hora,
         );
-        litrosSobraAnterior = calcularSobraAnterior(
-          toNum((anterior as MelosaCicloRow).litros_retirada),
+        litrosSobraAnterior = calcularSobraAposAbastecimentos(
+          litrosDisponivelNoCiclo(anterior as MelosaCicloRow),
           abast,
         );
       }
