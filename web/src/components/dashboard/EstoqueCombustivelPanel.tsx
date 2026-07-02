@@ -47,6 +47,15 @@ type Props = {
   ativoMelosa?: string;
 };
 
+const labelCls =
+  "text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400";
+
+function metricasMelosa(m: EstoqueMelosaItem) {
+  const cap = m.capacidade_litros ?? 5_000;
+  const ocup = m.ocupacao_pct ?? (cap > 0 ? (m.saldo_litros / cap) * 100 : 0);
+  return { cap, ocup };
+}
+
 export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Props) {
   const [obras, setObras] = useState<ObraOption[]>([]);
   const [obraCodigo, setObraCodigo] = useState<string>("");
@@ -86,27 +95,12 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
   }, [load]);
 
   const dieselS10 = data?.tanques_por_combustivel.find((t) => t.combustivel_key === "DIESEL_S10");
-
-  const melosaExibida = (() => {
-    if (!data?.melosas.length) return null;
-    const filtro = ativoMelosa.trim().toUpperCase();
-    if (filtro) {
-      const found = data.melosas.find((m) => m.ativo.toUpperCase() === filtro);
-      if (found) return found;
-    }
-    return data.melosas[0];
-  })();
-
-  const melosaCap = melosaExibida?.capacidade_litros ?? 5_000;
-  const melosaOcup = melosaExibida
-    ? (melosaExibida.ocupacao_pct ??
-      (melosaCap > 0 ? (melosaExibida.saldo_litros / melosaCap) * 100 : 0))
-    : 0;
-  const melosaPonto = melosaExibida?.ponto_pedido_litros ?? melosaCap * 0.2;
+  const melosasLista = data?.melosas ?? [];
+  const filtroMelosa = ativoMelosa.trim().toUpperCase();
 
   return (
     <section className={`${glassPanel} overflow-hidden p-4 md:p-6`}>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-white/30 pb-4 dark:border-white/10">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-white/30 pb-4 dark:border-white/10">
         <h2 className="text-lg font-bold uppercase tracking-wide text-slate-900 dark:text-white">
           Dashboard estoque tanques
         </h2>
@@ -143,52 +137,75 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
       ) : null}
 
       {loading && !data ? (
-        <div className="flex items-center justify-center gap-2 py-24 text-slate-500">
+        <div className="flex items-center justify-center gap-2 py-16 text-slate-500">
           <Loader2 className="h-8 w-8 animate-spin" />
           Carregando estoque…
         </div>
       ) : null}
 
       {data ? (
-        <div className="mx-auto flex max-w-md flex-col items-center gap-10 py-2">
-          {dieselS10 ? (
-            <TanqueGrandeVisual
-              titulo="Diesel S10 — Tanque — Estoque"
-              saldoLitros={dieselS10.saldo_litros}
-              capacidadeLitros={dieselS10.capacidade_litros}
-              ocupacaoPct={dieselS10.ocupacao_pct}
-              cor={dieselS10.cor}
-              pontoPedidoLitros={dieselS10.ponto_pedido_litros}
-              abaixoPonto={dieselS10.abaixo_ponto_pedido}
-            />
-          ) : (
-            <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">
-              Sem dados de Diesel S10 no filtro atual.
-            </p>
-          )}
+        <div className="space-y-6">
+          <div>
+            <p className={`${labelCls} mb-3`}>Tanque da obra</p>
+            <div className="flex justify-center sm:justify-start">
+              {dieselS10 ? (
+                <TanqueGrandeVisual
+                  tipo="tanque"
+                  titulo="Diesel S10"
+                  saldoLitros={dieselS10.saldo_litros}
+                  capacidadeLitros={dieselS10.capacidade_litros}
+                  ocupacaoPct={dieselS10.ocupacao_pct}
+                  cor={dieselS10.cor}
+                  abaixoPonto={dieselS10.abaixo_ponto_pedido}
+                />
+              ) : (
+                <p className="py-6 text-sm text-slate-500 dark:text-slate-400">
+                  Sem dados de Diesel S10 no filtro atual.
+                </p>
+              )}
+            </div>
+          </div>
 
-          <div className="h-px w-full max-w-xs bg-gradient-to-r from-transparent via-slate-300/60 to-transparent dark:via-slate-600/40" />
-
-          {melosaExibida ? (
-            <TanqueGrandeVisual
-              titulo={`${melosaExibida.ativo} — Melosa — Estoque`}
-              saldoLitros={melosaExibida.saldo_litros}
-              capacidadeLitros={melosaCap}
-              ocupacaoPct={melosaOcup}
-              cor="#0EA5E9"
-              pontoPedidoLitros={melosaPonto}
-              abaixoPonto={melosaExibida.abaixo_ponto_pedido}
-              subtitulo={
-                melosaExibida.ultimo_ciclo_numero != null
-                  ? `Último ciclo ID ${melosaExibida.ultimo_ciclo_numero}`
-                  : undefined
-              }
-            />
-          ) : (
-            <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">
-              Nenhuma melosa com ciclo registrado no filtro atual.
+          <div>
+            <p className={`${labelCls} mb-3`}>
+              Melosas {melosasLista.length > 0 ? `(${melosasLista.length})` : ""}
             </p>
-          )}
+            {melosasLista.length > 0 ? (
+              <div className="grid grid-cols-2 justify-items-center gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {melosasLista.map((m) => {
+                  const { cap, ocup } = metricasMelosa(m);
+                  const destacada = filtroMelosa.length > 0 && m.ativo.toUpperCase() === filtroMelosa;
+                  return (
+                    <div
+                      key={m.ativo}
+                      className={
+                        destacada
+                          ? "rounded-2xl ring-2 ring-sky-500 ring-offset-2 ring-offset-transparent dark:ring-offset-slate-900"
+                          : ""
+                      }
+                    >
+                      <TanqueGrandeVisual
+                        tipo="melosa"
+                        titulo={m.ativo}
+                        saldoLitros={m.saldo_litros}
+                        capacidadeLitros={cap}
+                        ocupacaoPct={ocup}
+                        cor="#0EA5E9"
+                        abaixoPonto={m.abaixo_ponto_pedido}
+                        subtitulo={
+                          m.ultimo_ciclo_numero != null ? `Ciclo ${m.ultimo_ciclo_numero}` : undefined
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="py-4 text-center text-sm text-slate-500 dark:text-slate-400">
+                Nenhuma melosa cadastrada no filtro atual.
+              </p>
+            )}
+          </div>
         </div>
       ) : null}
     </section>

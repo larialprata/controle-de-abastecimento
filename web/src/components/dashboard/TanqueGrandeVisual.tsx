@@ -8,10 +8,13 @@ type Props = {
   capacidadeLitros: number;
   ocupacaoPct: number;
   cor: string;
-  pontoPedidoLitros: number;
   abaixoPonto: boolean;
   subtitulo?: string;
+  tipo?: "tanque" | "melosa";
 };
+
+const ESCALA_PCTS = [100, 75, 50, 25, 0] as const;
+const TANK_BODY_H = 118;
 
 function fmtPct(v: number): string {
   return new Intl.NumberFormat("pt-BR", {
@@ -20,110 +23,131 @@ function fmtPct(v: number): string {
   }).format(v);
 }
 
-/** Tanque industrial grande — nível animado conforme estoque. */
+/** Cartão de tanque com tamanho fixo — todos iguais na grade. */
 export default function TanqueGrandeVisual({
   titulo,
   saldoLitros,
   capacidadeLitros,
   ocupacaoPct,
   cor,
-  pontoPedidoLitros,
   abaixoPonto,
   subtitulo,
+  tipo = "melosa",
 }: Props) {
   const alvoPct = Math.min(100, Math.max(0, ocupacaoPct));
 
   const [nivelPct, setNivelPct] = useState(0);
   useEffect(() => {
-    const id = window.setTimeout(() => setNivelPct(alvoPct), 100);
+    const id = window.setTimeout(() => setNivelPct(alvoPct), 80);
     return () => window.clearTimeout(id);
   }, [alvoPct]);
 
+  const bordaTipo =
+    tipo === "tanque"
+      ? "border-amber-400/40 dark:border-amber-500/30"
+      : "border-sky-400/40 dark:border-sky-500/30";
+
   return (
-    <div className="flex w-full max-w-[280px] flex-col items-center sm:max-w-[300px]">
-      <h3 className="mb-4 text-center text-sm font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100 sm:text-base">
-        {titulo}
-      </h3>
+    <article
+      className={`flex w-[168px] flex-col rounded-2xl border bg-white/60 shadow-sm backdrop-blur-sm dark:bg-slate-900/50 ${bordaTipo}`}
+    >
+      <header className="flex h-10 shrink-0 items-center justify-center border-b border-white/40 px-2 dark:border-white/10">
+        <h3 className="truncate text-center text-xs font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100">
+          {titulo}
+        </h3>
+      </header>
 
-      <div className="relative w-full" style={{ aspectRatio: "3 / 4.25" }}>
-        {/* Tubulação */}
-        <div className="absolute left-1/2 top-[2%] z-10 h-[7%] w-[14%] -translate-x-1/2 rounded-t-md border-2 border-b-0 border-slate-500 bg-slate-300 dark:border-slate-500 dark:bg-slate-600" />
-        <div className="absolute right-[12%] top-[11%] z-10 h-[3.5%] w-[24%] rounded-full border border-slate-400 bg-slate-300 dark:bg-slate-600" />
-
-        {/* Corpo do tanque */}
-        <div className="absolute inset-x-[8%] bottom-[2%] top-[8%] overflow-hidden rounded-b-[42%] rounded-t-2xl border-[3px] border-slate-500 bg-slate-100 shadow-[inset_0_8px_24px_rgba(0,0,0,0.12),0_12px_40px_rgba(0,0,0,0.15)] dark:border-slate-500 dark:bg-slate-800">
-          {/* Fundo vazio */}
-          <div className="absolute inset-0 bg-gradient-to-b from-slate-50 to-slate-200/80 dark:from-slate-800 dark:to-slate-900" />
-
-          {/* Líquido — enche/esvazia */}
+      {/* Tanque quadrado + medidores alinhados à altura do corpo */}
+      <div className="mt-2 flex items-end justify-center gap-1.5 px-2">
+        {/* Traços à esquerda — mesma altura do corpo */}
+        <div
+          className="relative flex shrink-0 flex-col justify-between"
+          style={{ width: 14, height: TANK_BODY_H }}
+        >
           <div
-            className="absolute inset-x-0 bottom-0 transition-[height] duration-[1.4s] ease-[cubic-bezier(0.33,1,0.68,1)]"
-            style={{
-              height: `${nivelPct}%`,
-              background: `linear-gradient(180deg, ${cor}ee 0%, ${cor} 45%, ${cor}cc 100%)`,
-            }}
+            className="pointer-events-none absolute bottom-0 top-0 left-1/2 w-px -translate-x-1/2 bg-slate-400/90 dark:bg-slate-500/90"
+            aria-hidden
+          />
+          {ESCALA_PCTS.map((pct) => (
+            <div key={pct} className="relative z-[1] flex h-0 items-center">
+              <div className="h-px w-3 bg-slate-400/90 dark:bg-slate-500/90" />
+            </div>
+          ))}
+        </div>
+
+        {/* Tampa + corpo retangular */}
+        <div className="flex shrink-0 flex-col items-center">
+          <div className="mb-0.5 h-2 w-5 shrink-0 rounded-t border border-b-0 border-slate-400 bg-slate-300 dark:border-slate-500 dark:bg-slate-600" />
+          <div
+            className="relative w-[72px] overflow-hidden rounded-md border-2 border-slate-400 bg-slate-100 shadow-inner dark:border-slate-500 dark:bg-slate-800"
+            style={{ height: TANK_BODY_H }}
           >
-            {/* Onda no topo */}
-            {nivelPct > 1 ? (
+            <div className="absolute inset-0 bg-gradient-to-b from-slate-100 to-slate-200/90 dark:from-slate-800 dark:to-slate-950" />
+            <div
+              className="absolute inset-x-0 bottom-0 transition-[height] duration-[1.2s] ease-out"
+              style={{
+                height: `${nivelPct}%`,
+                background: `linear-gradient(180deg, ${cor} 0%, ${cor}dd 100%)`,
+              }}
+            />
+            {nivelPct > 2 ? (
               <div
-                className="absolute -top-2 left-0 right-0 h-4 opacity-70"
+                className="absolute inset-x-0 opacity-70"
                 style={{
-                  background: `radial-gradient(ellipse 55% 100% at 50% 100%, ${cor} 0%, transparent 70%)`,
+                  bottom: `${nivelPct}%`,
+                  height: 2,
+                  background: `linear-gradient(90deg, transparent, ${cor}, transparent)`,
                 }}
               />
             ) : null}
-            {/* Reflexo */}
-            <div className="absolute bottom-[8%] left-[10%] top-[12%] w-[18%] rounded-full bg-white/25" />
           </div>
+        </div>
 
-          {/* Marcas % */}
-          <div className="pointer-events-none absolute inset-y-[6%] right-[4%] z-20 flex flex-col justify-between py-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
-            <span>100%</span>
-            <span>75%</span>
-            <span>50%</span>
-            <span>25%</span>
-            <span>0%</span>
-          </div>
-
-          {/* Litros em destaque */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-[22%] z-30 flex flex-col items-center">
-            <span className="text-3xl font-black tabular-nums text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.55)] sm:text-4xl">
-              {fmtLitrosDashboard(saldoLitros)}
+        {/* % à direita — alinhado aos traços */}
+        <div
+          className="flex shrink-0 flex-col justify-between text-right"
+          style={{ width: 22, height: TANK_BODY_H }}
+        >
+          {ESCALA_PCTS.map((pct) => (
+            <span
+              key={pct}
+              className="block text-[7px] font-semibold leading-none text-slate-500 dark:text-slate-400"
+            >
+              {pct}%
             </span>
-            <span className="mt-0.5 text-xs font-bold uppercase tracking-[0.2em] text-white/90 drop-shadow">litros</span>
-          </div>
+          ))}
         </div>
-
-        {/* Escada */}
-        <div className="absolute bottom-[6%] left-[3%] top-[18%] w-1 rounded-full bg-slate-400/70" />
-        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-          <div
-            key={i}
-            className="absolute left-[1%] h-0.5 w-[5%] rounded bg-slate-400/70"
-            style={{ top: `${20 + i * 9}%` }}
-          />
-        ))}
       </div>
 
-      {/* Info */}
-      <div className="mt-5 w-full rounded-2xl border border-white/50 bg-white/65 px-4 py-3 text-center shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-white/[0.06]">
-        <div className="flex items-center justify-center gap-2">
-          <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white">{fmtPct(alvoPct)}%</span>
-          <span className="text-sm text-slate-500">ocupação</span>
-          {abaixoPonto ? (
-            <ArrowDown className="h-5 w-5 text-red-500" />
-          ) : (
-            <ArrowUp className="h-5 w-5 text-emerald-500" />
-          )}
-        </div>
-        <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
-          Capacidade {fmtLitrosDashboard(capacidadeLitros)} L · Ponto de pedido{" "}
-          {fmtLitrosDashboard(pontoPedidoLitros)} L
+      {/* Dados — colados ao tanque */}
+      <div className="px-2.5 pb-2.5 pt-1">
+        <p className="text-center text-base font-black tabular-nums leading-none text-slate-900 dark:text-white">
+          {fmtLitrosDashboard(saldoLitros)}
+          <span className="ml-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">L</span>
         </p>
-        {subtitulo ? <p className="mt-1 text-xs font-medium text-slate-500">{subtitulo}</p> : null}
-      </div>
 
-      {abaixoPonto ? <AlertTriangle className="mt-4 h-12 w-12 text-amber-500 drop-shadow-lg" /> : <div className="mt-4 h-12" />}
-    </div>
+        <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1">
+          <span className="text-sm font-bold tabular-nums text-slate-800 dark:text-slate-200">
+            {fmtPct(alvoPct)}%
+          </span>
+          {abaixoPonto ? (
+            <ArrowDown className="h-3.5 w-3.5 shrink-0 text-red-500" aria-hidden />
+          ) : (
+            <ArrowUp className="h-3.5 w-3.5 shrink-0 text-emerald-500" aria-hidden />
+          )}
+          {abaixoPonto ? (
+            <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+              Baixo
+            </span>
+          ) : null}
+        </div>
+
+        <p className="mt-1 truncate text-center text-[10px] leading-tight text-slate-500 dark:text-slate-400">
+          Cap. {fmtLitrosDashboard(capacidadeLitros)} L
+          {subtitulo ? ` · ${subtitulo}` : ""}
+        </p>
+      </div>
+    </article>
   );
 }
