@@ -73,6 +73,13 @@ const createEquipamentoSchema = z
           path: ["nome"],
         });
       }
+      if (data.capacidade_litros == null || data.capacidade_litros <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Informe a capacidade do tanque em litros.",
+          path: ["capacidade_litros"],
+        });
+      }
     }
     if (data.tipo === "TANQUE" && data.nome != null && data.nome.length === 0) {
       ctx.addIssue({
@@ -252,8 +259,12 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     query = query.order("ativo");
   }
 
-  if (obraScope) {
-    query = query.or(`tipo.eq.MELOSA,obra_codigo.in.(${obraScope.join(",")})`);
+  if (obraScope && tipoRaw !== "TANQUE" && tipoRaw !== "MELOSA") {
+    if (tipoRaw === "EQUIPAMENTO") {
+      query = query.in("obra_codigo", obraScope);
+    } else {
+      query = query.or(`tipo.eq.MELOSA,tipo.eq.TANQUE,obra_codigo.in.(${obraScope.join(",")})`);
+    }
   }
 
   if (tipoRaw === "TANQUE" || tipoRaw === "MELOSA" || tipoRaw === "EQUIPAMENTO") {
@@ -450,7 +461,8 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
       tipo,
       obra_codigo: obraCodigoNormalizado,
       tanque_numero: tipo === "TANQUE" ? tanqueNumeroFinal : null,
-      capacidade_litros: tipo === "MELOSA" ? (capacidade_litros ?? null) : null,
+      capacidade_litros:
+        tipo === "MELOSA" || tipo === "TANQUE" ? (capacidade_litros ?? null) : null,
       mobilidade:
         tipo === "EQUIPAMENTO" ? resolveMobilidadeEquipamento(nome, mobilidade) : null,
       empresa: tipo === "EQUIPAMENTO" ? normalizeEquipamentoEmpresa(empresa) : null,
@@ -658,7 +670,7 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
   const service = createSupabaseServiceRole();
   const { data: existing, error: findErr } = await service
     .from("equipamentos")
-    .select("ativo, nome, tipo, obra_codigo, tanque_numero, mobilidade, empresa")
+    .select("ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, mobilidade, empresa")
     .eq("ativo", ativoAtual)
     .maybeSingle();
   if (findErr) return res.status(500).json({ error: findErr.message });
@@ -773,7 +785,10 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
       mobilidade,
       empresa,
       ...(parsed.data.capacidade_litros !== undefined
-        ? { capacidade_litros: tipo === "MELOSA" ? parsed.data.capacidade_litros : null }
+        ? {
+            capacidade_litros:
+              tipo === "MELOSA" || tipo === "TANQUE" ? parsed.data.capacidade_litros : null,
+          }
         : {}),
     })
     .eq("ativo", ativoAtual)

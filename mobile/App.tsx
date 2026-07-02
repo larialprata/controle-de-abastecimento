@@ -18,6 +18,8 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   View,
+  Modal,
+  Pressable,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
@@ -48,6 +50,154 @@ import {
 } from "./src/lib/equipamentoQr";
 import { normalizeAtivoPatrimonio } from "./src/lib/equipamentoAtivo";
 import { base64ToArrayBuffer, parseBase64DataUrl } from "./src/lib/signatureImage";
+
+type TanqueCadastrado = {
+  ativo: string;
+  nome: string | null;
+  obra_codigo: number | null;
+  tanque_numero: number | null;
+};
+
+function labelTanqueComObra(t: TanqueCadastrado, obraNome?: string | null): string {
+  const tanque = t.tanque_numero != null ? `Tanque ${t.tanque_numero}` : "Tanque";
+  const obra =
+    t.obra_codigo != null
+      ? `${t.obra_codigo}${obraNome ? ` - ${obraNome}` : ""}`
+      : (obraNome ?? "—");
+  const descricao = t.nome?.trim() || "—";
+  return `${tanque} - (${obra}) - (${descricao})`;
+}
+
+function TanqueOpcaoTexto({
+  t,
+  obraNome,
+  isDarkMode,
+  compact,
+}: {
+  t: TanqueCadastrado;
+  obraNome?: string | null;
+  isDarkMode: boolean;
+  compact?: boolean;
+}) {
+  const obraLabel =
+    t.obra_codigo != null
+      ? `${t.obra_codigo}${obraNome ? ` - ${obraNome}` : ""}`
+      : (obraNome ?? "—");
+  return (
+    <View style={compact ? styles.tanqueDropdownResumo : undefined}>
+      <Text style={[styles.tanqueListaNumero, !isDarkMode ? styles.tanqueListaNumeroLight : null]}>
+        {t.tanque_numero != null ? `Tanque ${t.tanque_numero}` : "Tanque"}
+      </Text>
+      <Text style={[styles.tanqueListaObra, !isDarkMode ? styles.tanqueListaObraLight : null]}>
+        ({obraLabel})
+      </Text>
+      <Text style={[styles.tanqueListaDescricao, !isDarkMode ? styles.tanqueListaDescricaoLight : null]}>
+        {t.nome?.trim() || "—"}
+      </Text>
+    </View>
+  );
+}
+
+function SeletorTanquesDropdown({
+  tanques,
+  obrasPorCodigo,
+  tanqueAtivo,
+  onSelect,
+  isDarkMode,
+}: {
+  tanques: TanqueCadastrado[];
+  obrasPorCodigo: Map<number, string>;
+  tanqueAtivo: string | null;
+  onSelect: (ativo: string) => void;
+  isDarkMode: boolean;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const selecionado = tanques.find((t) => t.ativo === tanqueAtivo) ?? null;
+
+  return (
+    <>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => setAberto(true)}
+        style={[styles.tanqueDropdownTrigger, !isDarkMode ? styles.tanqueDropdownTriggerLight : null]}
+      >
+        <View style={styles.tanqueDropdownTriggerBody}>
+          {selecionado ? (
+            <TanqueOpcaoTexto
+              t={selecionado}
+              obraNome={obrasPorCodigo.get(selecionado.obra_codigo ?? 0)}
+              isDarkMode={isDarkMode}
+              compact
+            />
+          ) : (
+            <Text style={[styles.tanqueDropdownPlaceholder, !isDarkMode ? styles.tanqueDropdownPlaceholderLight : null]}>
+              Selecione o tanque
+            </Text>
+          )}
+        </View>
+        <Text style={[styles.tanqueDropdownChevron, !isDarkMode ? styles.tanqueDropdownChevronLight : null]}>▼</Text>
+      </TouchableOpacity>
+
+      <Modal visible={aberto} transparent animationType="fade" onRequestClose={() => setAberto(false)}>
+        <Pressable style={styles.tanqueDropdownBackdrop} onPress={() => setAberto(false)}>
+          <Pressable
+            style={[styles.tanqueDropdownModal, !isDarkMode ? styles.tanqueDropdownModalLight : null]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={[styles.tanqueDropdownModalTitle, !isDarkMode ? styles.tanqueDropdownModalTitleLight : null]}>
+              Selecionar tanque
+            </Text>
+            <ScrollView nestedScrollEnabled style={styles.tanqueListaScroll} keyboardShouldPersistTaps="handled">
+              {tanques.map((t, idx) => {
+                const selected = t.ativo === tanqueAtivo;
+                return (
+                  <View key={t.ativo}>
+                    {idx > 0 ? (
+                      <Text
+                        style={[styles.tanqueListaSeparador, !isDarkMode ? styles.tanqueListaSeparadorLight : null]}
+                        numberOfLines={1}
+                        ellipsizeMode="clip"
+                      >
+                        ────────────────────────────────────────
+                      </Text>
+                    ) : null}
+                    <TouchableOpacity
+                      activeOpacity={0.75}
+                      onPress={() => {
+                        onSelect(t.ativo);
+                        setAberto(false);
+                      }}
+                      style={[
+                        styles.tanqueListaItem,
+                        !isDarkMode ? styles.tanqueListaItemLight : null,
+                        selected ? styles.tanqueListaItemSelected : null,
+                        selected && !isDarkMode ? styles.tanqueListaItemSelectedLight : null,
+                      ]}
+                    >
+                      <TanqueOpcaoTexto
+                        t={t}
+                        obraNome={obrasPorCodigo.get(t.obra_codigo ?? 0)}
+                        isDarkMode={isDarkMode}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity
+              style={[styles.tanqueDropdownFechar, !isDarkMode ? styles.tanqueDropdownFecharLight : null]}
+              onPress={() => setAberto(false)}
+            >
+              <Text style={[styles.tanqueDropdownFecharText, !isDarkMode ? styles.tanqueDropdownFecharTextLight : null]}>
+                Fechar
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
 
 type Screen =
   | { name: "login" }
@@ -622,13 +772,20 @@ export default function App() {
   const [isMelosaUser, setIsMelosaUser] = useState(false);
 
   const [melosasCadastradas, setMelosasCadastradas] = useState<{ ativo: string; nome: string | null }[]>([]);
-  const [tanquesObra, setTanquesObra] = useState<
-    { ativo: string; nome: string | null; tanque_numero: number | null }[]
-  >([]);
+  const [tanquesCadastrados, setTanquesCadastrados] = useState<TanqueCadastrado[]>([]);
+  const [tanqueAtivo, setTanqueAtivo] = useState<string | null>(null);
   const [obrasCadastradas, setObrasCadastradas] = useState<{ codigo: number; nome: string }[]>([]);
   const obrasDisponiveis = useMemo(
     () => (obrasCadastradas.length > 0 ? obrasCadastradas : [...OBRAS]),
     [obrasCadastradas],
+  );
+  const obrasPorCodigo = useMemo(
+    () => new Map(obrasDisponiveis.map((o) => [o.codigo, o.nome])),
+    [obrasDisponiveis],
+  );
+  const tanquesDisponiveis = useMemo(
+    () => tanquesCadastrados.filter((t) => t.tanque_numero != null && t.obra_codigo != null),
+    [tanquesCadastrados],
   );
   const [melosaObraCodigo, setMelosaObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
   const [melosaPlacaTexto, setMelosaPlacaTexto] = useState("");
@@ -777,30 +934,59 @@ export default function App() {
 
   useEffect(() => {
     if (!session?.access_token) {
-      setTanquesObra([]);
+      setTanquesCadastrados([]);
+      setTanqueAtivo(null);
       setTanqueNumero(null);
       return;
     }
-    apiGet<{
-      equipamentos: { ativo: string; nome: string | null; tanque_numero: number | null }[];
-    }>(`/v1/equipamentos?tipo=TANQUE&obra_codigo=${obraCodigo}`, session.access_token)
+    apiGet<{ equipamentos: TanqueCadastrado[] }>("/v1/equipamentos?tipo=TANQUE", session.access_token)
       .then((json) => {
-        const list = (json.equipamentos ?? []).filter((t) => t.tanque_numero != null);
-        setTanquesObra(list);
-        setTanqueNumero((prev) => {
-          if (prev != null && list.some((t) => t.tanque_numero === prev)) return prev;
-          return list[0]?.tanque_numero ?? null;
-        });
+        const list = (json.equipamentos ?? [])
+          .map((t) => ({
+            ...t,
+            obra_codigo: t.obra_codigo != null ? Number(t.obra_codigo) : null,
+            tanque_numero: t.tanque_numero != null ? Number(t.tanque_numero) : null,
+          }))
+          .filter((t) => t.tanque_numero != null && t.obra_codigo != null);
+        setTanquesCadastrados(list);
       })
       .catch(() => {
-        setTanquesObra([]);
-        setTanqueNumero(null);
+        setTanquesCadastrados([]);
       });
-  }, [session?.access_token, obraCodigo]);
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    if (tanquesDisponiveis.length === 0) {
+      setTanqueAtivo(null);
+      setTanqueNumero(null);
+      return;
+    }
+    setTanqueAtivo((prev) => {
+      if (prev && tanquesDisponiveis.some((t) => t.ativo === prev)) return prev;
+      return tanquesDisponiveis[0]?.ativo ?? null;
+    });
+  }, [tanquesDisponiveis]);
+
+  useEffect(() => {
+    const tanque = tanquesCadastrados.find((t) => t.ativo === tanqueAtivo) ?? null;
+    setTanqueNumero(tanque?.tanque_numero ?? null);
+    if (tanque?.obra_codigo != null) {
+      setObraCodigo(tanque.obra_codigo);
+    }
+  }, [tanqueAtivo, tanquesCadastrados]);
+
+  useEffect(() => {
+    if (!tanqueAtivo) return;
+    const tanque = tanquesCadastrados.find((t) => t.ativo === tanqueAtivo);
+    if (tanque?.obra_codigo != null && tanque.obra_codigo !== obraCodigo) {
+      setTanqueAtivo(null);
+      setTanqueNumero(null);
+    }
+  }, [obraCodigo, tanqueAtivo, tanquesCadastrados]);
 
   const tanqueSelecionado = useMemo(
-    () => tanquesObra.find((t) => t.tanque_numero === tanqueNumero) ?? null,
-    [tanquesObra, tanqueNumero],
+    () => tanquesCadastrados.find((t) => t.ativo === tanqueAtivo) ?? null,
+    [tanquesCadastrados, tanqueAtivo],
   );
 
   const melosaRegisterAberta = screen.name === "melosa" && screen.step === "register";
@@ -889,6 +1075,7 @@ export default function App() {
     setTanqueQuantidadeAbastecidaFotoUri(null);
     setTanqueAssinaturaOperadorDataUrl(null);
     setTanqueAssinaturaMelosaDataUrl(null);
+    setTanqueAtivo(null);
     setTanqueNumero(null);
     setValorUnitarioText("");
     setNotaFotoUri(null);
@@ -1929,9 +2116,9 @@ export default function App() {
     if (!tanqueNumero) {
       Alert.alert(
         "Tanque obrigatório",
-        tanquesObra.length === 0
-          ? "Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web."
-          : "Selecione o tanque da obra.",
+        tanquesDisponiveis.length === 0
+          ? "Nenhum tanque cadastrado. Peça ao administrador cadastrar em Tanques na web."
+          : "Selecione o tanque.",
       );
       return;
     }
@@ -2045,9 +2232,9 @@ export default function App() {
       if (!tanqueNumero) {
         Alert.alert(
           "Tanque obrigatório",
-          tanquesObra.length === 0
-            ? "Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web."
-            : "Selecione o tanque da obra.",
+          tanquesDisponiveis.length === 0
+            ? "Nenhum tanque cadastrado. Peça ao administrador cadastrar em Tanques na web."
+            : "Selecione o tanque.",
         );
         return;
       }
@@ -2262,7 +2449,7 @@ export default function App() {
     const payload: MovimentacaoPayload = {
       operation_id: operationId,
       tipo: tipoAtual,
-      obra_codigo: obraCodigo,
+      obra_codigo: isTanqueObra ? (tanqueSelecionado?.obra_codigo ?? obraCodigo) : obraCodigo,
       data_hora: new Date().toISOString(),
       litros,
       tanque_texto: isRetiradaTanque
@@ -3939,29 +4126,17 @@ export default function App() {
                   </View>
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Tanque</Text>
-                  {tanquesObra.length > 0 ? (
-                    <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                      <Picker
-                        selectedValue={tanqueNumero ?? undefined}
-                        onValueChange={(v) => setTanqueNumero(Number(v))}
-                        style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                      >
-                        {tanquesObra.map((t) => (
-                          <Picker.Item
-                            key={t.ativo}
-                            label={
-                              t.nome && t.nome.trim()
-                                ? `Tanque ${t.tanque_numero} — ${t.nome}`
-                                : `Tanque ${t.tanque_numero}`
-                            }
-                            value={t.tanque_numero as number}
-                          />
-                        ))}
-                      </Picker>
-                    </View>
+                  {tanquesDisponiveis.length > 0 ? (
+                    <SeletorTanquesDropdown
+                      tanques={tanquesDisponiveis}
+                      obrasPorCodigo={obrasPorCodigo}
+                      tanqueAtivo={tanqueAtivo}
+                      onSelect={setTanqueAtivo}
+                      isDarkMode={isDarkMode}
+                    />
                   ) : (
                     <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4 }]}>
-                      Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web.
+                      Nenhum tanque cadastrado. Peça ao administrador cadastrar em Tanques na web.
                     </Text>
                   )}
 
@@ -4068,29 +4243,17 @@ export default function App() {
                   />
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Tanque</Text>
-                  {tanquesObra.length > 0 ? (
-                    <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                      <Picker
-                        selectedValue={tanqueNumero ?? undefined}
-                        onValueChange={(v) => setTanqueNumero(Number(v))}
-                        style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                      >
-                        {tanquesObra.map((t) => (
-                          <Picker.Item
-                            key={t.ativo}
-                            label={
-                              t.nome && t.nome.trim()
-                                ? `Tanque ${t.tanque_numero} — ${t.nome}`
-                                : `Tanque ${t.tanque_numero}`
-                            }
-                            value={t.tanque_numero as number}
-                          />
-                        ))}
-                      </Picker>
-                    </View>
+                  {tanquesDisponiveis.length > 0 ? (
+                    <SeletorTanquesDropdown
+                      tanques={tanquesDisponiveis}
+                      obrasPorCodigo={obrasPorCodigo}
+                      tanqueAtivo={tanqueAtivo}
+                      onSelect={setTanqueAtivo}
+                      isDarkMode={isDarkMode}
+                    />
                   ) : (
                     <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4 }]}>
-                      Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web.
+                      Nenhum tanque cadastrado. Peça ao administrador cadastrar em Tanques na web.
                     </Text>
                   )}
 
@@ -4301,15 +4464,37 @@ export default function App() {
                         <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                           Tanque
                         </Text>
-                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
-                          {tanqueSelecionado
-                            ? tanqueSelecionado.nome?.trim()
-                              ? `Tanque ${tanqueSelecionado.tanque_numero} — ${tanqueSelecionado.nome}`
-                              : `Tanque ${tanqueSelecionado.tanque_numero}`
-                            : tanqueNumero != null
-                              ? `Tanque ${tanqueNumero}`
-                              : "—"}
-                        </Text>
+                        <View style={{ flex: 1, alignItems: "flex-end" }}>
+                          {tanqueSelecionado ? (
+                            <>
+                              <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                                {tanqueSelecionado.tanque_numero != null
+                                  ? `Tanque ${tanqueSelecionado.tanque_numero}`
+                                  : "Tanque"}
+                              </Text>
+                              <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                                ({tanqueSelecionado.obra_codigo ?? "—"}
+                                {obrasPorCodigo.get(tanqueSelecionado.obra_codigo ?? 0)
+                                  ? ` - ${obrasPorCodigo.get(tanqueSelecionado.obra_codigo ?? 0)}`
+                                  : ""}
+                                )
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.melosaResumoValue,
+                                  !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark,
+                                  { textAlign: "right" },
+                                ]}
+                              >
+                                {tanqueSelecionado.nome?.trim() || "—"}
+                              </Text>
+                            </>
+                          ) : (
+                            <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                              —
+                            </Text>
+                          )}
+                        </View>
                       </View>
                       <View style={styles.melosaResumoRow}>
                         <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
@@ -5541,6 +5726,156 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
   pickerLight: {
+    color: lightTheme.textPrimary,
+  },
+  tanqueListaShell: {
+    width: "100%",
+    alignSelf: "stretch",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    overflow: "hidden",
+    maxHeight: 280,
+  },
+  tanqueListaShellLight: {
+    borderColor: lightTheme.borderSubtle,
+    backgroundColor: lightTheme.surfaceMuted,
+  },
+  tanqueDropdownTrigger: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    paddingLeft: 14,
+    paddingRight: 10,
+    paddingVertical: 10,
+    minHeight: 52,
+  },
+  tanqueDropdownTriggerLight: {
+    borderColor: lightTheme.borderSubtle,
+    backgroundColor: lightTheme.surfaceMuted,
+  },
+  tanqueDropdownTriggerBody: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  tanqueDropdownResumo: {
+    gap: 2,
+  },
+  tanqueDropdownPlaceholder: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 15,
+  },
+  tanqueDropdownPlaceholderLight: {
+    color: lightTheme.textMuted,
+  },
+  tanqueDropdownChevron: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  tanqueDropdownChevronLight: {
+    color: lightTheme.textMuted,
+  },
+  tanqueDropdownBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  tanqueDropdownModal: {
+    maxHeight: "72%",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "#1e293b",
+    overflow: "hidden",
+  },
+  tanqueDropdownModalLight: {
+    borderColor: lightTheme.borderSubtle,
+    backgroundColor: lightTheme.surface,
+  },
+  tanqueDropdownModalTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  tanqueDropdownModalTitleLight: {
+    color: lightTheme.textPrimary,
+  },
+  tanqueDropdownFechar: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.12)",
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  tanqueDropdownFecharLight: {
+    borderTopColor: lightTheme.borderSubtle,
+  },
+  tanqueDropdownFecharText: {
+    color: "#93c5fd",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  tanqueDropdownFecharTextLight: {
+    color: "#2563eb",
+  },
+  tanqueListaScroll: {
+    maxHeight: 280,
+  },
+  tanqueListaSeparador: {
+    color: "rgba(255,255,255,0.22)",
+    fontSize: 11,
+    lineHeight: 14,
+    textAlign: "center",
+    marginVertical: 2,
+    letterSpacing: -0.5,
+  },
+  tanqueListaSeparadorLight: {
+    color: lightTheme.borderSubtle,
+  },
+  tanqueListaItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 2,
+  },
+  tanqueListaItemLight: {},
+  tanqueListaItemSelected: {
+    backgroundColor: "rgba(59,130,246,0.22)",
+  },
+  tanqueListaItemSelectedLight: {
+    backgroundColor: "rgba(37,99,235,0.12)",
+  },
+  tanqueListaNumero: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  tanqueListaNumeroLight: {
+    color: lightTheme.textPrimary,
+  },
+  tanqueListaObra: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  tanqueListaObraLight: {
+    color: lightTheme.textMuted,
+  },
+  tanqueListaDescricao: {
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 14,
+    lineHeight: 20,
+    flexWrap: "wrap",
+  },
+  tanqueListaDescricaoLight: {
     color: lightTheme.textPrimary,
   },
 });

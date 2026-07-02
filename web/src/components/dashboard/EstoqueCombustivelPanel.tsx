@@ -28,6 +28,19 @@ export type EstoqueMelosaItem = {
   obra_codigo: number | null;
 };
 
+export type EstoqueTanqueObraItem = {
+  ativo: string;
+  nome: string | null;
+  obra_codigo: number;
+  obra_nome: string | null;
+  tanque_numero: number;
+  capacidade_litros: number;
+  saldo_litros: number;
+  ocupacao_pct: number;
+  ponto_pedido_litros: number;
+  abaixo_ponto_pedido: boolean;
+};
+
 export type EstoqueDashboardResposta = {
   obra_codigo: number | null;
   tanque_total: {
@@ -37,6 +50,7 @@ export type EstoqueDashboardResposta = {
     total_devolvido: number;
   };
   tanques_por_combustivel: EstoqueTanqueItem[];
+  tanques_obra: EstoqueTanqueObraItem[];
   melosas: EstoqueMelosaItem[];
 };
 
@@ -94,7 +108,8 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
     load();
   }, [load]);
 
-  const dieselS10 = data?.tanques_por_combustivel.find((t) => t.combustivel_key === "DIESEL_S10");
+  const dieselS10 = data?.tanques_por_combustivel?.find((t) => t.combustivel_key === "DIESEL_S10");
+  const tanquesObra = data?.tanques_obra ?? [];
   const melosasLista = data?.melosas ?? [];
   const filtroMelosa = ativoMelosa.trim().toUpperCase();
 
@@ -146,25 +161,48 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
       {data ? (
         <div className="space-y-6">
           <div>
-            <p className={`${labelCls} mb-3`}>Tanque da obra</p>
-            <div className="flex justify-center sm:justify-start">
-              {dieselS10 ? (
-                <TanqueGrandeVisual
-                  tipo="tanque"
-                  titulo="Diesel S10"
-                  saldoLitros={dieselS10.saldo_litros}
-                  capacidadeLitros={dieselS10.capacidade_litros}
-                  ocupacaoPct={dieselS10.ocupacao_pct}
-                  cor={dieselS10.cor}
-                  abaixoPonto={dieselS10.abaixo_ponto_pedido}
-                />
-              ) : (
-                <p className="py-6 text-sm text-slate-500 dark:text-slate-400">
-                  Sem dados de Diesel S10 no filtro atual.
-                </p>
-              )}
-            </div>
+            <p className={`${labelCls} mb-3`}>
+              Tanques da obra {tanquesObra.length > 0 ? `(${tanquesObra.length})` : ""}
+            </p>
+            {tanquesObra.length > 0 ? (
+              <div className="grid grid-cols-2 justify-items-center gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {tanquesObra.map((t) => {
+                  const titulo =
+                    t.nome?.trim() ||
+                    `Tanque ${t.tanque_numero} - (${t.obra_codigo}${t.obra_nome ? ` - ${t.obra_nome}` : ""})`;
+                  const subtitulo = t.nome?.trim()
+                    ? `${t.obra_codigo}${t.obra_nome ? ` — ${t.obra_nome}` : ""}`
+                    : undefined;
+                  return (
+                    <TanqueGrandeVisual
+                      key={t.ativo}
+                      tipo="tanque"
+                      titulo={titulo}
+                      saldoLitros={t.saldo_litros}
+                      capacidadeLitros={t.capacidade_litros}
+                      ocupacaoPct={t.ocupacao_pct}
+                      cor="#EAB308"
+                      abaixoPonto={t.abaixo_ponto_pedido}
+                      subtitulo={subtitulo}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="py-4 text-center text-sm text-slate-500 dark:text-slate-400">
+                Nenhum tanque cadastrado no filtro atual. Cadastre em Tanques na web.
+              </p>
+            )}
           </div>
+
+          {dieselS10 ? (
+            <div className="rounded-xl border border-white/30 bg-white/20 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/5">
+              <p className="font-semibold text-slate-800 dark:text-slate-200">Resumo Diesel S10 (todas entradas)</p>
+              <p className="mt-1 tabular-nums text-slate-600 dark:text-slate-400">
+                Saldo agregado: {new Intl.NumberFormat("pt-BR").format(dieselS10.saldo_litros)} L
+              </p>
+            </div>
+          ) : null}
 
           <div>
             <p className={`${labelCls} mb-3`}>
