@@ -181,11 +181,6 @@ export default function MelosaFluxoPanel({ token, ativosDisponiveis, ativoInicia
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
               Análise de fluxo — tanque → melosa → equipamentos
             </h2>
-            <p className="mt-0.5 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
-              A melosa enche no tanque da obra e só esvazia abastecendo equipamentos — não devolve ao tanque.
-              O saldo estimado na melosa diminui a cada abastecimento. Alerta quando um novo enchimento
-              ultrapassa a capacidade (ex.: 3.500 L + 2.000 L = 5.500 L, máx. 5.000 L → 500 L sem explicação).
-            </p>
           </div>
         </div>
       </div>

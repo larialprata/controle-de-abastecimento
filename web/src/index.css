@@ -20,3 +20,44 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/* Selects legíveis em modo claro e escuro */
+select {
+  color-scheme: light;
+}
+
+.dark select {
+  color-scheme: dark;
+}
+
+select.glass-select {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+.dark select.glass-select {
+  background-color: #1e293b;
+  color: #f1f5f9;
+}
+
+select option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+.dark select option {
+  background-color: #1e293b;
+  color: #f8fafc;
+}
+
+select option:checked,
+select option:hover {
+  background-color: #e2e8f0;
+  color: #0f172a;
+}
+
+.dark select option:checked,
+.dark select option:hover {
+  background-color: #475569;
+  color: #f8fafc;
+}

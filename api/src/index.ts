@@ -10,6 +10,7 @@ import ticketsRouter from "./routes/tickets";
 import melosaCiclosRouter from "./routes/melosaCiclos";
 import melosaMedidorRouter from "./routes/melosaMedidor";
 import mobileErrorsRouter from "./routes/mobileErrors";
+import estoqueDashboardRouter from "./routes/estoqueDashboard";
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.use("/v1", equipamentosRouter);
 app.use("/v1", ticketsRouter);
 app.use("/v1", melosaCiclosRouter);
 app.use("/v1", melosaMedidorRouter);
+app.use("/v1", estoqueDashboardRouter);
 app.use("/v1", mobileErrorsRouter);
 
 // Tratador global de erros (caso algum erro escape de try/catch).

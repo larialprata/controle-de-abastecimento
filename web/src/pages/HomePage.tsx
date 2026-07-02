@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import DashboardCard from "../components/dashboard/DashboardCard";
 import MelosaFluxoPanel from "../components/dashboard/MelosaFluxoPanel";
+import EstoqueCombustivelPanel from "../components/dashboard/EstoqueCombustivelPanel";
 import { useAuth } from "../state/AuthContext";
 import { apiDelete, apiGet, apiPost } from "../lib/api";
 import { fmtLitrosDashboard } from "../lib/combustivelControle";
@@ -324,35 +325,6 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-      {/* Cabeçalho */}
-      <header className={`${glassPanel} px-5 py-5`}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">
-              Controle de melosas
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-slate-400">
-              Acompanhe o combustível do tanque até os equipamentos: a melosa enche no tanque, abastece
-              equipamentos até esvaziar o que tem (sem devolver ao tanque) e o sistema alerta quando um novo
-              enchimento ultrapassa a capacidade (ex.: 3.500 L + 2.000 L = 5.500 L, máx. 5.000 L → 500 L
-              sem explicação).
-            </p>
-          </div>
-          <details className="max-w-xs text-sm text-slate-600 dark:text-slate-400">
-            <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-200">
-              Como funciona
-            </summary>
-            <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
-              <li>Tanque recebe combustível (entrada) e perde nas retiradas para melosas.</li>
-              <li>Melosa enche na retirada e só esvazia nos abastecimentos de equipamentos.</li>
-              <li>Saldo na melosa = enchimentos − abastecimentos (estimado pelos registros).</li>
-              <li>Alerta se saldo + novo enchimento &gt; capacidade cadastrada da melosa.</li>
-              <li>Medidor acumulado: inicial deve igualar o final do abastecimento anterior.</li>
-            </ul>
-          </details>
-        </div>
-      </header>
-
       {/* Resumo */}
       <section>
         <p className={`${labelCls} mb-3`}>Resumo</p>
@@ -378,6 +350,8 @@ export default function HomePage() {
           />
         </div>
       </section>
+
+      <EstoqueCombustivelPanel token={token} ativoMelosa={filtroAtivo} />
 
       <MelosaFluxoPanel token={token} ativosDisponiveis={ativosUnicos} ativoInicial={filtroAtivo} />
 

@@ -6,3 +6,7 @@ export const glassSidebar =
 
 export const glassField =
   "rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-sm text-slate-900 shadow-sm backdrop-blur-md outline-none focus:border-accent/50 focus:ring-2 focus:ring-accent/20 dark:border-white/10 dark:bg-black/25 dark:text-slate-100";
+
+/** Select com fundo sólido — legível no modo claro e escuro (lista nativa do navegador). */
+export const glassSelect =
+  "glass-select rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm outline-none focus:border-accent/50 focus:ring-2 focus:ring-accent/20 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100";

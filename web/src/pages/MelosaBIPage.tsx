@@ -21,7 +21,7 @@ import {
   passesDashboardFilters,
   toDateInputValue,
 } from "../lib/aggregateCombustivelDashboard";
-import { glassField, glassPanel } from "../lib/glass";
+import { glassField, glassPanel, glassSelect } from "../lib/glass";
 import {
   EMPRESA_LABEL,
   OBRA_EMPRESAS,
@@ -693,7 +693,7 @@ export default function MelosaBIPage() {
         <div className="flex min-w-[160px] flex-col gap-1">
           <span className={labelCls}>Empresa</span>
           <select
-            className={glassField}
+            className={glassSelect}
             value={empresaFiltro}
             onChange={(e) => setEmpresaFiltro(e.target.value as "" | ObraEmpresa)}
           >
@@ -707,7 +707,7 @@ export default function MelosaBIPage() {
         </div>
         <div className="flex min-w-[180px] flex-col gap-1">
           <span className={labelCls}>Contrato</span>
-          <select className={glassField} value={contratoFiltro} onChange={(e) => setContratoFiltro(e.target.value)}>
+          <select className={glassSelect} value={contratoFiltro} onChange={(e) => setContratoFiltro(e.target.value)}>
             <option value="">Todos</option>
             {obrasContratoOpcoes.map((o) => (
               <option key={o.codigo} value={String(o.codigo)}>

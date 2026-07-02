@@ -4,7 +4,7 @@ import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import { useAuth } from "../state/AuthContext";
-import { glassField, glassPanel } from "../lib/glass";
+import { glassField, glassPanel, glassSelect } from "../lib/glass";
 
 type LinhaSupabase = Record<string, unknown> & {
   id?: string;
@@ -640,7 +640,7 @@ export default function DadosPage({ fixedTipo, title }: DadosPageProps) {
         {!fixedTipo ? (
           <div className="flex flex-col gap-1">
             <span className={labelCls}>Tipo</span>
-            <select className={glassField} value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}>
+            <select className={glassSelect} value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}>
               {TIPOS.map((t) => (
                 <option key={t || "all"} value={t}>
                   {t === "" ? "Todos" : t}
