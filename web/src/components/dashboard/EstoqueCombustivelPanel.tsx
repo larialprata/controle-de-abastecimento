@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { apiGet } from "../../lib/api";
-import { glassField, glassPanel, glassSelect } from "../../lib/glass";
+import { glassPanel, glassSelect } from "../../lib/glass";
 import TanqueGrandeVisual from "./TanqueGrandeVisual";
 
 export type EstoqueTanqueItem = {

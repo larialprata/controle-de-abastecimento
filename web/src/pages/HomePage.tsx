@@ -14,6 +14,7 @@ import {
 import DashboardCard from "../components/dashboard/DashboardCard";
 import MelosaFluxoPanel from "../components/dashboard/MelosaFluxoPanel";
 import EstoqueCombustivelPanel from "../components/dashboard/EstoqueCombustivelPanel";
+import DashboardResumoSection from "../components/dashboard/DashboardResumoSection";
 import { useAuth } from "../state/AuthContext";
 import { apiDelete, apiGet, apiPost } from "../lib/api";
 import { fmtLitrosDashboard } from "../lib/combustivelControle";
@@ -98,33 +99,6 @@ function SectionHeader({
           <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">{description}</p>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function StatCard({
-  title,
-  value,
-  hint,
-  tone = "neutral",
-}: {
-  title: string;
-  value: string;
-  hint?: string;
-  tone?: "neutral" | "warn" | "ok";
-}) {
-  const toneCls =
-    tone === "warn"
-      ? "border-red-300/70 bg-red-50/85 dark:border-red-900/50 dark:bg-red-950/35"
-      : tone === "ok"
-        ? "border-emerald-300/60 bg-emerald-50/80 dark:border-emerald-800/50 dark:bg-emerald-950/30"
-        : "border-white/40 bg-white/40 dark:border-white/10 dark:bg-white/[0.04]";
-
-  return (
-    <div className={`rounded-xl border px-4 py-3 ${toneCls}`}>
-      <p className={`${labelCls} mb-1`}>{title}</p>
-      <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white">{value}</p>
-      {hint ? <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{hint}</p> : null}
     </div>
   );
 }
@@ -325,32 +299,6 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-      {/* Resumo */}
-      <section>
-        <p className={`${labelCls} mb-3`}>Resumo</p>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <StatCard title="Ciclos" value={String(ciclos.length)} hint="Enchimentos listados" />
-          <StatCard
-            title="Capacidade"
-            value={String(suspeitos.length)}
-            hint="Acima do limite"
-            tone={suspeitos.length > 0 ? "warn" : "ok"}
-          />
-          <StatCard
-            title="Medidor"
-            value={String(desviosMedidor.length)}
-            hint="Continuidade quebrada"
-            tone={desviosMedidor.length > 0 ? "warn" : "ok"}
-          />
-          <StatCard title="Melosas" value={String(ativosUnicos.length)} hint="Ativos no período" />
-          <StatCard
-            title="Último ID"
-            value={ciclos[0] ? String(ciclos[0].ciclo_numero) : "—"}
-            hint={ciclos[0] ? ciclos[0].ativo_melosa_texto : undefined}
-          />
-        </div>
-      </section>
-
       <EstoqueCombustivelPanel token={token} ativoMelosa={filtroAtivo} />
 
       <MelosaFluxoPanel token={token} ativosDisponiveis={ativosUnicos} ativoInicial={filtroAtivo} />
@@ -695,6 +643,15 @@ export default function HomePage() {
           ) : null}
         </div>
       </section>
+
+      <DashboardResumoSection
+        ciclosCount={ciclos.length}
+        suspeitosCount={suspeitos.length}
+        desviosCount={desviosMedidor.length}
+        melosasCount={ativosUnicos.length}
+        ultimoCicloNumero={ciclos[0] ? String(ciclos[0].ciclo_numero) : "—"}
+        ultimaMelosa={ciclos[0]?.ativo_melosa_texto}
+      />
 
       {deleteTarget ? (
         <div

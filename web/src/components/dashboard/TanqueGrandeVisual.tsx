@@ -32,8 +32,6 @@ export default function TanqueGrandeVisual({
   subtitulo,
 }: Props) {
   const alvoPct = Math.min(100, Math.max(0, ocupacaoPct));
-  const pontoPct =
-    capacidadeLitros > 0 ? Math.min(100, Math.max(0, (pontoPedidoLitros / capacidadeLitros) * 100)) : 0;
 
   const [nivelPct, setNivelPct] = useState(0);
   useEffect(() => {
@@ -78,24 +76,6 @@ export default function TanqueGrandeVisual({
             <div className="absolute bottom-[8%] left-[10%] top-[12%] w-[18%] rounded-full bg-white/25" />
           </div>
 
-          {/* Linha ponto de pedido */}
-          {pontoPct > 0 ? (
-            <div
-              className="pointer-events-none absolute inset-x-0 z-20 border-t-2 border-dashed"
-              style={{
-                bottom: `${pontoPct}%`,
-                borderColor: abaixoPonto ? "#ef4444" : "#22c55e",
-              }}
-            >
-              <span
-                className="absolute -left-1 -top-3 rounded bg-white/90 px-1.5 text-[10px] font-bold dark:bg-slate-900/90"
-                style={{ color: abaixoPonto ? "#dc2626" : "#16a34a" }}
-              >
-                Pedido
-              </span>
-            </div>
-          ) : null}
-
           {/* Marcas % */}
           <div className="pointer-events-none absolute inset-y-[6%] right-[4%] z-20 flex flex-col justify-between py-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
             <span>100%</span>
@@ -105,7 +85,8 @@ export default function TanqueGrandeVisual({
             <span>0%</span>
           </div>
 
-          {/* Litros em destaque */}          <div className="pointer-events-none absolute inset-x-0 bottom-[22%] z-30 flex flex-col items-center">
+          {/* Litros em destaque */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-[22%] z-30 flex flex-col items-center">
             <span className="text-3xl font-black tabular-nums text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.55)] sm:text-4xl">
               {fmtLitrosDashboard(saldoLitros)}
             </span>
