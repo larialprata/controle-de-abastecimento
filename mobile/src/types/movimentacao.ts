@@ -10,7 +10,7 @@ export type MovimentacaoPayload = {
   tanque_texto?: string | null;
   placa_texto?: string | null;
   fornecedor_texto?: string | null;
-  tanque_numero?: 1 | 2 | null;
+  tanque_numero?: number | null;
 
   combustivel_tipo?: string | null;
   nota_numero?: string | null;

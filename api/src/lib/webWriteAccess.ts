@@ -35,5 +35,7 @@ export class WebWriteAccessError extends Error {
 }
 
 export function writePageForEquipamentoTipo(tipo: string): WebWritePageKey {
-  return tipo === "MELOSA" ? "melosas" : "equipamentos";
+  if (tipo === "MELOSA") return "melosas";
+  if (tipo === "TANQUE") return "tanques";
+  return "equipamentos";
 }

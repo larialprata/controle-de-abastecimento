@@ -3,6 +3,7 @@ export const WEB_PAGE_KEYS = [
   "contratos",
   "melosas",
   "equipamentos",
+  "tanques",
   "bi_tanque",
   "bi_melosa",
 ] as const;
@@ -10,7 +11,7 @@ export const WEB_PAGE_KEYS = [
 export type WebPageKey = (typeof WEB_PAGE_KEYS)[number];
 
 /** Páginas de cadastro em que utilizador web pode criar/editar/excluir. */
-export const WEB_WRITE_PAGE_KEYS = ["contratos", "melosas", "equipamentos"] as const;
+export const WEB_WRITE_PAGE_KEYS = ["contratos", "melosas", "equipamentos", "tanques"] as const;
 
 export type WebWritePageKey = (typeof WEB_WRITE_PAGE_KEYS)[number];
 

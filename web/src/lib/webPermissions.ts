@@ -3,6 +3,7 @@ export const WEB_PAGES = [
   { key: "contratos", label: "Contratos", path: "/contratos" },
   { key: "melosas", label: "Melosas", path: "/melosas" },
   { key: "equipamentos", label: "Equipamentos", path: "/equipamentos" },
+  { key: "tanques", label: "Tanques", path: "/tanques" },
   { key: "bi_tanque", label: "BI Tanque", path: "/bi" },
   { key: "bi_melosa", label: "BI Melosa", path: "/bi/melosa" },
 ] as const;
@@ -14,6 +15,7 @@ export const WEB_WRITE_PAGES = [
   { key: "contratos", label: "Contratos" },
   { key: "melosas", label: "Melosas" },
   { key: "equipamentos", label: "Equipamentos" },
+  { key: "tanques", label: "Tanques" },
 ] as const;
 
 export type WebWritePageKey = (typeof WEB_WRITE_PAGES)[number]["key"];
@@ -81,6 +83,7 @@ export function pathnameToPageKey(pathname: string): WebPageKey {
   if (pathname.startsWith("/contratos")) return "contratos";
   if (pathname.startsWith("/melosas")) return "melosas";
   if (pathname.startsWith("/equipamentos")) return "equipamentos";
+  if (pathname.startsWith("/tanques")) return "tanques";
   if (pathname.startsWith("/bi/melosa")) return "bi_melosa";
   if (pathname.startsWith("/bi")) return "bi_tanque";
   return "dashboard";
@@ -91,6 +94,7 @@ export function navItemToPageKey(to: string): WebPageKey {
   if (to === "/contratos") return "contratos";
   if (to === "/melosas") return "melosas";
   if (to === "/equipamentos") return "equipamentos";
+  if (to === "/tanques") return "tanques";
   if (to === "/bi/melosa") return "bi_melosa";
   if (to === "/bi") return "bi_tanque";
   return "dashboard";

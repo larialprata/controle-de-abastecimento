@@ -111,7 +111,7 @@ function litrosRetiradaTanqueFromMedidores(
   return Number.isFinite(diff) && diff > 0 ? diff : null;
 }
 
-const tanqueNumeroSchema = z.union([z.literal(1), z.literal(2)]);
+const tanqueNumeroSchema = z.number().int().positive();
 
 const movimentoSchema = z.object({
   operation_id: z.string().uuid(),
@@ -685,8 +685,25 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       if (payload.tipo !== "RETIRADA_TANQUE" && !fornecedorNorm) {
         return res.status(400).json({ error: "fornecedor_texto é obrigatório" });
       }
-      if (tanqueNum !== 1 && tanqueNum !== 2) {
-        return res.status(400).json({ error: "tanque_numero é obrigatório e deve ser 1 ou 2" });
+      if (payload.tipo === "RETIRADA_MELOSA") {
+        if (tanqueNum !== 1 && tanqueNum !== 2) {
+          return res.status(400).json({ error: "tanque_numero é obrigatório e deve ser 1 ou 2" });
+        }
+      } else if (!tanqueNum || !Number.isInteger(tanqueNum) || tanqueNum <= 0) {
+        return res.status(400).json({ error: "tanque_numero é obrigatório" });
+      } else {
+        const { data: tanqueCadastrado } = await service
+          .from("equipamentos")
+          .select("ativo")
+          .eq("tipo", "TANQUE")
+          .eq("obra_codigo", payload.obra_codigo)
+          .eq("tanque_numero", tanqueNum)
+          .maybeSingle();
+        if (!tanqueCadastrado) {
+          return res.status(400).json({
+            error: `Tanque ${tanqueNum} não cadastrado para a obra ${payload.obra_codigo}.`,
+          });
+        }
       }
     }
 

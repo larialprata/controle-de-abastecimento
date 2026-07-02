@@ -47,8 +47,11 @@ create table if not exists public.equipamentos (
   nome text,
   tipo public.equipamento_tipo not null default 'MELOSA',
   obra_codigo int references public.obras (codigo),
+  tanque_numero smallint,
   constraint equipamentos_obra_tanque_chk check (
-    (tipo = 'MELOSA' and obra_codigo is null) or tipo = 'TANQUE'
+    (tipo = 'MELOSA' and obra_codigo is null)
+    or (tipo = 'TANQUE' and obra_codigo is not null and tanque_numero is not null and tanque_numero > 0)
+    or (tipo = 'EQUIPAMENTO')
   )
 );
 
@@ -163,7 +166,7 @@ alter table public.movimentacoes add column if not exists tanque_numero smallint
 alter table public.movimentacoes drop constraint if exists movimentacoes_tanque_numero_check;
 alter table public.movimentacoes
   add constraint movimentacoes_tanque_numero_check
-  check (tanque_numero is null or tanque_numero in (1, 2));
+  check (tanque_numero is null or tanque_numero > 0);
 
 create index if not exists movimentacoes_usuario_id_idx on public.movimentacoes(usuario_id);
 create index if not exists movimentacoes_obra_codigo_data_idx on public.movimentacoes(obra_codigo, data_hora desc);
@@ -183,12 +186,12 @@ create table if not exists public.profiles (
   access_platform text not null default 'app' check (access_platform in ('app', 'web', 'both')),
   web_permissions text[] not null default array['dashboard']::text[]
     check (
-      web_permissions <@ array['dashboard', 'contratos', 'melosas', 'equipamentos', 'bi_tanque', 'bi_melosa']::text[]
+      web_permissions <@ array['dashboard', 'contratos', 'melosas', 'equipamentos', 'tanques', 'bi_tanque', 'bi_melosa']::text[]
       and 'dashboard' = any (web_permissions)
     ),
   web_write_permissions text[] not null default array[]::text[]
     check (
-      web_write_permissions <@ array['contratos', 'melosas', 'equipamentos']::text[]
+      web_write_permissions <@ array['contratos', 'melosas', 'equipamentos', 'tanques']::text[]
     ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -383,7 +386,7 @@ alter table public.melosa_movimentacoes add column if not exists tanque_numero s
 alter table public.melosa_movimentacoes drop constraint if exists melosa_movimentacoes_tanque_numero_check;
 alter table public.melosa_movimentacoes
   add constraint melosa_movimentacoes_tanque_numero_check
-  check (tanque_numero is null or tanque_numero in (1, 2));
+  check (tanque_numero is null or tanque_numero > 0);
 
 alter table public.melosa_movimentacoes add column if not exists melosa_km_registro numeric(12,3);
 alter table public.melosa_movimentacoes add column if not exists melosa_km_retirada numeric(12,3);

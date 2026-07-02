@@ -622,6 +622,9 @@ export default function App() {
   const [isMelosaUser, setIsMelosaUser] = useState(false);
 
   const [melosasCadastradas, setMelosasCadastradas] = useState<{ ativo: string; nome: string | null }[]>([]);
+  const [tanquesObra, setTanquesObra] = useState<
+    { ativo: string; nome: string | null; tanque_numero: number | null }[]
+  >([]);
   const [obrasCadastradas, setObrasCadastradas] = useState<{ codigo: number; nome: string }[]>([]);
   const obrasDisponiveis = useMemo(
     () => (obrasCadastradas.length > 0 ? obrasCadastradas : [...OBRAS]),
@@ -680,7 +683,7 @@ export default function App() {
   const [tanqueQuantidadeAbastecidaFotoUri, setTanqueQuantidadeAbastecidaFotoUri] = useState<string | null>(null);
   const [tanqueAssinaturaOperadorDataUrl, setTanqueAssinaturaOperadorDataUrl] = useState<string | null>(null);
   const [tanqueAssinaturaMelosaDataUrl, setTanqueAssinaturaMelosaDataUrl] = useState<string | null>(null);
-  const [tanqueNumero, setTanqueNumero] = useState<1 | 2>(1);
+  const [tanqueNumero, setTanqueNumero] = useState<number | null>(null);
   const [valorUnitarioText, setValorUnitarioText] = useState<string>("");
   const [notaFotoUri, setNotaFotoUri] = useState<string | null>(null);
   const [localLatitude, setLocalLatitude] = useState<number | null>(null);
@@ -772,6 +775,34 @@ export default function App() {
       .catch(() => setMelosasCadastradas([]));
   }, [session?.access_token]);
 
+  useEffect(() => {
+    if (!session?.access_token) {
+      setTanquesObra([]);
+      setTanqueNumero(null);
+      return;
+    }
+    apiGet<{
+      equipamentos: { ativo: string; nome: string | null; tanque_numero: number | null }[];
+    }>(`/v1/equipamentos?tipo=TANQUE&obra_codigo=${obraCodigo}`, session.access_token)
+      .then((json) => {
+        const list = (json.equipamentos ?? []).filter((t) => t.tanque_numero != null);
+        setTanquesObra(list);
+        setTanqueNumero((prev) => {
+          if (prev != null && list.some((t) => t.tanque_numero === prev)) return prev;
+          return list[0]?.tanque_numero ?? null;
+        });
+      })
+      .catch(() => {
+        setTanquesObra([]);
+        setTanqueNumero(null);
+      });
+  }, [session?.access_token, obraCodigo]);
+
+  const tanqueSelecionado = useMemo(
+    () => tanquesObra.find((t) => t.tanque_numero === tanqueNumero) ?? null,
+    [tanquesObra, tanqueNumero],
+  );
+
   const melosaRegisterAberta = screen.name === "melosa" && screen.step === "register";
 
   useEffect(() => {
@@ -858,7 +889,7 @@ export default function App() {
     setTanqueQuantidadeAbastecidaFotoUri(null);
     setTanqueAssinaturaOperadorDataUrl(null);
     setTanqueAssinaturaMelosaDataUrl(null);
-    setTanqueNumero(1);
+    setTanqueNumero(null);
     setValorUnitarioText("");
     setNotaFotoUri(null);
     setLocalLatitude(null);
@@ -1895,6 +1926,15 @@ export default function App() {
   }
 
   function continueRetiradaTanqueDados() {
+    if (!tanqueNumero) {
+      Alert.alert(
+        "Tanque obrigatório",
+        tanquesObra.length === 0
+          ? "Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web."
+          : "Selecione o tanque da obra.",
+      );
+      return;
+    }
     if (!placaTexto.trim()) {
       Alert.alert("Patrimônio obrigatório", "Selecione o patrimônio (melosa).");
       return;
@@ -2002,6 +2042,15 @@ export default function App() {
     }
 
     if (isEntradaTanqueObra) {
+      if (!tanqueNumero) {
+        Alert.alert(
+          "Tanque obrigatório",
+          tanquesObra.length === 0
+            ? "Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web."
+            : "Selecione o tanque da obra.",
+        );
+        return;
+      }
       if (!obraCombustivelTipo.trim()) {
         Alert.alert("Combustível obrigatório", "Selecione o tipo de combustível.");
         return;
@@ -2223,7 +2272,7 @@ export default function App() {
           : null,
       placa_texto: placaTexto.trim(),
       fornecedor_texto: isRetiradaTanque ? null : fornecedorTexto.trim(),
-      tanque_numero: tanqueNumero,
+      tanque_numero: isTanqueObra ? tanqueNumero : tipoAtual === "RETIRADA_MELOSA" ? melosaTanqueNumero : null,
 
       combustivel_tipo: isTanqueObra ? obraCombustivelTipo.trim() : null,
       nota_numero: isEntradaTanqueObra ? notaNumero.trim() : null,
@@ -3890,16 +3939,31 @@ export default function App() {
                   </View>
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Tanque</Text>
-                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                    <Picker
-                      selectedValue={tanqueNumero}
-                      onValueChange={(v) => setTanqueNumero(Number(v) === 2 ? 2 : 1)}
-                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                    >
-                      <Picker.Item label="Tanque 1" value={1} />
-                      <Picker.Item label="Tanque 2" value={2} />
-                    </Picker>
-                  </View>
+                  {tanquesObra.length > 0 ? (
+                    <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                      <Picker
+                        selectedValue={tanqueNumero ?? undefined}
+                        onValueChange={(v) => setTanqueNumero(Number(v))}
+                        style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                      >
+                        {tanquesObra.map((t) => (
+                          <Picker.Item
+                            key={t.ativo}
+                            label={
+                              t.nome && t.nome.trim()
+                                ? `Tanque ${t.tanque_numero} — ${t.nome}`
+                                : `Tanque ${t.tanque_numero}`
+                            }
+                            value={t.tanque_numero as number}
+                          />
+                        ))}
+                      </Picker>
+                    </View>
+                  ) : (
+                    <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4 }]}>
+                      Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web.
+                    </Text>
+                  )}
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Insumo</Text>
                   <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
@@ -4004,16 +4068,31 @@ export default function App() {
                   />
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Tanque</Text>
-                  <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
-                    <Picker
-                      selectedValue={tanqueNumero}
-                      onValueChange={(v) => setTanqueNumero(Number(v) === 2 ? 2 : 1)}
-                      style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
-                    >
-                      <Picker.Item label="Tanque 1" value={1} />
-                      <Picker.Item label="Tanque 2" value={2} />
-                    </Picker>
-                  </View>
+                  {tanquesObra.length > 0 ? (
+                    <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                      <Picker
+                        selectedValue={tanqueNumero ?? undefined}
+                        onValueChange={(v) => setTanqueNumero(Number(v))}
+                        style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                      >
+                        {tanquesObra.map((t) => (
+                          <Picker.Item
+                            key={t.ativo}
+                            label={
+                              t.nome && t.nome.trim()
+                                ? `Tanque ${t.tanque_numero} — ${t.nome}`
+                                : `Tanque ${t.tanque_numero}`
+                            }
+                            value={t.tanque_numero as number}
+                          />
+                        ))}
+                      </Picker>
+                    </View>
+                  ) : (
+                    <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4 }]}>
+                      Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web.
+                    </Text>
+                  )}
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Insumo</Text>
                   <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
@@ -4223,7 +4302,13 @@ export default function App() {
                           Tanque
                         </Text>
                         <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
-                          Tanque {tanqueNumero}
+                          {tanqueSelecionado
+                            ? tanqueSelecionado.nome?.trim()
+                              ? `Tanque ${tanqueSelecionado.tanque_numero} — ${tanqueSelecionado.nome}`
+                              : `Tanque ${tanqueSelecionado.tanque_numero}`
+                            : tanqueNumero != null
+                              ? `Tanque ${tanqueNumero}`
+                              : "—"}
                         </Text>
                       </View>
                       <View style={styles.melosaResumoRow}>

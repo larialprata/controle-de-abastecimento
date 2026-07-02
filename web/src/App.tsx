@@ -11,6 +11,7 @@ import UsersPage from "./pages/UsersPage";
 import ContratosPage from "./pages/ContratosPage";
 import MelosasPage from "./pages/MelosasPage";
 import EquipamentosPage from "./pages/EquipamentosPage";
+import TanquesPage from "./pages/TanquesPage";
 import type { WebPageKey } from "./lib/webPermissions";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -121,6 +122,14 @@ function AppRoutes() {
           element={
             <RequirePage page="equipamentos">
               <EquipamentosPage />
+            </RequirePage>
+          }
+        />
+        <Route
+          path="tanques"
+          element={
+            <RequirePage page="tanques">
+              <TanquesPage />
             </RequirePage>
           }
         />
