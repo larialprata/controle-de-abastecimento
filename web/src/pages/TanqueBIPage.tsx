@@ -40,6 +40,12 @@ type LinhaTanque = Record<string, unknown> & {
   data_hora?: string;
   litros?: number;
   combustivel_tipo?: string | null;
+  nota_numero?: string | number | null;
+  nota_storage_path?: string | null;
+  valor_unitario?: string | number | null;
+  fornecedor_texto?: string | null;
+  placa_texto?: string | null;
+  placa_caminhao?: string | null;
 };
 
 function fmt(v: unknown): string {
@@ -145,6 +151,15 @@ function fmtInsumoTicket(m: LinhaTanque): string {
 
 function calcQuantidadeLitros(m: LinhaTanque): number | null {
   return resolveLitrosMovimentoTanque(m);
+}
+
+function fmtValorUnitario(m: LinhaTanque): string {
+  if (!isEntradaTanque(m)) return "—";
+  const v = m.valor_unitario;
+  if (v === null || v === undefined || v === "") return "—";
+  const n = typeof v === "number" ? v : Number(String(v).replace(",", "."));
+  if (!Number.isFinite(n)) return fmt(v);
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 }
 
 function fmtQuantidade(m: LinhaTanque): string {
@@ -267,7 +282,7 @@ function TanqueBiScrollTable({
 }: TanqueTableProps) {
   const isRetiradaTable = variant === "retirada";
   const isEntradaTable = variant === "entrada";
-  const colCount = isRetiradaTable ? 15 : 12;
+  const colCount = isRetiradaTable ? 15 : 14;
   const visibleKeys = useMemo(() => rows.map((m) => rowKey(m)), [rows, rowKey]);
   const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selectedKeys.includes(k));
 
@@ -306,7 +321,9 @@ function TanqueBiScrollTable({
               {isEntradaTable ? (
                 <>
                   <th className={thCls}>Nº nota</th>
+                  <th className={thCls}>Foto nota</th>
                   <th className={thCls}>Valor unit. (L)</th>
+                  <th className={thCls}>Fornecedor</th>
                 </>
               ) : null}
               <th className={thCls}>Patrimônio</th>
@@ -327,10 +344,6 @@ function TanqueBiScrollTable({
           <tbody>
             {rows.map((m, idx) => {
               const insumo = fmtCombustivelCurto(m.combustivel_tipo);
-              const valorUnit =
-                isEntradaTanque(m) && m.valor_unitario != null && m.valor_unitario !== ""
-                  ? fmt(m.valor_unitario)
-                  : "—";
               const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
               const k = rowKey(m);
               const checked = selectedKeys.includes(k);
@@ -369,16 +382,19 @@ function TanqueBiScrollTable({
                     <div className="flex items-center gap-2">
                       <span>{fmtQuantidade(m)}</span>
                       {isRetiradaTable
-                        ? photo(storagePath(m, "tanque_quantidade_abastecida_storage_path"), "Qtd. (L)")
+                        ? photo(storagePath(m, "tanque_quantidade_abastecida_storage_path"), "Medidor")
                         : null}
-                      {isEntradaTable ? photo(storagePath(m, "nota_storage_path"), "Qtd. (L)") : null}
                     </div>
                   </td>
                   <td className={`${tdCls} max-w-[120px]`}>{insumo}</td>
                   {isEntradaTable ? (
                     <>
                       <td className={`${tdCls} max-w-[100px]`}>{fmt(m.nota_numero)}</td>
-                      <td className={`${tdCls} max-w-[120px]`}>{valorUnit}</td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "nota_storage_path"), "Nota")}
+                      </td>
+                      <td className={`${tdCls} max-w-[120px] whitespace-nowrap`}>{fmtValorUnitario(m)}</td>
+                      <td className={`${tdCls} max-w-[160px]`}>{fmtFornecedorRow(m)}</td>
                     </>
                   ) : null}
                   <td className={`${tdCls} max-w-[120px]`}>{fmtPatrimonioRow(m)}</td>

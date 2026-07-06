@@ -842,6 +842,29 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       if (noteExists !== true) {
         return res.status(400).json({ error: "Arquivo da nota não encontrado no Storage" });
       }
+
+      if (!payload.tanque_assinatura_operador_storage_path?.trim()) {
+        return res.status(400).json({ error: "tanque_assinatura_operador_storage_path é obrigatório" });
+      }
+      if (!payload.tanque_assinatura_melosa_storage_path?.trim()) {
+        return res.status(400).json({ error: "tanque_assinatura_melosa_storage_path é obrigatório" });
+      }
+      const tanqueAssinaturaOperadorOk = await storageObjectExists(
+        service,
+        envValidated.MELOSA_ASSINATURAS_BUCKET,
+        payload.tanque_assinatura_operador_storage_path,
+      );
+      if (!tanqueAssinaturaOperadorOk) {
+        return res.status(400).json({ error: "Assinatura do operador do tanque não encontrada no Storage" });
+      }
+      const tanqueAssinaturaEntregaOk = await storageObjectExists(
+        service,
+        envValidated.MELOSA_ASSINATURAS_BUCKET,
+        payload.tanque_assinatura_melosa_storage_path,
+      );
+      if (!tanqueAssinaturaEntregaOk) {
+        return res.status(400).json({ error: "Assinatura do responsável pela entrega não encontrada no Storage" });
+      }
     }
 
     if (payload.tipo === "RETIRADA_TANQUE") {
@@ -1118,11 +1141,11 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       lacre_melosa_storage_path: payload.lacre_melosa_storage_path ?? null,
       tanque_quantidade_abastecida: payload.tanque_quantidade_abastecida ?? null,
       tanque_quantidade_abastecida_storage_path: payload.tanque_quantidade_abastecida_storage_path ?? null,
-      tanque_operador_nome: payload.tipo === "RETIRADA_TANQUE" ? payload.tanque_operador_nome ?? null : null,
+      tanque_operador_nome: isTanqueTipo ? payload.tanque_operador_nome ?? null : null,
       tanque_assinatura_operador_storage_path:
-        payload.tipo === "RETIRADA_TANQUE" ? payload.tanque_assinatura_operador_storage_path ?? null : null,
+        isTanqueTipo ? payload.tanque_assinatura_operador_storage_path ?? null : null,
       tanque_assinatura_melosa_storage_path:
-        payload.tipo === "RETIRADA_TANQUE" ? payload.tanque_assinatura_melosa_storage_path ?? null : null,
+        isTanqueTipo ? payload.tanque_assinatura_melosa_storage_path ?? null : null,
       retirada_horimetro_foto_storage_path: payload.retirada_horimetro_foto_storage_path ?? null,
 
       placa_texto: needsVeiculoMeta ? placaNorm : null,
