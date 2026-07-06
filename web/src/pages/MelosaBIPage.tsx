@@ -48,6 +48,7 @@ type LinhaMelosa = Record<string, unknown> & {
   placa_texto?: string | null;
   ativo_melosa_texto?: string | null;
   ativo_equipamento_texto?: string | null;
+  fornecedor_texto?: string | null;
   ativo_equipamento_nome?: string | null;
   ativo_equipamento_empresa?: string | null;
   tanque_numero?: number | string | null;
