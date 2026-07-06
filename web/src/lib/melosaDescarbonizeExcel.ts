@@ -13,7 +13,7 @@ export {
 } from "./descarbonizeExcel";
 
 import type { DescarbonizeExcelRowInput } from "./descarbonizeExcel";
-import { downloadDescarbonizeExcel } from "./descarbonizeExcel";
+import { downloadDescarbonizeExcelByMonth } from "./descarbonizeExcel";
 
 export type MelosaExcelRowInput = {
   obraCodigo?: number;
@@ -57,5 +57,5 @@ export async function downloadMelosaDescarbonizeExcel(
   rows: MelosaExcelRowInput[],
   filenamePrefix = "melosa-descarbonize",
 ): Promise<void> {
-  await downloadDescarbonizeExcel(rows.map(toDescarbonizeRow), filenamePrefix);
+  await downloadDescarbonizeExcelByMonth(rows.map(toDescarbonizeRow), filenamePrefix);
 }

@@ -40,6 +40,7 @@ const createEquipamentoSchema = z
     obra_codigo: z.number().int().positive().nullable().optional(),
     tanque_numero: z.number().int().positive().optional(),
     capacidade_litros: z.number().positive().nullable().optional(),
+    saldo_inicial_litros: z.number().nonnegative().nullable().optional(),
     mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
     empresa: equipamentoEmpresaInputSchema,
   })
@@ -88,6 +89,13 @@ const createEquipamentoSchema = z
         path: ["capacidade_litros"],
       });
     }
+    if (data.tipo !== "TANQUE" && data.saldo_inicial_litros != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Saldo inicial só se aplica a tanques.",
+        path: ["saldo_inicial_litros"],
+      });
+    }
     if (data.tipo !== "EQUIPAMENTO" && data.mobilidade != null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -104,7 +112,8 @@ const createEquipamentoSchema = z
     }
   });
 
-const EQUIPAMENTO_SELECT = "ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, mobilidade, empresa";
+const EQUIPAMENTO_SELECT =
+  "ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, saldo_inicial_litros, saldo_inicial_em, mobilidade, empresa";
 
 function formatEquipamentoDbError(message: string): string {
   if (message.includes("invalid input value for enum equipamento_empresa")) {
@@ -374,7 +383,7 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
   }
 
-  const { tipo, obra_codigo, capacidade_litros, mobilidade, empresa, tanque_numero } = parsed.data;
+  const { tipo, obra_codigo, capacidade_litros, saldo_inicial_litros, mobilidade, empresa, tanque_numero } = parsed.data;
   const service = createSupabaseServiceRole();
 
   try {
@@ -407,6 +416,12 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
 
   if (tipo === "MELOSA" && capacidade_litros != null && capacidade_litros <= 0) {
     return res.status(400).json({ error: "Capacidade da melosa deve ser maior que zero." });
+  }
+  if (tipo === "TANQUE" && capacidade_litros != null && capacidade_litros <= 0) {
+    return res.status(400).json({ error: "Capacidade do tanque deve ser maior que zero." });
+  }
+  if (tipo === "TANQUE" && saldo_inicial_litros != null && saldo_inicial_litros < 0) {
+    return res.status(400).json({ error: "Quantidade no tanque não pode ser negativa." });
   }
 
   if (obraCodigoNormalizado != null && req.userId) {
@@ -450,7 +465,11 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
       tipo,
       obra_codigo: obraCodigoNormalizado,
       tanque_numero: tipo === "TANQUE" ? tanqueNumeroFinal : null,
-      capacidade_litros: tipo === "MELOSA" ? (capacidade_litros ?? null) : null,
+      capacidade_litros:
+        tipo === "MELOSA" || tipo === "TANQUE" ? (capacidade_litros ?? null) : null,
+      saldo_inicial_litros: tipo === "TANQUE" ? (saldo_inicial_litros ?? null) : null,
+      saldo_inicial_em:
+        tipo === "TANQUE" && saldo_inicial_litros != null ? new Date().toISOString() : null,
       mobilidade:
         tipo === "EQUIPAMENTO" ? resolveMobilidadeEquipamento(nome, mobilidade) : null,
       empresa: tipo === "EQUIPAMENTO" ? normalizeEquipamentoEmpresa(empresa) : null,
@@ -614,6 +633,7 @@ const updateEquipamentoSchema = z
     obra_codigo: z.number().int().positive().nullable().optional(),
     tanque_numero: z.number().int().positive().optional(),
     capacidade_litros: z.number().positive().nullable().optional(),
+    saldo_inicial_litros: z.number().nonnegative().nullable().optional(),
     mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
     empresa: equipamentoEmpresaInputSchema,
   })
@@ -637,6 +657,13 @@ const updateEquipamentoSchema = z
         code: z.ZodIssueCode.custom,
         message: "Empresa só se aplica a equipamentos.",
         path: ["empresa"],
+      });
+    }
+    if (data.tipo != null && data.tipo !== "TANQUE" && data.saldo_inicial_litros != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Saldo inicial só se aplica a tanques.",
+        path: ["saldo_inicial_litros"],
       });
     }
   });
@@ -681,6 +708,13 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
 
   if (tipo === "TANQUE" && !nomeRaw) {
     return res.status(400).json({ error: "Informe uma descrição para o tanque." });
+  }
+  if (
+    tipo === "TANQUE" &&
+    parsed.data.saldo_inicial_litros != null &&
+    parsed.data.saldo_inicial_litros < 0
+  ) {
+    return res.status(400).json({ error: "Quantidade no tanque não pode ser negativa." });
   }
 
   let obra_codigo: number | null;
@@ -773,7 +807,19 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
       mobilidade,
       empresa,
       ...(parsed.data.capacidade_litros !== undefined
-        ? { capacidade_litros: tipo === "MELOSA" ? parsed.data.capacidade_litros : null }
+        ? {
+            capacidade_litros:
+              tipo === "MELOSA" || tipo === "TANQUE" ? parsed.data.capacidade_litros : null,
+          }
+        : {}),
+      ...(parsed.data.saldo_inicial_litros !== undefined
+        ? {
+            saldo_inicial_litros: tipo === "TANQUE" ? parsed.data.saldo_inicial_litros : null,
+            saldo_inicial_em:
+              tipo === "TANQUE" && parsed.data.saldo_inicial_litros != null
+                ? new Date().toISOString()
+                : null,
+          }
         : {}),
     })
     .eq("ativo", ativoAtual)

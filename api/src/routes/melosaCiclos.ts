@@ -2,10 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { buildMelosaFluxo } from "../lib/melosaFluxo";
-import { excluirMelosaCiclo, excluirMelosaCiclosEmLote, enriquecerCiclosParaListagem, avaliarEnchimentoMelosa, type MelosaCicloRow } from "../lib/melosaCiclo";
+import { excluirMelosaCiclo, excluirMelosaCiclosEmLote, enriquecerCiclosParaListagem, avaliarEnchimentoMelosa, atualizarCicloAlerta, type MelosaCicloRow } from "../lib/melosaCiclo";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { requireAdmin } from "../middleware/requireAdmin";
-import { getUserObraCodigos } from "../lib/userObras";
+import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
 
 const router = Router();
 
@@ -84,6 +84,7 @@ router.get("/melosa-ciclos", requireAuth, async (req: AuthedRequest, res) => {
       );
       return {
         ...c,
+        alerta_oculto: Boolean((row as MelosaCicloRow & { alerta_oculto?: boolean }).alerta_oculto),
         litros_sobra_atual: litrosSobraAtual,
         litros_retirada: toNum(c.litros_retirada),
         litros_sobra_anterior: litrosSobraAnterior,
@@ -106,6 +107,51 @@ router.get("/melosa-ciclos", requireAuth, async (req: AuthedRequest, res) => {
     });
   } catch (err: unknown) {
     return res.status(500).json({ error: err instanceof Error ? err.message : "Erro ao listar ciclos." });
+  }
+});
+
+const cicloAlertaPatchSchema = z
+  .object({
+    alerta_oculto: z.boolean().optional(),
+    capacidade_litros: z.number().positive().nullable().optional(),
+  })
+  .refine((obj) => obj.alerta_oculto !== undefined || obj.capacidade_litros !== undefined, {
+    message: "Informe alerta_oculto ou capacidade_litros",
+  });
+
+router.patch("/melosa-ciclos/:id", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+    const id = String(req.params.id ?? "").trim();
+    const parsedId = z.string().uuid().safeParse(id);
+    if (!parsedId.success) return res.status(400).json({ error: "ID do ciclo inválido" });
+
+    const parsedBody = cicloAlertaPatchSchema.safeParse(req.body ?? {});
+    if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const { data: ciclo, error: findErr } = await service
+      .from("melosa_ciclos")
+      .select("id, obra_codigo")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (findErr) return res.status(400).json({ error: findErr.message });
+    if (!ciclo) return res.status(404).json({ error: "Ciclo não encontrado" });
+
+    if (ciclo.obra_codigo != null) {
+      try {
+        await assertUserObraAccess(service, req.userId, ciclo.obra_codigo);
+      } catch (e) {
+        if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
+    }
+
+    const atualizado = await atualizarCicloAlerta(service, id, parsedBody.data);
+    return res.json({ ok: true, ciclo: atualizado });
+  } catch (err: unknown) {
+    return res.status(500).json({ error: err instanceof Error ? err.message : "Erro ao atualizar alerta." });
   }
 });
 

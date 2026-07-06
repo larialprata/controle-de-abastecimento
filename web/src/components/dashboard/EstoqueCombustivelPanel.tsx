@@ -17,6 +17,20 @@ export type EstoqueTanqueItem = {
   total_retirada_alocada: number;
 };
 
+export type EstoqueTanqueRegistradoItem = {
+  ativo: string;
+  nome: string | null;
+  obra_codigo: number;
+  obra_nome: string | null;
+  tanque_numero: number;
+  label: string;
+  saldo_litros: number;
+  capacidade_litros: number;
+  ocupacao_pct: number;
+  ponto_pedido_litros: number;
+  abaixo_ponto_pedido: boolean;
+};
+
 export type EstoqueMelosaItem = {
   ativo: string;
   saldo_litros: number;
@@ -37,6 +51,7 @@ export type EstoqueDashboardResposta = {
     total_devolvido: number;
   };
   tanques_por_combustivel: EstoqueTanqueItem[];
+  tanques_registrados: EstoqueTanqueRegistradoItem[];
   melosas: EstoqueMelosaItem[];
 };
 
@@ -95,6 +110,7 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
   }, [load]);
 
   const dieselS10 = data?.tanques_por_combustivel.find((t) => t.combustivel_key === "DIESEL_S10");
+  const tanquesRegistrados = data?.tanques_registrados ?? [];
   const melosasLista = data?.melosas ?? [];
   const filtroMelosa = ativoMelosa.trim().toUpperCase();
 
@@ -146,9 +162,29 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
       {data ? (
         <div className="space-y-6">
           <div>
-            <p className={`${labelCls} mb-3`}>Tanque da obra</p>
-            <div className="flex justify-center sm:justify-start">
-              {dieselS10 ? (
+            <p className={`${labelCls} mb-3`}>
+              Tanques da obra {tanquesRegistrados.length > 0 ? `(${tanquesRegistrados.length})` : ""}
+            </p>
+            {tanquesRegistrados.length > 0 ? (
+              <div className="grid grid-cols-2 justify-items-center gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {tanquesRegistrados.map((t) => (
+                  <TanqueGrandeVisual
+                    key={`${t.obra_codigo}-${t.tanque_numero}-${t.ativo}`}
+                    tipo="tanque"
+                    titulo={t.label}
+                    saldoLitros={t.saldo_litros}
+                    capacidadeLitros={t.capacidade_litros}
+                    ocupacaoPct={t.ocupacao_pct}
+                    cor={dieselS10?.cor ?? "#EAB308"}
+                    abaixoPonto={t.abaixo_ponto_pedido}
+                    subtitulo={
+                      t.obra_nome ? `${t.obra_codigo} · ${t.obra_nome}` : `Obra ${t.obra_codigo}`
+                    }
+                  />
+                ))}
+              </div>
+            ) : dieselS10 ? (
+              <div className="flex justify-center sm:justify-start">
                 <TanqueGrandeVisual
                   tipo="tanque"
                   titulo="Diesel S10"
@@ -158,12 +194,12 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
                   cor={dieselS10.cor}
                   abaixoPonto={dieselS10.abaixo_ponto_pedido}
                 />
-              ) : (
-                <p className="py-6 text-sm text-slate-500 dark:text-slate-400">
-                  Sem dados de Diesel S10 no filtro atual.
-                </p>
-              )}
-            </div>
+              </div>
+            ) : (
+              <p className="py-6 text-sm text-slate-500 dark:text-slate-400">
+                Nenhum tanque cadastrado no filtro atual.
+              </p>
+            )}
           </div>
 
           <div>

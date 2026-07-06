@@ -27,6 +27,7 @@ type AuthContextValue = {
   canWriteOnPage: (pageKey: WebWritePageKey) => boolean;
   authError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
+  signInWithOutlook: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   clearAuthError: () => void;
@@ -88,9 +89,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applyProfileRow],
   );
 
+  const rejectSession = useCallback(async (message: string) => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setToken(null);
+    setIsAdmin(false);
+    setAccessPlatform(null);
+    setWebPermissions(DEFAULT_WEB_PERMISSIONS);
+    setWebWritePermissions([]);
+    setObraCodigos(null);
+    setAuthError(message);
+  }, []);
+
   const bootstrapSession = useCallback(
     async (sess: Session) => {
-      const ensure = await apiPost("/v1/auth/ensure-role", sess.access_token, { role: "user" });
+      const ensure = await apiPost("/v1/auth/ensure-role", sess.access_token, { role: "user", platform: "web" });
       await refreshProfileInternal(sess);
       applyObraCodigos((ensure as { obra_codigos?: number[] | null }).obra_codigos);
       setAuthError(null);
@@ -132,10 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             await bootstrapSession(nextSession);
           } catch (err) {
-            if (!cancelled) {
-              setAuthError(authErrorMessage(err));
-              await refreshProfileInternal(nextSession);
-            }
+            if (!cancelled) await rejectSession(authErrorMessage(err));
           }
         }
       } finally {
@@ -160,8 +170,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       void bootstrapSession(nextSession).catch((err) => {
-        setAuthError(authErrorMessage(err));
-        void refreshProfileInternal(nextSession);
+        void rejectSession(authErrorMessage(err));
       });
     });
 
@@ -169,7 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, [bootstrapSession, refreshProfileInternal]);
+  }, [bootstrapSession, rejectSession]);
 
   async function refreshProfile() {
     if (!session) return;
@@ -185,8 +194,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.session?.access_token ?? null);
 
     if (data.session) {
-      await bootstrapSession(data.session);
+      try {
+        await bootstrapSession(data.session);
+      } catch (ensureErr) {
+        await rejectSession(authErrorMessage(ensureErr));
+        throw ensureErr;
+      }
     }
+  }
+
+  async function signInWithOutlook() {
+    setAuthError(null);
+    const redirectTo = `${window.location.origin}/login`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "azure",
+      options: {
+        redirectTo,
+        scopes: "email openid profile",
+        queryParams: {
+          prompt: "select_account",
+        },
+      },
+    });
+    if (error) throw new Error(error.message);
   }
 
   async function signOut() {
@@ -221,6 +251,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canWriteOnPage,
       authError,
       signIn,
+      signInWithOutlook,
       signOut,
       refreshProfile,
       clearAuthError,

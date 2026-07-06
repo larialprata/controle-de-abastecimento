@@ -4,19 +4,24 @@ import {
   CheckCircle2,
   Download,
   Droplets,
+  EyeOff,
   Fuel,
   HardHat,
   LayoutDashboard,
+  Pencil,
   RefreshCw,
   Trash2,
   TrendingDown,
 } from "lucide-react";
+import DashboardAlertaCicloModal, {
+  type DashboardAlertaCiclo,
+} from "../components/dashboard/DashboardAlertaCicloModal";
 import DashboardCard from "../components/dashboard/DashboardCard";
 import MelosaFluxoPanel from "../components/dashboard/MelosaFluxoPanel";
 import EstoqueCombustivelPanel from "../components/dashboard/EstoqueCombustivelPanel";
 import DashboardResumoSection from "../components/dashboard/DashboardResumoSection";
 import { useAuth } from "../state/AuthContext";
-import { apiDelete, apiGet, apiPost } from "../lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { fmtLitrosDashboard } from "../lib/combustivelControle";
 import {
   downloadDashboardCiclosExcel,
@@ -39,6 +44,7 @@ type MelosaCiclo = {
   capacidade_litros: number | null;
   volume_excedente: number;
   status: "ok" | "suspeito";
+  alerta_oculto?: boolean;
 };
 
 type MedidorDesvio = {
@@ -133,6 +139,8 @@ export default function HomePage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedCicloIds, setSelectedCicloIds] = useState<string[]>([]);
   const [selectedDesvioIds, setSelectedDesvioIds] = useState<string[]>([]);
+  const [alertaEditCiclo, setAlertaEditCiclo] = useState<DashboardAlertaCiclo | null>(null);
+  const [ocultandoAlertaId, setOcultandoAlertaId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -209,6 +217,31 @@ export default function HomePage() {
   }, [load]);
 
   const suspeitos = useMemo(() => ciclos.filter((c) => c.status === "suspeito"), [ciclos]);
+  const suspeitosVisiveis = useMemo(
+    () => suspeitos.filter((c) => !c.alerta_oculto),
+    [suspeitos],
+  );
+
+  const ocultarAlertaCiclo = useCallback(
+    async (ciclo: MelosaCiclo) => {
+      if (!token) return;
+      const ok = window.confirm(
+        `Ocultar o alerta do ciclo ${ciclo.ciclo_numero} (${ciclo.ativo_melosa_texto})? O ciclo permanece na listagem, mas deixa de aparecer em Alertas.`,
+      );
+      if (!ok) return;
+      setOcultandoAlertaId(ciclo.id);
+      try {
+        await apiPatch(`/v1/melosa-ciclos/${ciclo.id}`, token, { alerta_oculto: true });
+        await load();
+      } catch (err: unknown) {
+        window.alert(err instanceof Error ? err.message : "Erro ao ocultar alerta");
+      } finally {
+        setOcultandoAlertaId(null);
+      }
+    },
+    [load, token],
+  );
+
   const ativosUnicos = useMemo(
     () => Array.from(new Set(ciclos.map((c) => c.ativo_melosa_texto))).sort(),
     [ciclos],
@@ -295,7 +328,7 @@ export default function HomePage() {
     });
   }, [desviosMedidor]);
 
-  const temAlertas = suspeitos.length > 0 || desviosMedidor.length > 0;
+  const temAlertas = suspeitosVisiveis.length > 0 || desviosMedidor.length > 0;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
@@ -322,13 +355,13 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="space-y-6">
-            {suspeitos.length > 0 ? (
+            {suspeitosVisiveis.length > 0 ? (
               <div>
                 <h3 className="mb-2 text-sm font-bold text-red-800 dark:text-red-300">
-                  Capacidade ultrapassada ({suspeitos.length})
+                  Capacidade ultrapassada ({suspeitosVisiveis.length})
                 </h3>
                 <div className="overflow-auto rounded-xl border border-red-200/60 dark:border-red-900/40">
-                  <table className="w-full min-w-[640px] border-collapse text-sm">
+                  <table className="w-full min-w-[720px] border-collapse text-sm">
                     <thead>
                       <tr className="bg-red-50/80 text-left text-xs font-bold uppercase text-red-900 dark:bg-red-950/40 dark:text-red-200">
                         <th className="px-3 py-2">ID</th>
@@ -336,10 +369,11 @@ export default function HomePage() {
                         <th className="px-3 py-2">Excedente (L)</th>
                         <th className="px-3 py-2">Sobra ant. + Enchimento</th>
                         <th className="px-3 py-2">Capacidade (L)</th>
+                        <th className="px-3 py-2">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {suspeitos.map((c) => (
+                      {suspeitosVisiveis.map((c) => (
                         <tr key={c.id} className="border-t border-red-100 dark:border-red-900/30">
                           <td className="px-3 py-2 font-bold">{c.ciclo_numero}</td>
                           <td className="px-3 py-2">{c.ativo_melosa_texto}</td>
@@ -352,6 +386,47 @@ export default function HomePage() {
                           </td>
                           <td className="px-3 py-2">
                             {c.capacidade_litros != null ? fmtLitrosDashboard(c.capacidade_litros) : "—"}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setAlertaEditCiclo({
+                                    id: c.id,
+                                    ciclo_numero: c.ciclo_numero,
+                                    ativo_melosa_texto: c.ativo_melosa_texto,
+                                    capacidade_litros: c.capacidade_litros,
+                                    volume_excedente: c.volume_excedente,
+                                    litros_sobra_anterior: c.litros_sobra_anterior,
+                                    litros_retirada: c.litros_retirada,
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white/80 px-2 py-1 text-xs font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+                              >
+                                <Pencil className="h-3 w-3" />
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void ocultarAlertaCiclo(c)}
+                                disabled={ocultandoAlertaId === c.id}
+                                className="inline-flex items-center gap-1 rounded-lg border border-amber-400/80 bg-amber-50/80 px-2 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200"
+                              >
+                                <EyeOff className="h-3 w-3" />
+                                {ocultandoAlertaId === c.id ? "Ocultando…" : "Retirar"}
+                              </button>
+                              {isAdmin ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteTarget({ kind: "ciclos", ids: [c.id] })}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-red-700"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  Excluir
+                                </button>
+                              ) : null}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -646,12 +721,22 @@ export default function HomePage() {
 
       <DashboardResumoSection
         ciclosCount={ciclos.length}
-        suspeitosCount={suspeitos.length}
+        suspeitosCount={suspeitosVisiveis.length}
         desviosCount={desviosMedidor.length}
         melosasCount={ativosUnicos.length}
         ultimoCicloNumero={ciclos[0] ? String(ciclos[0].ciclo_numero) : "—"}
         ultimaMelosa={ciclos[0]?.ativo_melosa_texto}
       />
+
+      {alertaEditCiclo ? (
+        <DashboardAlertaCicloModal
+          open={Boolean(alertaEditCiclo)}
+          ciclo={alertaEditCiclo}
+          token={token ?? ""}
+          onClose={() => setAlertaEditCiclo(null)}
+          onSaved={() => void load()}
+        />
+      ) : null}
 
       {deleteTarget ? (
         <div

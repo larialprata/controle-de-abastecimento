@@ -18,6 +18,7 @@ export type MelosaCicloRow = {
   capacidade_litros: number | null;
   volume_excedente: number;
   status: MelosaCicloStatus;
+  alerta_oculto?: boolean;
 };
 
 function normalizeAtivo(v: string): string {
@@ -561,4 +562,70 @@ export async function excluirMelosaCiclosEmLote(
   }
 
   return resultados;
+}
+
+export async function atualizarCicloAlerta(
+  service: SupabaseClient,
+  cicloId: string,
+  opts: { alerta_oculto?: boolean; capacidade_litros?: number | null },
+): Promise<MelosaCicloRow & { alerta_oculto: boolean }> {
+  const { data: ciclo, error } = await service
+    .from("melosa_ciclos")
+    .select("*")
+    .eq("id", cicloId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!ciclo) throw new Error("Ciclo não encontrado");
+
+  const row = ciclo as MelosaCicloRow & { alerta_oculto?: boolean };
+  const patch: Record<string, unknown> = {};
+
+  if (opts.alerta_oculto !== undefined) {
+    patch.alerta_oculto = opts.alerta_oculto;
+  }
+
+  if (opts.capacidade_litros !== undefined) {
+    const cap = opts.capacidade_litros;
+    const ativo = normalizeAtivo(row.ativo_melosa_texto);
+
+    if (cap != null && cap > 0) {
+      const { error: eqErr } = await service
+        .from("equipamentos")
+        .update({ capacidade_litros: cap })
+        .eq("tipo", "MELOSA")
+        .ilike("ativo", ativo);
+      if (eqErr) throw new Error(eqErr.message);
+    }
+
+    const metricas = await enriquecerCiclosParaListagem(service, [row]);
+    const m = metricas.get(row.id);
+    const litrosSobraAnterior = m?.litros_sobra_anterior ?? toNum(row.litros_sobra_anterior);
+    const litrosRetirada = toNum(row.litros_retirada);
+    const capacidadeEff = cap != null && cap > 0 ? cap : null;
+    const { volumeExcedente, status } = avaliarEnchimentoMelosa(
+      litrosSobraAnterior,
+      litrosRetirada,
+      capacidadeEff,
+    );
+
+    patch.capacidade_litros = capacidadeEff;
+    patch.volume_excedente = volumeExcedente;
+    patch.status = status;
+    patch.alerta_oculto = false;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new Error("Nenhuma alteração informada.");
+  }
+
+  const { data: updated, error: updErr } = await service
+    .from("melosa_ciclos")
+    .update(patch)
+    .eq("id", cicloId)
+    .select("*")
+    .single();
+
+  if (updErr) throw new Error(updErr.message);
+  return updated as MelosaCicloRow & { alerta_oculto: boolean };
 }

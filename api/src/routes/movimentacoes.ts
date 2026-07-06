@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
@@ -180,8 +181,33 @@ const movimentoSchema = z.object({
   obs: z.string().optional().nullable(),
 });
 
+const melosaWebCreateSchema = z
+  .object({
+    obra_codigo: z.number().int(),
+    data_hora: z.string().datetime(),
+    ativo_melosa_texto: z.string().min(1),
+    ativo_equipamento_texto: z.string().min(1),
+    tanque_numero: z.union([z.literal(1), z.literal(2)]).optional().nullable(),
+    quantidade_litros: z.number().positive(),
+    melosa_combustivel_tipo_retirada: z.string().optional().nullable(),
+    melosa_combustivel_tipo_registro: z.string().optional().nullable(),
+    melosa_categoria: z.enum(["ESTACIONARIA", "MOVEL"]).optional().nullable(),
+    melosa_horimetro_equipamento_abastecido_numero: z.string().optional().nullable(),
+    melosa_motorista_equipamento_abastecido: z.string().optional().nullable(),
+    melosa_operador_nome: z.string().optional().nullable(),
+    melosa_lubrificado: z.boolean().optional().nullable(),
+    obs: z.string().optional().nullable(),
+  })
+  .refine(
+    (data) =>
+      Boolean(data.melosa_combustivel_tipo_retirada?.trim() || data.melosa_combustivel_tipo_registro?.trim()),
+    { message: "Informe o insumo/combustível" },
+  );
+
 const melosaUpdateSchema = z
   .object({
+    obra_codigo: z.number().int().optional(),
+    data_hora: z.string().datetime().optional(),
     litros: z.number().min(0).optional(),
     melosa_km_registro: z.number().min(0).optional().nullable(),
     melosa_km_retirada: z.number().min(0).optional().nullable(),
@@ -189,8 +215,15 @@ const melosaUpdateSchema = z
     melosa_combustivel_tipo_retirada: z.string().optional().nullable(),
     melosa_quantidade_abastecida: z.string().optional().nullable(),
     melosa_quantidade_abastecida_storage_path: z.string().optional().nullable(),
+    melosa_horimetro_equipamento_abastecido_numero: z.string().optional().nullable(),
+    melosa_motorista_equipamento_abastecido: z.string().optional().nullable(),
+    melosa_categoria: z.enum(["ESTACIONARIA", "MOVEL"]).optional().nullable(),
+    melosa_operador_nome: z.string().optional().nullable(),
+    melosa_lubrificado: z.boolean().optional().nullable(),
     ativo_melosa_texto: z.string().optional().nullable(),
     ativo_equipamento_texto: z.string().optional().nullable(),
+    ativo_equipamento_empresa: z.string().optional().nullable(),
+    ativo_equipamento_nome: z.string().optional().nullable(),
     placa_texto: z.string().optional().nullable(),
     fornecedor_texto: z.string().optional().nullable(),
     tanque_numero: tanqueNumeroSchema.optional().nullable(),
@@ -499,6 +532,72 @@ router.get("/tanque/photo-url", requireAuth, async (req: AuthedRequest, res) => 
   }
 });
 
+router.post("/melosa/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const parsedBody = melosaWebCreateSchema.safeParse(req.body);
+    if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const payload = parsedBody.data;
+
+    try {
+      await assertUserObraAccess(service, req.userId, payload.obra_codigo);
+    } catch (e) {
+      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+
+    const ativoMelosa = payload.ativo_melosa_texto.trim().toUpperCase();
+    const ativoEquipamento = payload.ativo_equipamento_texto.trim().toUpperCase();
+    const quantidadeStr = String(payload.quantidade_litros);
+    const operationId = randomUUID();
+
+    const insertRowMelosa = {
+      operation_id: operationId,
+      usuario_id: req.userId,
+      tipo: "RETIRADA_MELOSA",
+      obra_codigo: payload.obra_codigo,
+      data_hora: new Date(payload.data_hora).toISOString(),
+      litros: payload.quantidade_litros,
+      melosa_quantidade_abastecida: quantidadeStr,
+      melosa_combustivel_tipo_retirada: payload.melosa_combustivel_tipo_retirada?.trim() || null,
+      melosa_combustivel_tipo_registro: payload.melosa_combustivel_tipo_registro?.trim() || null,
+      melosa_categoria: payload.melosa_categoria ?? null,
+      melosa_horimetro_equipamento_abastecido_numero:
+        payload.melosa_horimetro_equipamento_abastecido_numero?.trim() || null,
+      melosa_motorista_equipamento_abastecido: payload.melosa_motorista_equipamento_abastecido?.trim() || null,
+      melosa_operador_nome: payload.melosa_operador_nome?.trim() || null,
+      melosa_lubrificado: payload.melosa_lubrificado === true ? true : null,
+      ativo_melosa_texto: ativoMelosa,
+      ativo_equipamento_texto: ativoEquipamento,
+      tanque_numero: payload.tanque_numero ?? null,
+      obs: payload.obs?.trim() || null,
+    };
+
+    const { error } = await service
+      .from("melosa_movimentacoes")
+      .insert(sanitizeMelosaRowForDb(insertRowMelosa as Record<string, unknown>));
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    try {
+      await vincularAbastecimentoAoCicloAberto(service, {
+        operationId,
+        ativoMelosa,
+        litrosAbastecidos: payload.quantidade_litros,
+      });
+    } catch (cicloErr: unknown) {
+      console.warn("[melosa_ciclo] vincular abastecimento (web):", cicloErr);
+    }
+
+    return res.json({ ok: true, operation_id: operationId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
 router.patch("/melosa/movimentacoes/:operationId", requireAuth, async (req: AuthedRequest, res) => {
   try {
     if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
@@ -524,9 +623,28 @@ router.patch("/melosa/movimentacoes/:operationId", requireAuth, async (req: Auth
       return res.status(403).json({ error: "Sem permissão para editar esta movimentação" });
     }
 
+    const updatePayload: Record<string, unknown> = { ...parsedBody.data };
+    if (updatePayload.obra_codigo != null) {
+      try {
+        await assertUserObraAccess(service, req.userId, updatePayload.obra_codigo as number);
+      } catch (e) {
+        if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
+    }
+    if (updatePayload.data_hora != null) {
+      updatePayload.data_hora = new Date(String(updatePayload.data_hora)).toISOString();
+    }
+    if (updatePayload.melosa_quantidade_abastecida !== undefined) {
+      const litrosCalc = parseMedidorMelosaNumero(String(updatePayload.melosa_quantidade_abastecida ?? ""));
+      if (litrosCalc != null && litrosCalc > 0) updatePayload.litros = litrosCalc;
+    } else if (updatePayload.litros !== undefined && typeof updatePayload.litros === "number") {
+      updatePayload.melosa_quantidade_abastecida = String(updatePayload.litros);
+    }
+
     const { error: updateError } = await service
       .from("melosa_movimentacoes")
-      .update(sanitizeMelosaRowForDb(parsedBody.data as Record<string, unknown>))
+      .update(sanitizeMelosaRowForDb(updatePayload))
       .eq("operation_id", operationId);
 
     if (updateError) return res.status(400).json({ error: updateError.message });

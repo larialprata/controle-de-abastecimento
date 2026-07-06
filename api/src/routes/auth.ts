@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { envValidated } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
+import { canAccessClientPlatform, parseClientPlatform } from "../lib/accessPlatform";
 import { DEFAULT_WEB_PERMISSIONS, normalizeWebWritePermissions } from "../lib/webPermissions";
 import { getUserObraCodigos } from "../lib/userObras";
 
@@ -324,6 +325,7 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
     const ensureSchema = z
       .object({
         role: z.literal("user").optional(),
+        platform: z.enum(["app", "web"]).optional(),
       })
       .and(motoristaProfileBodySchema);
     const parsed = ensureSchema.safeParse(req.body ?? {});
@@ -331,17 +333,30 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
       return res.status(400).json({ error: "Corpo inválido", details: parsed.error.flatten() });
     }
 
-    const { role: _roleIgnored, ...profileBody } = parsed.data;
+    const { role: _roleIgnored, platform: bodyPlatform, ...profileBody } = parsed.data;
+    const clientPlatform =
+      parseClientPlatform(bodyPlatform) ?? parseClientPlatform(req.header("X-Client-Platform"));
 
     const service = createSupabaseServiceRole();
 
-    const { data: profRow, error: profRoleError } = await service
+    let { data: profRow, error: profRoleError } = await service
       .from("profiles")
       .select("role, active, access_platform, web_permissions, web_write_permissions")
       .eq("user_id", req.userId)
       .maybeSingle();
 
     if (profRoleError) return res.status(500).json({ error: profRoleError.message });
+
+    if (!profRow && clientPlatform === "web") {
+      await ensureWebProfileForOAuthUser(service, req.userId);
+      const refetch = await service
+        .from("profiles")
+        .select("role, active, access_platform, web_permissions, web_write_permissions")
+        .eq("user_id", req.userId)
+        .maybeSingle();
+      if (refetch.error) return res.status(500).json({ error: refetch.error.message });
+      profRow = refetch.data;
+    }
 
     if (profRow?.role === "admin") {
       const obra_codigos = await getUserObraCodigos(service, req.userId);
@@ -362,6 +377,13 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
       return res.status(403).json({ error: "Perfil inativo. Aguarde liberação pelo administrador." });
     }
 
+    if (profRow && clientPlatform && !canAccessClientPlatform(profRow, clientPlatform)) {
+      const destino = clientPlatform === "web" ? "o painel web" : "o aplicativo mobile";
+      return res.status(403).json({
+        error: `Esta conta não tem permissão para acessar ${destino}.`,
+      });
+    }
+
     const hasProfileFields = [
       profileBody.full_name,
       profileBody.cpf,
@@ -370,7 +392,7 @@ router.post("/auth/ensure-role", requireAuth, async (req: AuthedRequest, res) =>
       profileBody.cnh_storage_path,
     ].some((v) => v !== undefined && String(v).trim().length > 0);
 
-    if (hasProfileFields) {
+    if (clientPlatform !== "web" && hasProfileFields) {
       try {
         await syncMotoristaProfileFromParsedBodyOrThrow(service, req.userId, profileBody);
       } catch (e: any) {

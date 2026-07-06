@@ -267,7 +267,7 @@ function TanqueBiScrollTable({
 }: TanqueTableProps) {
   const isRetiradaTable = variant === "retirada";
   const isEntradaTable = variant === "entrada";
-  const colCount = isRetiradaTable ? 20 : 13;
+  const colCount = isRetiradaTable ? 15 : 12;
   const visibleKeys = useMemo(() => rows.map((m) => rowKey(m)), [rows, rowKey]);
   const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selectedKeys.includes(k));
 
@@ -306,7 +306,6 @@ function TanqueBiScrollTable({
               {isEntradaTable ? (
                 <>
                   <th className={thCls}>Nº nota</th>
-                  <th className={thCls}>Foto nota</th>
                   <th className={thCls}>Valor unit. (L)</th>
                 </>
               ) : null}
@@ -319,12 +318,6 @@ function TanqueBiScrollTable({
                   <th className={thCls}>Foto lacre T.</th>
                   <th className={thCls}>Lacre melosa</th>
                   <th className={thCls}>Foto lacre M.</th>
-                </>
-              ) : null}
-              {isRetiradaTable ? (
-                <>
-                  <th className={thCls}>Qtd. abast.</th>
-                  <th className={thCls}>Foto medidor</th>
                 </>
               ) : null}
               <th className={thCls}>Local</th>
@@ -372,12 +365,19 @@ function TanqueBiScrollTable({
                   <td className={`${tdCls} max-w-[200px]`}>{fmtDateBr(m.data_hora)}</td>
                   <td className={`${tdCls} max-w-[220px]`}>{fmtObra(m)}</td>
                   <td className={`${tdCls} max-w-[200px]`}>{usuarioCell}</td>
-                  <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
+                  <td className={`${tdCls} whitespace-nowrap font-semibold`}>
+                    <div className="flex items-center gap-2">
+                      <span>{fmtQuantidade(m)}</span>
+                      {isRetiradaTable
+                        ? photo(storagePath(m, "tanque_quantidade_abastecida_storage_path"), "Qtd. (L)")
+                        : null}
+                      {isEntradaTable ? photo(storagePath(m, "nota_storage_path"), "Qtd. (L)") : null}
+                    </div>
+                  </td>
                   <td className={`${tdCls} max-w-[120px]`}>{insumo}</td>
                   {isEntradaTable ? (
                     <>
                       <td className={`${tdCls} max-w-[100px]`}>{fmt(m.nota_numero)}</td>
-                      <td className={tdPhotoCls}>{photo(storagePath(m, "nota_storage_path"), "Nota")}</td>
                       <td className={`${tdCls} max-w-[120px]`}>{valorUnit}</td>
                     </>
                   ) : null}
@@ -395,10 +395,6 @@ function TanqueBiScrollTable({
                       <td className={`${tdCls} max-w-[100px]`}>{fmt(m.lacre_melosa_numero)}</td>
                       <td className={tdPhotoCls}>
                         {photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.")}
-                      </td>
-                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.tanque_quantidade_abastecida)}</td>
-                      <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "tanque_quantidade_abastecida_storage_path"), "Medidor")}
                       </td>
                     </>
                   ) : null}

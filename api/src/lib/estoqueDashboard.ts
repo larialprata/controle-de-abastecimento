@@ -22,6 +22,20 @@ export type EstoqueTanqueItem = {
   total_retirada_alocada: number;
 };
 
+export type EstoqueTanqueRegistradoItem = {
+  ativo: string;
+  nome: string | null;
+  obra_codigo: number;
+  obra_nome: string | null;
+  tanque_numero: number;
+  label: string;
+  saldo_litros: number;
+  capacidade_litros: number;
+  ocupacao_pct: number;
+  ponto_pedido_litros: number;
+  abaixo_ponto_pedido: boolean;
+};
+
 export type EstoqueMelosaItem = {
   ativo: string;
   saldo_litros: number;
@@ -42,6 +56,7 @@ export type EstoqueDashboardResposta = {
     total_devolvido: number;
   };
   tanques_por_combustivel: EstoqueTanqueItem[];
+  tanques_registrados: EstoqueTanqueRegistradoItem[];
   melosas: EstoqueMelosaItem[];
 };
 
@@ -236,6 +251,10 @@ export async function buildEstoqueDashboard(
   }
 
   const melosas = await buildMelosasEstoque(service, { obraCodigo, obraScope: params.obraScope });
+  const tanques_registrados = await buildTanquesRegistrados(service, movs, {
+    obraCodigo,
+    obraScope: params.obraScope,
+  });
 
   return {
     obra_codigo: obraCodigo,
@@ -246,8 +265,130 @@ export async function buildEstoqueDashboard(
       total_devolvido: totalDevolvido,
     },
     tanques_por_combustivel,
+    tanques_registrados,
     melosas,
   };
+}
+
+function tanqueRegistradoKey(obraCodigo: number, tanqueNumero: number): string {
+  return `${obraCodigo}:${tanqueNumero}`;
+}
+
+function parseDataHoraMov(v: unknown): Date | null {
+  if (!v) return null;
+  const d = new Date(String(v));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Início de 06/07/2026 (BRT) para tanques com saldo cadastrado antes de saldo_inicial_em existir. */
+const SALDO_INICIAL_CUTOFF_PADRAO = new Date("2026-07-06T03:00:00.000Z");
+
+async function buildTanquesRegistrados(
+  service: SupabaseClient,
+  movs: Record<string, unknown>[],
+  params: { obraCodigo?: number | null; obraScope?: number[] | null },
+): Promise<EstoqueTanqueRegistradoItem[]> {
+  let eqQuery = service
+    .from("equipamentos")
+    .select("ativo, nome, obra_codigo, tanque_numero, capacidade_litros, saldo_inicial_litros, saldo_inicial_em")
+    .eq("tipo", "TANQUE")
+    .order("obra_codigo")
+    .order("tanque_numero");
+
+  if (params.obraCodigo != null) {
+    eqQuery = eqQuery.eq("obra_codigo", params.obraCodigo);
+  } else if (params.obraScope?.length) {
+    eqQuery = eqQuery.in("obra_codigo", params.obraScope);
+  }
+
+  const { data: equipamentos } = await eqQuery;
+  const rows = equipamentos ?? [];
+  if (rows.length === 0) return [];
+
+  const obraCodigos = Array.from(
+    new Set(rows.map((eq) => Number(eq.obra_codigo)).filter((c) => Number.isFinite(c))),
+  );
+  const obraNomes = new Map<number, string>();
+  if (obraCodigos.length > 0) {
+    const { data: obras } = await service.from("obras").select("codigo, nome").in("codigo", obraCodigos);
+    (obras ?? []).forEach((o) => {
+      if (o.codigo != null) obraNomes.set(Number(o.codigo), String(o.nome ?? ""));
+    });
+  }
+
+  const cutoffPorTanque = new Map<string, Date>();
+  rows.forEach((eq) => {
+    const obra = Number(eq.obra_codigo);
+    const tanque = Number(eq.tanque_numero);
+    if (!Number.isFinite(obra) || !Number.isFinite(tanque) || tanque <= 0) return;
+    const hasSaldo =
+      eq.saldo_inicial_litros != null && Number.isFinite(toNum(eq.saldo_inicial_litros));
+    if (!hasSaldo) return;
+    const em = parseDataHoraMov(eq.saldo_inicial_em);
+    cutoffPorTanque.set(tanqueRegistradoKey(obra, tanque), em ?? SALDO_INICIAL_CUTOFF_PADRAO);
+  });
+
+  const saldos = new Map<string, { entrada: number; retirada: number }>();
+  movs.forEach((m) => {
+    const obra = Number(m.obra_codigo);
+    const tanque = Number(m.tanque_numero);
+    if (!Number.isFinite(obra) || !Number.isFinite(tanque) || tanque <= 0) return;
+    const key = tanqueRegistradoKey(obra, tanque);
+    const cutoff = cutoffPorTanque.get(key);
+    if (cutoff) {
+      const dataHora = parseDataHoraMov(m.data_hora);
+      if (!dataHora || dataHora < cutoff) return;
+    }
+    if (!saldos.has(key)) saldos.set(key, { entrada: 0, retirada: 0 });
+    const bucket = saldos.get(key)!;
+    const tipo = String(m.tipo ?? "");
+    if (tipo === "ENTRADA_TANQUE_OBRA") {
+      const litros = toNum(m.litros);
+      if (litros > 0) bucket.entrada += litros;
+    } else if (tipo === "RETIRADA_TANQUE") {
+      const litros = litrosRetiradaTanque(m);
+      if (litros > 0) bucket.retirada += litros;
+    }
+  });
+
+  const DEFAULT_CAP = 10_000;
+
+  return rows
+    .map((eq) => {
+      const obra = Number(eq.obra_codigo);
+      const tanque = Number(eq.tanque_numero);
+      if (!Number.isFinite(obra) || !Number.isFinite(tanque) || tanque <= 0) return null;
+
+      const { entrada = 0, retirada = 0 } = saldos.get(tanqueRegistradoKey(obra, tanque)) ?? {};
+      const saldoInicial =
+        eq.saldo_inicial_litros != null && Number.isFinite(toNum(eq.saldo_inicial_litros))
+          ? toNum(eq.saldo_inicial_litros)
+          : 0;
+      const saldo = Math.max(0, saldoInicial + entrada - retirada);
+      const cap =
+        eq.capacidade_litros != null && toNum(eq.capacidade_litros) > 0
+          ? toNum(eq.capacidade_litros)
+          : DEFAULT_CAP;
+      const ponto = cap * 0.4;
+      const ocupacao = cap > 0 ? (saldo / cap) * 100 : 0;
+      const nome = typeof eq.nome === "string" ? eq.nome.trim() : "";
+      const obraNome = obraNomes.get(obra) ?? null;
+
+      return {
+        ativo: String(eq.ativo ?? ""),
+        nome: nome || null,
+        obra_codigo: obra,
+        obra_nome: obraNome,
+        tanque_numero: tanque,
+        label: nome ? `Tanque ${tanque} — ${nome}` : `Tanque ${tanque}`,
+        saldo_litros: saldo,
+        capacidade_litros: cap,
+        ocupacao_pct: Math.min(100, Math.max(0, ocupacao)),
+        ponto_pedido_litros: ponto,
+        abaixo_ponto_pedido: saldo < ponto,
+      };
+    })
+    .filter((item): item is EstoqueTanqueRegistradoItem => item != null);
 }
 
 async function buildMelosasEstoque(

@@ -313,17 +313,11 @@ async function loadTemplateWorkbook(templateUrl: string): Promise<Workbook> {
   return workbook;
 }
 
-export async function buildDescarbonizeWorkbook(
+function fillDescarbonizeSheet(
+  sheet: Worksheet,
   rows: DescarbonizeExcelRowInput[],
-  templateUrl = DESCARBONIZE_TEMPLATE_URL,
   options?: BuildDescarbonizeWorkbookOptions,
-): Promise<Workbook> {
-  const workbook = await loadTemplateWorkbook(templateUrl);
-  const sheet = workbook.worksheets[0];
-  if (!sheet) {
-    throw new Error("A planilha modelo não contém nenhuma aba.");
-  }
-
+) {
   const appendTotal = Boolean(options?.appendQuantidadeTotal && rows.length > 0);
   const rowSlots = rows.length + (appendTotal ? 1 : 0);
 
@@ -344,6 +338,102 @@ export async function buildDescarbonizeWorkbook(
       rows.length,
     );
   }
+}
+
+const DESCARBONIZE_TZ = "America/Sao_Paulo";
+
+function monthKeyFromRow(row: DescarbonizeExcelRowInput): string {
+  if (!row.dataHora?.trim()) return "sem-data";
+  const d = new Date(row.dataHora);
+  if (Number.isNaN(d.getTime())) return "sem-data";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: DESCARBONIZE_TZ,
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(d);
+  const year = parts.find((p) => p.type === "year")?.value ?? "0000";
+  const month = parts.find((p) => p.type === "month")?.value ?? "00";
+  return `${year}-${month}`;
+}
+
+function sanitizeExcelSheetName(key: string): string {
+  const base = key.replace(/[\\/*?:[\]]/g, "-").slice(0, 31);
+  return base || "aba";
+}
+
+function copyWorksheetContent(source: Worksheet, target: Worksheet) {
+  source.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    const newRow = target.getRow(rowNumber);
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      const newCell = newRow.getCell(colNumber);
+      newCell.value = cell.value;
+      newCell.style = { ...cell.style };
+      if (cell.numFmt) newCell.numFmt = cell.numFmt;
+    });
+    if (row.height != null) newRow.height = row.height;
+  });
+  if (source.columns) target.columns = source.columns.map((col) => ({ ...col }));
+}
+
+function groupRowsByMonth(rows: DescarbonizeExcelRowInput[]): Map<string, DescarbonizeExcelRowInput[]> {
+  const groups = new Map<string, DescarbonizeExcelRowInput[]>();
+  for (const row of rows) {
+    const key = monthKeyFromRow(row);
+    const list = groups.get(key);
+    if (list) list.push(row);
+    else groups.set(key, [row]);
+  }
+  return groups;
+}
+
+export async function buildDescarbonizeWorkbook(
+  rows: DescarbonizeExcelRowInput[],
+  templateUrl = DESCARBONIZE_TEMPLATE_URL,
+  options?: BuildDescarbonizeWorkbookOptions,
+): Promise<Workbook> {
+  const workbook = await loadTemplateWorkbook(templateUrl);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) {
+    throw new Error("A planilha modelo não contém nenhuma aba.");
+  }
+
+  fillDescarbonizeSheet(sheet, rows, options);
+
+  return workbook;
+}
+
+export async function buildDescarbonizeWorkbookByMonth(
+  rows: DescarbonizeExcelRowInput[],
+  templateUrl = DESCARBONIZE_TEMPLATE_URL,
+  options?: BuildDescarbonizeWorkbookOptions,
+): Promise<Workbook> {
+  const groups = groupRowsByMonth(rows);
+  const sortedKeys = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b));
+
+  if (sortedKeys.length === 0) {
+    return buildDescarbonizeWorkbook([], templateUrl, options);
+  }
+
+  const workbook = await loadTemplateWorkbook(templateUrl);
+  const templateSheet = workbook.worksheets[0];
+  if (!templateSheet) {
+    throw new Error("A planilha modelo não contém nenhuma aba.");
+  }
+
+  const [firstKey, ...restKeys] = sortedKeys;
+  templateSheet.name = sanitizeExcelSheetName(firstKey);
+  fillDescarbonizeSheet(templateSheet, groups.get(firstKey) ?? [], options);
+
+  for (const monthKey of restKeys) {
+    const monthWb = await loadTemplateWorkbook(templateUrl);
+    const monthSheet = monthWb.worksheets[0];
+    if (!monthSheet) continue;
+    fillDescarbonizeSheet(monthSheet, groups.get(monthKey) ?? [], options);
+    monthSheet.name = sanitizeExcelSheetName(monthKey);
+
+    const newSheet = workbook.addWorksheet(monthSheet.name);
+    copyWorksheetContent(monthSheet, newSheet);
+  }
 
   return workbook;
 }
@@ -355,6 +445,26 @@ export async function downloadDescarbonizeExcel(
   options?: BuildDescarbonizeWorkbookOptions,
 ): Promise<void> {
   const workbook = await buildDescarbonizeWorkbook(rows, templateUrl, options);
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const dataTag = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `${filenamePrefix}-${dataTag}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadDescarbonizeExcelByMonth(
+  rows: DescarbonizeExcelRowInput[],
+  filenamePrefix = "descarbonize",
+  templateUrl = DESCARBONIZE_TEMPLATE_URL,
+  options?: BuildDescarbonizeWorkbookOptions,
+): Promise<void> {
+  const workbook = await buildDescarbonizeWorkbookByMonth(rows, templateUrl, options);
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
