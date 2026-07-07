@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import MelosaMovimentacaoFormModal, {
   type MelosaMovimentacaoFormRow,
@@ -203,6 +204,21 @@ function fmtLubrificado(m: LinhaMelosa): string {
   return m.melosa_lubrificado === true ? "Sim" : "—";
 }
 
+function fmtUsuarioMelosa(m: LinhaMelosa): string {
+  const nome = m.usuario_full_name;
+  return typeof nome === "string" && nome.trim() ? nome.trim() : "—";
+}
+
+function fmtOperadorMelosa(m: LinhaMelosa): string {
+  const nome = m.melosa_operador_nome;
+  return typeof nome === "string" && nome.trim() ? nome.trim() : "—";
+}
+
+function fmtMotoristaMelosa(m: LinhaMelosa): string {
+  const nome = m.melosa_motorista_equipamento_abastecido;
+  return typeof nome === "string" && nome.trim() ? nome.trim() : "—";
+}
+
 function fmtInsumoMel(m: LinhaMelosa): string {
   const ret = m.melosa_combustivel_tipo_retirada;
   const reg = m.melosa_combustivel_tipo_registro;
@@ -326,7 +342,7 @@ function municipioFromAddress(v: unknown): string {
 }
 
 const PAGE_SIZE = 500;
-const TABLE_COL_COUNT = 15;
+const TABLE_COL_COUNT = 18;
 const TABLE_SCROLL_MAX_HEIGHT = "min(28.5rem, 52vh)";
 
 const labelCls =
@@ -343,17 +359,21 @@ const tdPhotoCls =
 
 export default function MelosaBIPage() {
   const { token } = useAuth();
+  const [searchParams] = useSearchParams();
   const periodoInicial = defaultPeriodoMesAtual();
+  const ativoUrl = searchParams.get("ativo")?.trim() ?? "";
+  const deUrl = searchParams.get("de")?.trim() ?? "";
+  const ateUrl = searchParams.get("ate")?.trim() ?? "";
   const [raw, setRaw] = useState<LinhaMelosa[]>([]);
   const [obras, setObras] = useState<ObraRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [dataDe, setDataDe] = useState(toDateInputValue(periodoInicial.de));
-  const [dataAte, setDataAte] = useState(toDateInputValue(periodoInicial.ate));
+  const [dataDe, setDataDe] = useState(deUrl || toDateInputValue(periodoInicial.de));
+  const [dataAte, setDataAte] = useState(ateUrl || toDateInputValue(periodoInicial.ate));
   const [empresaFiltro, setEmpresaFiltro] = useState<"" | ObraEmpresa>("");
   const [contratoFiltro, setContratoFiltro] = useState("");
   const [ticketFiltro, setTicketFiltro] = useState("");
-  const [busca, setBusca] = useState("");
+  const [busca, setBusca] = useState(ativoUrl);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -721,16 +741,16 @@ export default function MelosaBIPage() {
   const authToken = token ?? "";
 
   return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <header className={`${glassPanel} px-5 py-5 text-center md:text-left`}>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">BI — Melosa</h1>
+    <div className="page-shell flex flex-col">
+      <header className={`${glassPanel} px-4 py-4 text-center sm:px-5 sm:py-5 md:text-left`}>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">BI — Abastecimentos</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
           Quantidade (L) informada no app na retirada melosa. Use <strong>Exportar Excel Resumo</strong> para a planilha
           organizada por empresa do equipamento; <strong>Descarbonize</strong> preenche o modelo GHG (uma aba por mês) a partir da linha 2.
         </p>
       </header>
 
-      <div className={`flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
+      <div className={`flex flex-wrap items-end gap-3 p-3 sm:gap-4 sm:p-4 ${glassPanel}`}>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>Atualizar</span>
           <button
@@ -780,7 +800,7 @@ export default function MelosaBIPage() {
           <span className={labelCls}>Até</span>
           <input type="date" className={glassField} value={dataAte} onChange={(e) => setDataAte(e.target.value)} />
         </div>
-        <div className="flex min-w-[160px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Empresa</span>
           <select
             className={glassSelect}
@@ -795,7 +815,7 @@ export default function MelosaBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[180px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Contrato</span>
           <select className={glassSelect} value={contratoFiltro} onChange={(e) => setContratoFiltro(e.target.value)}>
             <option value="">Todos</option>
@@ -806,7 +826,7 @@ export default function MelosaBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[160px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Patrimônio melosa</span>
           <select
             className={glassSelect}
@@ -821,7 +841,7 @@ export default function MelosaBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[120px] flex-col gap-1">
+        <div className="filter-field">
           <span className={labelCls}>Nº ticket</span>
           <input
             type="search"
@@ -832,7 +852,7 @@ export default function MelosaBIPage() {
             onChange={(e) => setTicketFiltro(e.target.value)}
           />
         </div>
-        <div className="flex min-w-[200px] flex-1 flex-col gap-1 sm:min-w-[260px]">
+        <div className="filter-field-wide">
           <span className={labelCls}>Buscar</span>
           <input
             className={`${glassField} w-full`}
@@ -897,7 +917,7 @@ export default function MelosaBIPage() {
             Retiradas registradas no app — role horizontalmente se necessário
           </p>
         </div>
-        <div className="min-w-0 overflow-auto" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
+        <div className="table-scroll" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
           <table className="w-full min-w-[1320px] border-collapse text-sm">
             <thead>
               <tr className="text-left align-middle">
@@ -931,6 +951,9 @@ export default function MelosaBIPage() {
                   <th className={`${thCls} min-w-[88px]`}>Horímetro</th>
                   <th className={`${thCls} min-w-[100px]`}>Foto horímetro</th>
                   <th className={`${thCls} min-w-[88px]`}>Lubrificado</th>
+                  <th className={`${thCls} min-w-[120px]`}>Usuário</th>
+                  <th className={`${thCls} min-w-[120px]`}>Operador</th>
+                  <th className={`${thCls} min-w-[120px]`}>Motorista</th>
                   <th className={`${thCls} min-w-[100px]`}>Foto operador</th>
                   <th className={`${thCls} min-w-[180px]`}>Local</th>
                 </tr>
@@ -996,6 +1019,15 @@ export default function MelosaBIPage() {
                         }`}
                       >
                         {fmtLubrificado(m)}
+                      </td>
+                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtUsuarioMelosa(m)}>
+                        {fmtUsuarioMelosa(m)}
+                      </td>
+                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtOperadorMelosa(m)}>
+                        {fmtOperadorMelosa(m)}
+                      </td>
+                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtMotoristaMelosa(m)}>
+                        {fmtMotoristaMelosa(m)}
                       </td>
                       <td className={tdPhotoCls}>
                         {photo(storagePath(m, "melosa_equipamento_operador_storage_path"), "Operador")}

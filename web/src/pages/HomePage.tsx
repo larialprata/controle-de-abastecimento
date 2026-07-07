@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Trash2,
   TrendingDown,
+  Gauge,
 } from "lucide-react";
 import DashboardAlertaCicloModal, {
   type DashboardAlertaCiclo,
@@ -331,7 +332,7 @@ export default function HomePage() {
   const temAlertas = suspeitosVisiveis.length > 0 || desviosMedidor.length > 0;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+    <div className="page-shell">
       <EstoqueCombustivelPanel token={token} ativoMelosa={filtroAtivo} />
 
       <MelosaFluxoPanel token={token} ativosDisponiveis={ativosUnicos} ativoInicial={filtroAtivo} />
@@ -360,7 +361,7 @@ export default function HomePage() {
                 <h3 className="mb-2 text-sm font-bold text-red-800 dark:text-red-300">
                   Capacidade ultrapassada ({suspeitosVisiveis.length})
                 </h3>
-                <div className="overflow-auto rounded-xl border border-red-200/60 dark:border-red-900/40">
+                <div className="table-scroll rounded-xl border border-red-200/60 dark:border-red-900/40">
                   <table className="w-full min-w-[720px] border-collapse text-sm">
                     <thead>
                       <tr className="bg-red-50/80 text-left text-xs font-bold uppercase text-red-900 dark:bg-red-950/40 dark:text-red-200">
@@ -454,7 +455,7 @@ export default function HomePage() {
                     </button>
                   ) : null}
                 </div>
-                <div className="overflow-auto rounded-xl border border-amber-200/60 dark:border-amber-900/40">
+                <div className="table-scroll rounded-xl border border-amber-200/60 dark:border-amber-900/40">
                   <table className="w-full min-w-[720px] border-collapse text-sm">
                     <thead>
                       <tr className="bg-amber-50/80 text-left text-xs font-bold uppercase text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
@@ -524,7 +525,7 @@ export default function HomePage() {
 
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="flex flex-wrap items-end gap-3">
-            <label className="flex min-w-[160px] flex-col gap-1">
+            <label className="filter-field-md">
               <span className={labelCls}>Filtrar melosa</span>
               <input
                 className={glassField}
@@ -594,7 +595,7 @@ export default function HomePage() {
           </p>
         ) : null}
 
-        <div className="overflow-auto rounded-xl border border-white/30 dark:border-white/10" style={{ maxHeight: "min(32rem, 60vh)" }}>
+        <div className="table-scroll rounded-xl border border-white/30 dark:border-white/10" style={{ maxHeight: "min(32rem, 60vh)" }}>
           <table className="w-max min-w-full border-collapse text-sm">
             <thead>
               <tr>
@@ -687,9 +688,17 @@ export default function HomePage() {
           {canAccessPage("bi_melosa") ? (
             <DashboardCard
               to="/bi/melosa"
-              title="BI Melosa"
+              title="BI abastecimentos"
               description="Abastecimentos de equipamentos."
               icon={Droplets}
+            />
+          ) : null}
+          {canAccessPage("consumo_medio") ? (
+            <DashboardCard
+              to="/consumo-medio"
+              title="Consumo médio"
+              description="Média de litros por hora ou km entre leituras do horímetro."
+              icon={Gauge}
             />
           ) : null}
           {canAccessPage("melosas") ? (

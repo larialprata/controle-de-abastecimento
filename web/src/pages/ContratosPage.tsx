@@ -185,24 +185,24 @@ export default function ContratosPage() {
   const colCount = canWrite ? 5 : 3;
 
   return (
-    <div>
+    <div className="page-shell">
       <Link
         to="/"
-        className="mb-6 inline-flex items-center gap-2 text-sm font-semibold text-accent hover:underline"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-accent hover:underline"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
         Início
       </Link>
 
-      <header className={`mb-6 p-5 ${glassPanel}`}>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">Contratos</h1>
+      <header className={`${glassPanel} px-4 py-4 sm:p-5`}>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">Contratos</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
           Obras cadastradas em <code className="rounded bg-black/5 px-1 text-xs dark:bg-black/20">public.obras</code>{" "}
           (código, nome e empresa — Dimensional ou Delurb).
         </p>
       </header>
 
-      <div className={`mb-4 flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
+      <div className={`flex flex-wrap items-end gap-3 p-3 sm:gap-4 sm:p-4 ${glassPanel}`}>
         <div className="flex flex-col gap-1">
           <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Atualizar
@@ -261,7 +261,7 @@ export default function ContratosPage() {
           </>
         ) : null}
 
-        <div className="flex min-w-[160px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Empresa
           </span>

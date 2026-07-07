@@ -186,7 +186,7 @@ export default function MelosaFluxoPanel({ token, ativosDisponiveis, ativoInicia
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <label className="flex min-w-[180px] flex-col gap-1">
+        <label className="filter-field-md">
           <span className={labelCls}>Melosa</span>
           <input
             className={glassField}

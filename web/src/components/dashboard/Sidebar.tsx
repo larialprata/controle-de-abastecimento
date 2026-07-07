@@ -4,6 +4,7 @@ import {
   Droplets,
   FileText,
   Fuel,
+  Gauge,
   HardHat,
   LayoutDashboard,
   LogOut,
@@ -11,6 +12,7 @@ import {
   Sun,
   Users,
   Warehouse,
+  X,
 } from "lucide-react";
 import { useAuth } from "../../state/AuthContext";
 import { useTheme } from "../../state/ThemeContext";
@@ -34,10 +36,16 @@ const NAV: NavItem[] = [
   { to: "/equipamentos", label: "Equipamentos", icon: HardHat },
   { to: "/usuarios", label: "Usuários", icon: Users, adminOnly: true },
   { to: "/bi", label: "BI Tanque", icon: BarChart3, end: true },
-  { to: "/bi/melosa", label: "BI Melosa", icon: Droplets },
+  { to: "/bi/melosa", label: "BI abastecimentos", icon: Droplets },
+  { to: "/consumo-medio", label: "Consumo médio", icon: Gauge },
 ];
 
-export default function Sidebar() {
+type SidebarProps = {
+  open?: boolean;
+  onClose?: () => void;
+};
+
+export default function Sidebar({ open = false, onClose }: SidebarProps) {
   const { signOut, isAdmin } = useAuth();
   const { theme, setTheme } = useTheme();
 
@@ -52,7 +60,14 @@ export default function Sidebar() {
     ].join(" ");
 
   return (
-    <aside className={`flex h-full w-64 shrink-0 flex-col overflow-hidden ${glassSidebar}`}>
+    <aside
+      className={[
+        glassSidebar,
+        "fixed inset-y-0 left-0 z-50 flex h-full w-[min(17rem,88vw)] flex-col overflow-hidden shadow-xl transition-transform duration-200 ease-out",
+        "lg:static lg:z-auto lg:w-52 lg:shrink-0 lg:translate-x-0 lg:shadow-none xl:w-56 2xl:w-64",
+        open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+      ].join(" ")}
+    >
       <div className="flex items-start gap-2 border-b border-white/40 px-4 py-4 dark:border-white/10">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
           <FileText className="h-5 w-5" aria-hidden />
@@ -63,6 +78,16 @@ export default function Sidebar() {
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-500">Painel web</p>
         </div>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/40 dark:text-slate-400 dark:hover:bg-white/10 lg:hidden"
+            aria-label="Fechar menu"
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        ) : null}
       </div>
 
       <div className="px-3 pt-4">
@@ -99,7 +124,11 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav className="mt-5 flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-4" aria-label="Principal">
+      <nav
+        className="mt-5 flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-4"
+        aria-label="Principal"
+        onClick={onClose}
+      >
         {items.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
             <item.icon className="h-5 w-5 shrink-0 opacity-90" aria-hidden />

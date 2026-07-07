@@ -309,9 +309,9 @@ export default function UsersPage() {
   }
 
   return (
-    <div>
-      <header className={`mb-6 p-5 ${glassPanel}`}>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">Usuários</h1>
+    <div className="page-shell">
+      <header className={`${glassPanel} px-4 py-4 sm:p-5`}>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">Usuários</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
           Utilizador Web: defina quais páginas e obras cada um pode ver, e em quais pode adicionar/editar.
         </p>
@@ -323,7 +323,7 @@ export default function UsersPage() {
         </div>
       ) : null}
 
-      <div className={`mb-4 flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
+      <div className={`flex flex-wrap items-end gap-3 p-3 sm:gap-4 sm:p-4 ${glassPanel}`}>
         <div className="flex flex-col gap-1">
           <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Atualizar
@@ -357,7 +357,7 @@ export default function UsersPage() {
 
       {!loading ? (
         <div className={`overflow-hidden p-0 ${glassPanel}`}>
-          <div className="overflow-x-auto">
+          <div className="table-scroll">
             <table className="w-full min-w-[760px] border-collapse text-sm">
               <thead>
                 <tr className="align-middle">

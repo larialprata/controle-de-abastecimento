@@ -186,7 +186,7 @@ create table if not exists public.profiles (
   access_platform text not null default 'app' check (access_platform in ('app', 'web', 'both')),
   web_permissions text[] not null default array['dashboard']::text[]
     check (
-      web_permissions <@ array['dashboard', 'contratos', 'melosas', 'equipamentos', 'tanques', 'bi_tanque', 'bi_melosa']::text[]
+      web_permissions <@ array['dashboard', 'contratos', 'melosas', 'equipamentos', 'tanques', 'bi_tanque', 'bi_melosa', 'consumo_medio']::text[]
       and 'dashboard' = any (web_permissions)
     ),
   web_write_permissions text[] not null default array[]::text[]

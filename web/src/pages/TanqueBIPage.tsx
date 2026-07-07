@@ -292,7 +292,7 @@ function TanqueBiScrollTable({
         <h2 className="text-base font-bold text-slate-900 dark:text-white">{title}</h2>
         <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
       </div>
-      <div className="overflow-auto" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
+      <div className="table-scroll" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
         <table className="w-max min-w-full border-collapse text-sm">
           <thead>
             <tr className="text-left align-middle">
@@ -773,17 +773,17 @@ export default function TanqueBIPage() {
   const authToken = token ?? "";
 
   return (
-    <div>
-      <header className={`mb-6 ${glassPanel} px-5 py-5 text-center md:text-left`}>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">BI — Tanque</h1>
+    <div className="page-shell">
+      <header className={`${glassPanel} px-4 py-4 text-center sm:px-5 sm:py-5 md:text-left`}>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">BI — Tanque</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
           Quantidade (L): entrada usa o campo litros da nota. Na saída, litros = medidor final − medidor
           inicial (medidor acumulado sobe ao abastecer; ex.: 50 → 5000 = 4950 L).
-          O Excel Descarbonize usa a mesma planilha modelo do BI Melosa; só as retiradas entram na exportação.
+          O Excel Descarbonize usa a mesma planilha modelo do BI abastecimentos; só as retiradas entram na exportação.
         </p>
       </header>
 
-      <div className={`mb-4 flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
+      <div className={`flex flex-wrap items-end gap-3 p-3 sm:gap-4 sm:p-4 ${glassPanel}`}>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>Atualizar</span>
           <button
@@ -813,7 +813,7 @@ export default function TanqueBIPage() {
           <span className={labelCls}>Até</span>
           <input type="date" className={glassField} value={dataAte} onChange={(e) => setDataAte(e.target.value)} />
         </div>
-        <div className="flex min-w-[160px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Empresa</span>
           <select
             className={glassSelect}
@@ -828,7 +828,7 @@ export default function TanqueBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[180px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Contrato</span>
           <select className={glassSelect} value={contratoFiltro} onChange={(e) => setContratoFiltro(e.target.value)}>
             <option value="">Todos</option>
@@ -839,7 +839,7 @@ export default function TanqueBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[120px] flex-col gap-1">
+        <div className="filter-field">
           <span className={labelCls}>Nº ticket</span>
           <input
             type="search"
@@ -850,7 +850,7 @@ export default function TanqueBIPage() {
             onChange={(e) => setTicketFiltro(e.target.value)}
           />
         </div>
-        <div className="min-w-[200px] flex-1 flex-col gap-1 sm:min-w-[260px]">
+        <div className="filter-field-wide">
           <span className={labelCls}>Buscar</span>
           <input
             className={`${glassField} w-full`}
