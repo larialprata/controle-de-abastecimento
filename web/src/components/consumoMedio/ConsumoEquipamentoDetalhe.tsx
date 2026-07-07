@@ -29,6 +29,8 @@ type Props = {
   token: string;
   de: string;
   ate: string;
+  obraCodigo?: string | null;
+  melosa?: string | null;
   data: EquipamentoConsumoResposta | null;
   onClose: () => void;
   onMetaSaved: (meta: MetaEquipamento) => void;
@@ -62,6 +64,8 @@ export default function ConsumoEquipamentoDetalhe({
   token,
   de,
   ate,
+  obraCodigo,
+  melosa,
   data,
   onClose,
   onMetaSaved,
@@ -80,6 +84,8 @@ export default function ConsumoEquipamentoDetalhe({
       const params = new URLSearchParams({ ativo, meses: "12" });
       if (de) params.set("de", de);
       if (ate) params.set("ate", ate);
+      if (obraCodigo) params.set("obra_codigo", obraCodigo);
+      if (melosa?.trim()) params.set("melosa", melosa.trim());
       const res = await apiGet<EquipamentoConsumoDetalhe>(
         `/v1/equipamentos/consumo/detalhe?${params}`,
         token,
@@ -93,7 +99,7 @@ export default function ConsumoEquipamentoDetalhe({
     } finally {
       setLoading(false);
     }
-  }, [ativo, ate, de, token]);
+  }, [ativo, ate, de, melosa, obraCodigo, token]);
 
   useEffect(() => {
     void load();

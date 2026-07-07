@@ -85,11 +85,15 @@ function VariacaoBadge({ pct }: { pct: number | null }) {
 
 export default function EquipamentoConsumoPanel({ token, variant = "embedded" }: Props) {
   const isPage = variant === "page";
-  const { isAdmin } = useAuth();
+  const { isAdmin, canAccessObra } = useAuth();
   const periodoInicial = useMemo(() => defaultPeriodoMesAtual(), []);
   const [de, setDe] = useState(toDateInputValue(periodoInicial.de));
   const [ate, setAte] = useState(toDateInputValue(periodoInicial.ate));
   const [filtroAtivo, setFiltroAtivo] = useState("");
+  const [filtroObra, setFiltroObra] = useState("");
+  const [filtroMelosa, setFiltroMelosa] = useState("");
+  const [obrasOpcoes, setObrasOpcoes] = useState<{ codigo: number; nome: string }[]>([]);
+  const [melosasOpcoes, setMelosasOpcoes] = useState<{ ativo: string; nome: string | null }[]>([]);
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroUnidade, setFiltroUnidade] = useState<"" | "h" | "km">("");
   const [somenteAlertas, setSomenteAlertas] = useState(false);
@@ -105,6 +109,39 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
   const [metasLocal, setMetasLocal] = useState<ConsumoMeta[]>([]);
   const [metasEquipamento, setMetasEquipamento] = useState<Record<string, MetaEquipamento>>({});
 
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [obrasRes, melosasRes] = await Promise.all([
+          apiGet<{ obras: { codigo: number; nome: string }[] }>("/v1/obras", token),
+          apiGet<{ equipamentos: { ativo: string; nome: string | null }[] }>(
+            "/v1/equipamentos?tipo=MELOSA",
+            token,
+          ),
+        ]);
+        if (cancelled) return;
+        setObrasOpcoes(
+          (obrasRes.obras ?? [])
+            .filter((o) => canAccessObra(o.codigo))
+            .sort((a, b) => a.codigo - b.codigo),
+        );
+        setMelosasOpcoes(
+          [...(melosasRes.equipamentos ?? [])].sort((a, b) => a.ativo.localeCompare(b.ativo, "pt-BR")),
+        );
+      } catch {
+        if (!cancelled) {
+          setObrasOpcoes([]);
+          setMelosasOpcoes([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, canAccessObra]);
+
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
@@ -114,6 +151,8 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
       if (de) params.set("de", de);
       if (ate) params.set("ate", ate);
       if (filtroAtivo.trim()) params.set("ativo", filtroAtivo.trim());
+      if (filtroObra) params.set("obra_codigo", filtroObra);
+      if (filtroMelosa.trim()) params.set("melosa", filtroMelosa.trim());
       if (compararPeriodo) params.set("comparar", "1");
       const res = await apiGet<EquipamentoConsumoResposta>(`/v1/equipamentos/consumo?${params}`, token);
       setData(res);
@@ -125,7 +164,7 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
     } finally {
       setLoading(false);
     }
-  }, [token, de, ate, filtroAtivo, compararPeriodo]);
+  }, [token, de, ate, filtroAtivo, filtroObra, filtroMelosa, compararPeriodo]);
 
   useEffect(() => {
     void load();
@@ -212,6 +251,10 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
             de={de}
             ate={ate}
             filtroAtivo={filtroAtivo}
+            filtroObra={filtroObra}
+            filtroMelosa={filtroMelosa}
+            obras={obrasOpcoes}
+            melosas={melosasOpcoes}
             compararPeriodo={compararPeriodo}
             loading={loading}
             exporting={exporting}
@@ -219,6 +262,8 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
             onDeChange={setDe}
             onAteChange={setAte}
             onFiltroAtivoChange={setFiltroAtivo}
+            onFiltroObraChange={setFiltroObra}
+            onFiltroMelosaChange={setFiltroMelosa}
             onCompararChange={setCompararPeriodo}
             onRefresh={() => void load()}
             onMetas={() => setMetasOpen(true)}
@@ -430,6 +475,29 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
                 onChange={(e) => setFiltroAtivo(e.target.value)}
               />
             </label>
+            <label className="filter-field-md">
+              <span className={labelCls}>Obra</span>
+              <select className={glassSelect} value={filtroObra} onChange={(e) => setFiltroObra(e.target.value)}>
+                <option value="">Todas</option>
+                {obrasOpcoes.map((o) => (
+                  <option key={o.codigo} value={String(o.codigo)}>
+                    {o.codigo} — {o.nome}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-field-md">
+              <span className={labelCls}>Melosa</span>
+              <select className={glassSelect} value={filtroMelosa} onChange={(e) => setFiltroMelosa(e.target.value)}>
+                <option value="">Todas</option>
+                {melosasOpcoes.map((m) => (
+                  <option key={m.ativo} value={m.ativo}>
+                    {m.ativo}
+                    {m.nome ? ` — ${m.nome}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="flex items-center gap-2 pb-2 text-sm text-slate-700 dark:text-slate-300">
               <input type="checkbox" checked={compararPeriodo} onChange={(e) => setCompararPeriodo(e.target.checked)} />
               Comparar período anterior
@@ -555,6 +623,8 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
           token={token}
           de={de}
           ate={ate}
+          obraCodigo={filtroObra || null}
+          melosa={filtroMelosa || null}
           data={data}
           onClose={() => setSelectedAtivo(null)}
           onMetaSaved={(meta) => {

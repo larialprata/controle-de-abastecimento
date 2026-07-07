@@ -52,11 +52,13 @@ router.get("/equipamentos/consumo", requireAuth, async (req: AuthedRequest, res)
     const ate = typeof req.query.ate === "string" && req.query.ate.trim() ? req.query.ate.trim() : null;
     const ativoEquipamento =
       typeof req.query.ativo === "string" && req.query.ativo.trim() ? req.query.ativo.trim() : null;
+    const ativoMelosa =
+      typeof req.query.melosa === "string" && req.query.melosa.trim() ? req.query.melosa.trim() : null;
     const compararPeriodoAnterior = req.query.comparar === "1" || req.query.comparar === "true";
 
     const dashboard = await buildEquipamentoConsumoDashboard(
       scope.service,
-      { de, ate, obraCodigo, ativoEquipamento, compararPeriodoAnterior },
+      { de, ate, obraCodigo, ativoEquipamento, ativoMelosa, compararPeriodoAnterior },
       scope.obraScope,
     );
     return res.json(dashboard);
@@ -83,13 +85,15 @@ router.get("/equipamentos/consumo/detalhe", requireAuth, async (req: AuthedReque
 
     const de = typeof req.query.de === "string" && req.query.de.trim() ? req.query.de.trim() : null;
     const ate = typeof req.query.ate === "string" && req.query.ate.trim() ? req.query.ate.trim() : null;
+    const ativoMelosa =
+      typeof req.query.melosa === "string" && req.query.melosa.trim() ? req.query.melosa.trim() : null;
     const mesesRaw = typeof req.query.meses === "string" ? Number(req.query.meses) : 12;
     const meses = Number.isFinite(mesesRaw) ? Math.min(24, Math.max(3, mesesRaw)) : 12;
 
     const detalhe = await buildEquipamentoConsumoDetalhe(
       scope.service,
       ativo,
-      { de, ate, obraCodigo },
+      { de, ate, obraCodigo, ativoMelosa },
       scope.obraScope,
       meses,
     );

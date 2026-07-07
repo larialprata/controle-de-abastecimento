@@ -13,6 +13,7 @@ export type { ConsumoMeta, MetaEquipamento };
 export type MelosaAbastecimentoRow = {
   operation_id?: string;
   data_hora?: string;
+  ativo_melosa_texto?: string | null;
   ativo_equipamento_texto?: string | null;
   ativo_equipamento_nome?: string | null;
   ativo_equipamento_empresa?: string | null;
@@ -97,6 +98,7 @@ export type EquipamentoConsumoFiltros = {
   ate?: string | null;
   obraCodigo?: number | null;
   ativoEquipamento?: string | null;
+  ativoMelosa?: string | null;
   compararPeriodoAnterior?: boolean;
 };
 
@@ -327,7 +329,7 @@ async function fetchMovimentacoes(
   let query = service
     .from("melosa_movimentacoes")
     .select(
-      "operation_id, data_hora, ativo_equipamento_texto, ativo_equipamento_nome, ativo_equipamento_empresa, melosa_horimetro_equipamento_abastecido_numero, melosa_quantidade_abastecida, litros, obra_codigo",
+      "operation_id, data_hora, ativo_melosa_texto, ativo_equipamento_texto, ativo_equipamento_nome, ativo_equipamento_empresa, melosa_horimetro_equipamento_abastecido_numero, melosa_quantidade_abastecida, litros, obra_codigo",
     )
     .not("ativo_equipamento_texto", "is", null)
     .order("data_hora", { ascending: true });
@@ -348,6 +350,10 @@ async function fetchMovimentacoes(
   if (filtros.ativoEquipamento) {
     const alvo = normAtivo(filtros.ativoEquipamento);
     rows = rows.filter((r) => normAtivo(r.ativo_equipamento_texto) === alvo);
+  }
+  if (filtros.ativoMelosa) {
+    const melosa = normAtivo(filtros.ativoMelosa);
+    rows = rows.filter((r) => normAtivo(r.ativo_melosa_texto) === melosa);
   }
   return rows;
 }

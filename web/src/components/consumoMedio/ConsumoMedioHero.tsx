@@ -7,13 +7,27 @@ import {
   RefreshCw,
   Settings2,
 } from "lucide-react";
-import { glassField } from "../../lib/glass";
+import { glassField, glassSelect } from "../../lib/glass";
 import { fmtPeriodoBr, labelCls } from "./consumoMedioUi";
+
+export type ConsumoMedioObraOpcao = {
+  codigo: number;
+  nome: string;
+};
+
+export type ConsumoMedioMelosaOpcao = {
+  ativo: string;
+  nome: string | null;
+};
 
 type Props = {
   de: string;
   ate: string;
   filtroAtivo: string;
+  filtroObra: string;
+  filtroMelosa: string;
+  obras: ConsumoMedioObraOpcao[];
+  melosas: ConsumoMedioMelosaOpcao[];
   compararPeriodo: boolean;
   loading: boolean;
   exporting: boolean;
@@ -21,6 +35,8 @@ type Props = {
   onDeChange: (v: string) => void;
   onAteChange: (v: string) => void;
   onFiltroAtivoChange: (v: string) => void;
+  onFiltroObraChange: (v: string) => void;
+  onFiltroMelosaChange: (v: string) => void;
   onCompararChange: (v: boolean) => void;
   onRefresh: () => void;
   onMetas: () => void;
@@ -31,6 +47,10 @@ export default function ConsumoMedioHero({
   de,
   ate,
   filtroAtivo,
+  filtroObra,
+  filtroMelosa,
+  obras,
+  melosas,
   compararPeriodo,
   loading,
   exporting,
@@ -38,6 +58,8 @@ export default function ConsumoMedioHero({
   onDeChange,
   onAteChange,
   onFiltroAtivoChange,
+  onFiltroObraChange,
+  onFiltroMelosaChange,
   onCompararChange,
   onRefresh,
   onMetas,
@@ -122,6 +144,29 @@ export default function ConsumoMedioHero({
             value={filtroAtivo}
             onChange={(e) => onFiltroAtivoChange(e.target.value)}
           />
+        </label>
+        <label className="filter-field-md">
+          <span className={labelCls}>Obra</span>
+          <select className={glassSelect} value={filtroObra} onChange={(e) => onFiltroObraChange(e.target.value)}>
+            <option value="">Todas as obras</option>
+            {obras.map((o) => (
+              <option key={o.codigo} value={String(o.codigo)}>
+                {o.codigo} — {o.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field-md">
+          <span className={labelCls}>Melosa</span>
+          <select className={glassSelect} value={filtroMelosa} onChange={(e) => onFiltroMelosaChange(e.target.value)}>
+            <option value="">Todas as melosas</option>
+            {melosas.map((m) => (
+              <option key={m.ativo} value={m.ativo}>
+                {m.ativo}
+                {m.nome ? ` — ${m.nome}` : ""}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="flex items-center gap-2 pb-2 text-sm text-slate-700 dark:text-slate-300">
           <input
