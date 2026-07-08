@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import MelosaMovimentacaoFormModal, {
@@ -364,6 +364,7 @@ export default function MelosaBIPage() {
   const ativoUrl = searchParams.get("ativo")?.trim() ?? "";
   const deUrl = searchParams.get("de")?.trim() ?? "";
   const ateUrl = searchParams.get("ate")?.trim() ?? "";
+  const opUrl = searchParams.get("op")?.trim() ?? "";
   const [raw, setRaw] = useState<LinhaMelosa[]>([]);
   const [obras, setObras] = useState<ObraRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -384,6 +385,12 @@ export default function MelosaBIPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"add" | "edit">("add");
   const [formRow, setFormRow] = useState<MelosaMovimentacaoFormRow | null>(null);
+  const [highlightOp, setHighlightOp] = useState(opUrl);
+  const mapSectionRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setHighlightOp(opUrl);
+  }, [opUrl]);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
 
@@ -487,13 +494,41 @@ export default function MelosaBIPage() {
       });
     }
     const q = busca.trim().toLowerCase();
-    if (q) rows = rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
+    if (q) {
+      const qCompact = busca.trim().toUpperCase().replace(/\s+/g, "");
+      rows = rows.filter((r) => {
+        if (JSON.stringify(r).toLowerCase().includes(q)) return true;
+        if (!qCompact) return false;
+        return [
+          r.ativo_melosa_texto,
+          r.ativo_equipamento_texto,
+          r.ativo_equipamento_nome,
+          r.placa_texto,
+          r.fornecedor_texto,
+        ]
+          .map((v) => String(v ?? "").toUpperCase().replace(/\s+/g, ""))
+          .some((p) => p.length > 0 && p.includes(qCompact));
+      });
+    }
     return rows;
   }, [raw, busca, filtros, obraCodigosEmpresa, patrimonioFiltro, ticketFiltro]);
 
   const filtroTextoAtivo = Boolean(
     busca.trim() || contratoFiltro || empresaFiltro || ticketFiltro.trim() || patrimonioFiltro,
   );
+
+  useEffect(() => {
+    if (!highlightOp || loading) return;
+    const found = filtradas.some(
+      (r) => String(r.operation_id ?? "").trim() === highlightOp,
+    );
+    if (!found) return;
+    const el = document.getElementById(`mov-${highlightOp}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = window.setTimeout(() => setHighlightOp(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [highlightOp, loading, filtradas]);
 
   const rowKey = useCallback((m: LinhaMelosa, idx: number) => biTableRowKey(m, idx), []);
 
@@ -621,8 +656,10 @@ export default function MelosaBIPage() {
         lat,
         lng,
         key: `${String(m.operation_id ?? "")}-${String(m.id ?? idx)}-${idx}`,
+        operationId: typeof m.operation_id === "string" ? m.operation_id : undefined,
         dataHora: `${fmtDateOnly(m.data_hora)} ${fmtTimeOnly(m.data_hora)}`,
         usuario: fmtAtivoPlaca(m),
+        equipamento: fmtAtivoEquipamento(m),
         obra: fmtObra(m),
         litros: fmtQuantidade(m),
         municipio: municipioFromAddress(m.local_address),
@@ -631,6 +668,22 @@ export default function MelosaBIPage() {
     });
     return out;
   }, [filtradas]);
+
+  const focusOperationId = useMemo(() => {
+    if (selectedRows.length === 0) return null;
+    const last = selectedRows[selectedRows.length - 1];
+    return typeof last.operation_id === "string" ? last.operation_id : null;
+  }, [selectedRows]);
+
+  const focusPointDisponivel = useMemo(
+    () => Boolean(focusOperationId) && mapPoints.some((p) => p.operationId === focusOperationId),
+    [focusOperationId, mapPoints],
+  );
+
+  useEffect(() => {
+    if (!focusPointDisponivel) return;
+    mapSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [focusOperationId, focusPointDisponivel]);
 
   const openAddForm = useCallback(() => {
     setFormMode("add");
@@ -964,6 +1017,8 @@ export default function MelosaBIPage() {
                   const k = rowKey(m, idx);
                   const checked = selectedKeys.includes(k);
                   const dataRef = fmtDateOnly(m.data_hora);
+                  const opId = String(m.operation_id ?? "").trim();
+                  const destacada = Boolean(highlightOp) && opId === highlightOp;
 
                   const photo = (path: string | undefined, label: string) => (
                     <StoragePhotoCell
@@ -976,7 +1031,15 @@ export default function MelosaBIPage() {
                   );
 
                   return (
-                    <tr key={k} className={zebra}>
+                    <tr
+                      key={k}
+                      id={opId ? `mov-${opId}` : undefined}
+                      className={`${zebra} ${
+                        destacada
+                          ? "outline outline-2 -outline-offset-2 outline-sky-500 bg-sky-100/70 dark:bg-sky-900/40"
+                          : ""
+                      }`}
+                    >
                       <td className={`${tdCls} w-10`}>
                         <input
                           type="checkbox"
@@ -1050,15 +1113,15 @@ export default function MelosaBIPage() {
         </div>
       </div>
 
-      <div className={`flex min-w-0 flex-col overflow-hidden ${glassPanel} p-0`}>
+      <div ref={mapSectionRef} className={`flex min-w-0 flex-col overflow-hidden ${glassPanel} p-0`}>
         <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
           <h2 className="text-base font-bold text-slate-900 dark:text-white">Mapa das localizações</h2>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            Pontos GPS das movimentações filtradas
+            Pontos GPS das movimentações filtradas · selecione uma linha para focar no mapa
           </p>
         </div>
         <div className="relative min-h-[360px] overflow-hidden rounded-b-2xl md:min-h-[420px]">
-          <MovementsMap points={mapPoints} />
+          <MovementsMap points={mapPoints} focusKey={focusOperationId} />
         </div>
       </div>
 

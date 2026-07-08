@@ -529,7 +529,16 @@ export default function TanqueBIPage() {
       rows = rows.filter((r) => ticketNumeroParaFiltro(r.ticket_numero).includes(ticketQ));
     }
     const q = busca.trim().toLowerCase();
-    if (q) rows = rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
+    if (q) {
+      const qCompact = busca.trim().toUpperCase().replace(/\s+/g, "");
+      rows = rows.filter((r) => {
+        if (JSON.stringify(r).toLowerCase().includes(q)) return true;
+        if (!qCompact) return false;
+        return [r.placa_texto, r.placa_caminhao, r.fornecedor_texto]
+          .map((v) => String(v ?? "").toUpperCase().replace(/\s+/g, ""))
+          .some((p) => p.length > 0 && p.includes(qCompact));
+      });
+    }
     return rows;
   }, [raw, busca, filtros, obraCodigosEmpresa, ticketFiltro]);
 

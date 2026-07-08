@@ -3,6 +3,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { apiGet } from "../../lib/api";
 import { glassPanel, glassSelect } from "../../lib/glass";
 import TanqueGrandeVisual from "./TanqueGrandeVisual";
+import EstoqueDetalheModal, { type EstoqueDetalheAlvo } from "./EstoqueDetalheModal";
 
 export type EstoqueTanqueItem = {
   combustivel_key: string;
@@ -77,6 +78,7 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
   const [data, setData] = useState<EstoqueDashboardResposta | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detalhe, setDetalhe] = useState<EstoqueDetalheAlvo | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -180,6 +182,7 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
                     subtitulo={
                       t.obra_nome ? `${t.obra_codigo} · ${t.obra_nome}` : `Obra ${t.obra_codigo}`
                     }
+                    onClick={() => setDetalhe({ kind: "tanque", item: t })}
                   />
                 ))}
               </div>
@@ -231,6 +234,7 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
                         subtitulo={
                           m.ultimo_ciclo_numero != null ? `Ciclo ${m.ultimo_ciclo_numero}` : undefined
                         }
+                        onClick={() => setDetalhe({ kind: "melosa", item: m })}
                       />
                     </div>
                   );
@@ -243,6 +247,10 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
             )}
           </div>
         </div>
+      ) : null}
+
+      {detalhe ? (
+        <EstoqueDetalheModal alvo={detalhe} token={token} onClose={() => setDetalhe(null)} />
       ) : null}
     </section>
   );
