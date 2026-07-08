@@ -338,32 +338,37 @@ export async function enriquecerCiclosParaListagem(
 
     const movimentacoes = await fetchMovimentacoesMelosaDesde(service, ativo, chain[0].data_hora);
 
+    // Propaga a sobra RECALCULADA ao longo da cadeia (não usa o valor armazenado,
+    // que pode estar defasado quando há abastecimentos lançados retroativamente).
+    let disponivelAnterior = 0;
+    let dataHoraAnterior: string | null = null;
+
     for (let i = 0; i < chain.length; i++) {
       const ciclo = chain[i];
-      const ateAbast = chain[i + 1]?.data_hora ?? null;
-      const abast = sumMovimentacoesNoIntervalo(movimentacoes, ciclo.data_hora, ateAbast);
 
       let sobraAnterior = 0;
-      if (i > 0) {
-        const anterior = chain[i - 1];
+      if (i > 0 && dataHoraAnterior != null) {
         const abastEntreCiclos = sumMovimentacoesNoIntervalo(
           movimentacoes,
-          anterior.data_hora,
+          dataHoraAnterior,
           ciclo.data_hora,
         );
-        sobraAnterior = calcularSobraAposAbastecimentos(
-          litrosDisponivelNoCiclo(anterior),
-          abastEntreCiclos,
-        );
+        sobraAnterior = calcularSobraAposAbastecimentos(disponivelAnterior, abastEntreCiclos);
       }
 
-      const sobraAtual = calcularSobraAposAbastecimentos(litrosDisponivelNoCiclo({ ...ciclo, litros_sobra_anterior: sobraAnterior }), abast);
+      const disponivel = sobraAnterior + toNum(ciclo.litros_retirada);
+      const ateAbast = chain[i + 1]?.data_hora ?? null;
+      const abast = sumMovimentacoesNoIntervalo(movimentacoes, ciclo.data_hora, ateAbast);
+      const sobraAtual = calcularSobraAposAbastecimentos(disponivel, abast);
 
       resultado.set(ciclo.id, {
         litros_sobra_anterior: sobraAnterior,
         litros_abastecidos: abast,
         litros_sobra_atual: sobraAtual,
       });
+
+      disponivelAnterior = disponivel;
+      dataHoraAnterior = ciclo.data_hora;
     }
   }
 

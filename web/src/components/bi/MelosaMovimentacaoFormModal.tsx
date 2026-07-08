@@ -109,7 +109,7 @@ export default function MelosaMovimentacaoFormModal({
   const [ativoEquipamento, setAtivoEquipamento] = useState("");
   const [insumo, setInsumo] = useState("DIESEL_S10");
   const [quantidadeLitros, setQuantidadeLitros] = useState("");
-  const [categoria, setCategoria] = useState<"" | "ESTACIONARIA" | "MOVEL">("");
+  const [categoria, setCategoria] = useState<"ESTACIONARIA" | "MOVEL">("MOVEL");
   const [horimetroTipo, setHorimetroTipo] = useState<HorimetroTipo>("");
   const [horimetroValor, setHorimetroValor] = useState("");
   const [motorista, setMotorista] = useState("");
@@ -141,7 +141,7 @@ export default function MelosaMovimentacaoFormModal({
       setInsumo(resolveInsumo(initialRow));
       setQuantidadeLitros(resolveQuantidade(initialRow));
       const cat = initialRow.melosa_categoria;
-      setCategoria(cat === "MOVEL" || cat === "ESTACIONARIA" ? cat : "");
+      setCategoria(cat === "ESTACIONARIA" ? "ESTACIONARIA" : "MOVEL");
       const hor = parseHorimetroFromRow(initialRow.melosa_horimetro_equipamento_abastecido_numero);
       setHorimetroTipo(hor.tipo);
       setHorimetroValor(hor.valor);
@@ -156,7 +156,7 @@ export default function MelosaMovimentacaoFormModal({
       setAtivoEquipamento("");
       setInsumo("DIESEL_S10");
       setQuantidadeLitros("");
-      setCategoria("");
+      setCategoria("MOVEL");
       setHorimetroTipo("");
       setHorimetroValor("");
       setMotorista("");
@@ -414,12 +414,11 @@ export default function MelosaMovimentacaoFormModal({
               id="melosa-mov-cat"
               className={glassSelect}
               value={categoria}
-              onChange={(e) => setCategoria(e.target.value as "" | "ESTACIONARIA" | "MOVEL")}
+              onChange={(e) => setCategoria(e.target.value as "ESTACIONARIA" | "MOVEL")}
               disabled={saving}
             >
-              <option value="">Padrão (estacionária)</option>
+              <option value="MOVEL">Móvel (padrão)</option>
               <option value="ESTACIONARIA">Estacionária</option>
-              <option value="MOVEL">Móvel</option>
             </select>
           </div>
 

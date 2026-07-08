@@ -42,6 +42,8 @@ export type DescarbonizeExcelRowInput = {
   /** Usado quando não há medidor (ex.: litros direto) */
   quantidadeLitros?: number | null;
   placaTexto?: string | null;
+  /** Ativo do equipamento abastecido; quando presente, vai no "Detalhe dois". */
+  ativoEquipamento?: string | null;
 };
 
 function normHeader(value: unknown): string {
@@ -252,7 +254,13 @@ function writeDataRow(
   put("fator", fmtFatorEmissao(row.insumo));
   put("quantidade", quantidade ?? "", quantidade != null ? "#,##0.00" : undefined);
   put("detalheUm", "");
-  put("detalheDois", row.placaTexto != null ? String(row.placaTexto).trim() : "");
+  const detalheDois =
+    row.ativoEquipamento != null && String(row.ativoEquipamento).trim()
+      ? String(row.ativoEquipamento).trim()
+      : row.placaTexto != null
+        ? String(row.placaTexto).trim()
+        : "";
+  put("detalheDois", detalheDois);
   put("comentarios", "");
   put("evidencia", DESCARBONIZE_EVIDENCIA);
   put("percentualReceita", DESCARBONIZE_RECEITA_DIFERENTE);

@@ -84,6 +84,7 @@ function toMelosaExcelInput(m: LinhaMelosa): MelosaExcelRowInput {
     insumoRegistro: m.melosa_combustivel_tipo_registro,
     quantidadeAbastecida: m.melosa_quantidade_abastecida,
     placaTexto: m.ativo_melosa_texto ?? m.placa_texto,
+    ativoEquipamento: m.ativo_equipamento_texto ?? m.fornecedor_texto,
   };
 }
 
