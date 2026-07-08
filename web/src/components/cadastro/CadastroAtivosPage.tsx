@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Pencil, Plus, QrCode, Trash2, Upload, X } from "lucide-react";
 import { useAuth } from "../../state/AuthContext";
 import type { WebWritePageKey } from "../../lib/webPermissions";
@@ -78,6 +78,7 @@ export default function CadastroAtivosPage({
 }: CadastroAtivosPageProps) {
   const { token, canWriteOnPage, canAccessObra } = useAuth();
   const canWrite = canWriteOnPage(writePageKey);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [equipamentos, setEquipamentos] = useState<EquipamentoRow[]>([]);
   const [obras, setObras] = useState<ObraRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -277,9 +278,9 @@ export default function CadastroAtivosPage({
 
   const isEditing = editingAtivoOriginal != null;
 
-  const openAddModal = useCallback(() => {
+  const openAddModalWithAtivo = useCallback((ativo: string) => {
     setEditingAtivoOriginal(null);
-    setFormAtivo("");
+    setFormAtivo(ativo);
     setFormNome("");
     setFormObraCodigo("");
     setFormCapacidadeLitros("");
@@ -289,6 +290,19 @@ export default function CadastroAtivosPage({
     setFormError(null);
     setFormOpen(true);
   }, []);
+
+  const openAddModal = useCallback(() => {
+    openAddModalWithAtivo("");
+  }, [openAddModalWithAtivo]);
+
+  useEffect(() => {
+    const ativo = searchParams.get("novo")?.trim();
+    if (!ativo || !canWrite) return;
+    openAddModalWithAtivo(ativo.toUpperCase());
+    const next = new URLSearchParams(searchParams);
+    next.delete("novo");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, canWrite, openAddModalWithAtivo, setSearchParams]);
 
   const openEditModal = useCallback((e: EquipamentoRow) => {
     setEditingAtivoOriginal(e.ativo);

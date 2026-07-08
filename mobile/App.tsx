@@ -845,6 +845,13 @@ export default function App() {
             setMelosaEquipamentoEmpresa("");
           }
         })
+        .catch(() => {
+          // Patrimônio não cadastrado (404) ou erro de rede: apenas limpa os dados.
+          if (seq === melosaAtivoLookupSeqRef.current) {
+            setMelosaEquipamentoNomeTexto("");
+            setMelosaEquipamentoEmpresa("");
+          }
+        })
         .finally(() => {
           if (seq === melosaAtivoLookupSeqRef.current) {
             setMelosaEquipamentoAtivoLookupLoading(false);
@@ -1023,6 +1030,12 @@ export default function App() {
       if (equipamento) {
         applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true });
       } else {
+        setMelosaEquipamentoNomeTexto("");
+        setMelosaEquipamentoEmpresa("");
+      }
+    } catch {
+      // Patrimônio não cadastrado (404) ou erro de rede: não bloqueia o registro.
+      if (seq === melosaAtivoLookupSeqRef.current) {
         setMelosaEquipamentoNomeTexto("");
         setMelosaEquipamentoEmpresa("");
       }
@@ -2720,8 +2733,10 @@ export default function App() {
       return;
     }
 
+    // Busca a descrição/empresa em segundo plano; não bloqueia o avanço mesmo que
+    // o patrimônio não esteja cadastrado ou a rede falhe.
     if (isOnline && session?.access_token) {
-      await lookupMelosaEquipamentoPatrimonio(melosaFornecedorTexto);
+      void lookupMelosaEquipamentoPatrimonio(melosaFornecedorTexto);
     }
 
     setMessage(null);

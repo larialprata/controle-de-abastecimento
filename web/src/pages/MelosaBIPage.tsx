@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import MelosaMovimentacaoFormModal, {
   type MelosaMovimentacaoFormRow,
@@ -278,6 +278,17 @@ function fmtAtivoEquipamento(m: LinhaMelosa): string {
   );
 }
 
+function normalizeAtivoKey(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function ativoEquipamentoRaw(m: LinhaMelosa): string {
+  return String(m.ativo_equipamento_texto ?? m.fornecedor_texto ?? "").trim();
+}
+
 function fmtObra(m: LinhaMelosa): string {
   return `${m.obra_codigo ?? "—"}${m.obra_nome ? ` · ${m.obra_nome}` : ""}`;
 }
@@ -383,6 +394,7 @@ export default function MelosaBIPage() {
   const [ticketRows, setTicketRows] = useState<MelosaTicketRow[]>([]);
   const [patrimonioFiltro, setPatrimonioFiltro] = useState("");
   const [melosasCadastradas, setMelosasCadastradas] = useState<string[]>([]);
+  const [equipamentosCadastrados, setEquipamentosCadastrados] = useState<Set<string>>(new Set());
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"add" | "edit">("add");
   const [formRow, setFormRow] = useState<MelosaMovimentacaoFormRow | null>(null);
@@ -394,6 +406,16 @@ export default function MelosaBIPage() {
   }, [opUrl]);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
+
+  const isEquipamentoNaoCadastrado = useCallback(
+    (m: LinhaMelosa) => {
+      if (equipamentosCadastrados.size === 0) return false;
+      const raw = ativoEquipamentoRaw(m);
+      if (!raw) return false;
+      return !equipamentosCadastrados.has(normalizeAtivoKey(raw));
+    },
+    [equipamentosCadastrados],
+  );
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -426,9 +448,26 @@ export default function MelosaBIPage() {
       } catch {
         melosasAtivos = [];
       }
+      // Considera qualquer ativo cadastrado (EQUIPAMENTO, MELOSA ou TANQUE) como "existente",
+      // pois uma melosa pode abastecer a si mesma e já está cadastrada.
+      let equipamentosAtivos = new Set<string>();
+      try {
+        const eqJson = await apiGet<{ equipamentos?: { ativo?: string }[] }>(
+          "/v1/equipamentos",
+          token,
+        );
+        equipamentosAtivos = new Set(
+          (eqJson?.equipamentos ?? [])
+            .map((e) => normalizeAtivoKey(e.ativo))
+            .filter(Boolean),
+        );
+      } catch {
+        equipamentosAtivos = new Set();
+      }
       setRaw(rows);
       setObras(obrasJson?.obras ?? []);
       setMelosasCadastradas(melosasAtivos);
+      setEquipamentosCadastrados(equipamentosAtivos);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erro ao carregar");
     } finally {
@@ -970,6 +1009,16 @@ export default function MelosaBIPage() {
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
             Retiradas registradas no app — role horizontalmente se necessário
           </p>
+          {(() => {
+            const naoCadastrados = filtradas.filter(isEquipamentoNaoCadastrado).length;
+            if (naoCadastrados === 0) return null;
+            return (
+              <p className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-amber-200/80 px-2 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-500/25 dark:text-amber-100">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-500" aria-hidden />
+                {naoCadastrados} equipamento(s) com patrimônio não cadastrado no sistema (destacados em amarelo)
+              </p>
+            );
+          })()}
         </div>
         <div className="table-scroll" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
           <table className="w-full min-w-[1320px] border-collapse text-sm">
@@ -1063,8 +1112,28 @@ export default function MelosaBIPage() {
                       <td className={`${tdCls} max-w-[120px] truncate`} title={fmtAtivoPlaca(m)}>
                         {fmtAtivoPlaca(m)}
                       </td>
-                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtAtivoEquipamento(m)}>
-                        {fmtAtivoEquipamento(m)}
+                      <td
+                        className={`${tdCls} max-w-[140px] truncate ${
+                          isEquipamentoNaoCadastrado(m)
+                            ? "bg-amber-200/80 font-semibold text-amber-900 dark:bg-amber-500/30 dark:text-amber-100"
+                            : ""
+                        }`}
+                        title={
+                          isEquipamentoNaoCadastrado(m)
+                            ? `${fmtAtivoEquipamento(m)} — patrimônio não cadastrado. Clique para cadastrar.`
+                            : fmtAtivoEquipamento(m)
+                        }
+                      >
+                        {isEquipamentoNaoCadastrado(m) ? (
+                          <Link
+                            to={`/equipamentos?novo=${encodeURIComponent(ativoEquipamentoRaw(m))}`}
+                            className="underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:hover:text-white"
+                          >
+                            {fmtAtivoEquipamento(m)}
+                          </Link>
+                        ) : (
+                          fmtAtivoEquipamento(m)
+                        )}
                       </td>
                       <td className={`${tdCls} whitespace-nowrap`}>{fmtInsumoMel(m)}</td>
                       <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
