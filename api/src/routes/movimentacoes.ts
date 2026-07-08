@@ -261,6 +261,16 @@ const tanqueUpdateSchema = z
     message: "Informe ao menos um campo para editar",
   });
 
+const tanqueRetiradaEquipamentoWebSchema = z.object({
+  obra_codigo: z.number().int(),
+  data_hora: z.string().datetime(),
+  tanque_numero: tanqueNumeroSchema,
+  ativo_equipamento_texto: z.string().min(1),
+  quantidade_litros: z.number().positive(),
+  combustivel_tipo: z.string().optional().nullable(),
+  obs: z.string().optional().nullable(),
+});
+
 const MELOSA_DB_COLUMN_KEYS = [
   "operation_id",
   "usuario_id",
@@ -753,6 +763,67 @@ router.delete("/tanque/movimentacoes/:operationId", requireAuth, async (req: Aut
 
     const { error: deleteError } = await service.from("movimentacoes").delete().eq("operation_id", operationId);
     if (deleteError) return res.status(400).json({ error: deleteError.message });
+    return res.json({ ok: true, operation_id: operationId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+// Retirada do tanque DIRETO para um equipamento (registro manual pela web).
+// Abate o saldo do tanque e NÃO cria ciclo de melosa.
+router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const parsedBody = tanqueRetiradaEquipamentoWebSchema.safeParse(req.body);
+    if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const payload = parsedBody.data;
+
+    try {
+      await assertUserObraAccess(service, req.userId, payload.obra_codigo);
+    } catch (e) {
+      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+
+    const { data: tanqueCadastrado } = await service
+      .from("equipamentos")
+      .select("ativo")
+      .eq("tipo", "TANQUE")
+      .eq("obra_codigo", payload.obra_codigo)
+      .eq("tanque_numero", payload.tanque_numero)
+      .maybeSingle();
+    if (!tanqueCadastrado) {
+      return res.status(400).json({
+        error: `Tanque ${payload.tanque_numero} não cadastrado para a obra ${payload.obra_codigo}.`,
+      });
+    }
+
+    const patrimonio = payload.ativo_equipamento_texto.trim().toUpperCase();
+    if (!patrimonio) return res.status(400).json({ error: "Informe o patrimônio do equipamento." });
+
+    const operationId = randomUUID();
+    const quantidadeStr = String(payload.quantidade_litros);
+
+    const { error } = await service.from("movimentacoes").insert({
+      operation_id: operationId,
+      usuario_id: req.userId,
+      tipo: "RETIRADA_TANQUE",
+      obra_codigo: payload.obra_codigo,
+      data_hora: new Date(payload.data_hora).toISOString(),
+      litros: payload.quantidade_litros,
+      combustivel_tipo: payload.combustivel_tipo?.trim() || null,
+      tanque_numero: payload.tanque_numero,
+      tanque_quantidade_abastecida: quantidadeStr,
+      placa_texto: patrimonio,
+      fornecedor_texto: patrimonio,
+      obs: payload.obs?.trim() || null,
+    });
+
+    if (error) return res.status(400).json({ error: error.message });
+
     return res.json({ ok: true, operation_id: operationId });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import TanqueTicketModal, { type TanqueTicketRow } from "../components/bi/TanqueTicketModal";
+import TanqueRetiradaEquipamentoModal from "../components/bi/TanqueRetiradaEquipamentoModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
 import { useAuth } from "../state/AuthContext";
@@ -455,6 +456,7 @@ export default function TanqueBIPage() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [ticketOpen, setTicketOpen] = useState(false);
+  const [retiradaEquipOpen, setRetiradaEquipOpen] = useState(false);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
 
@@ -890,6 +892,14 @@ export default function TanqueBIPage() {
       <div className={`mb-4 flex flex-wrap items-center justify-end gap-2 ${glassPanel} px-4 py-3`}>
         <button
           type="button"
+          onClick={() => setRetiradaEquipOpen(true)}
+          disabled={loading}
+          className="mr-auto rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Retirar para equipamento
+        </button>
+        <button
+          type="button"
           onClick={() => void openTicket()}
           disabled={loading || selectedTicketRows.length === 0}
           className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1007,6 +1017,15 @@ export default function TanqueBIPage() {
       {ticketOpen && ticketRows.length > 0 ? (
         <TanqueTicketModal rows={ticketRows} variant={ticketVariant} onClose={() => setTicketOpen(false)} />
       ) : null}
+
+      <TanqueRetiradaEquipamentoModal
+        open={retiradaEquipOpen}
+        obras={obras}
+        apiBase={apiBase}
+        token={authToken}
+        onClose={() => setRetiradaEquipOpen(false)}
+        onSaved={() => void load()}
+      />
     </div>
   );
 }
