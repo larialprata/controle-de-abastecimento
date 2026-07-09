@@ -13,7 +13,7 @@ export {
 } from "./descarbonizeExcel";
 
 import type { DescarbonizeExcelRowInput } from "./descarbonizeExcel";
-import { downloadDescarbonizeExcel } from "./descarbonizeExcel";
+import { downloadDescarbonizeExcelByMonth } from "./descarbonizeExcel";
 
 export type MelosaExcelRowInput = {
   obraCodigo?: number;
@@ -24,6 +24,7 @@ export type MelosaExcelRowInput = {
   insumoRegistro?: string | null;
   quantidadeAbastecida?: string | null;
   placaTexto?: string | null;
+  ativoEquipamento?: string | null;
 };
 
 function toDescarbonizeRow(row: MelosaExcelRowInput): DescarbonizeExcelRowInput {
@@ -35,13 +36,15 @@ function toDescarbonizeRow(row: MelosaExcelRowInput): DescarbonizeExcelRowInput 
   return {
     obraCodigo: row.obraCodigo,
     obraNome: row.obraNome,
-    categoriaDados: row.melosaCategoria,
+    // Abastecimento de equipamento é sempre fonte móvel.
+    categoriaDados: "MOVEL",
     dataHora: row.dataHora,
     insumo,
     medidorInicial: row.quantidadeAbastecida,
     medidorFinal: null,
     quantidadeLitros,
     placaTexto: row.placaTexto,
+    ativoEquipamento: row.ativoEquipamento,
   };
 }
 
@@ -57,5 +60,5 @@ export async function downloadMelosaDescarbonizeExcel(
   rows: MelosaExcelRowInput[],
   filenamePrefix = "melosa-descarbonize",
 ): Promise<void> {
-  await downloadDescarbonizeExcel(rows.map(toDescarbonizeRow), filenamePrefix);
+  await downloadDescarbonizeExcelByMonth(rows.map(toDescarbonizeRow), filenamePrefix);
 }

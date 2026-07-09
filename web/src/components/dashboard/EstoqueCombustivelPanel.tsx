@@ -3,6 +3,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { apiGet } from "../../lib/api";
 import { glassPanel, glassSelect } from "../../lib/glass";
 import TanqueGrandeVisual from "./TanqueGrandeVisual";
+import EstoqueDetalheModal, { type EstoqueDetalheAlvo } from "./EstoqueDetalheModal";
 
 export type EstoqueTanqueItem = {
   combustivel_key: string;
@@ -15,6 +16,20 @@ export type EstoqueTanqueItem = {
   abaixo_ponto_pedido: boolean;
   total_entrada: number;
   total_retirada_alocada: number;
+};
+
+export type EstoqueTanqueRegistradoItem = {
+  ativo: string;
+  nome: string | null;
+  obra_codigo: number;
+  obra_nome: string | null;
+  tanque_numero: number;
+  label: string;
+  saldo_litros: number;
+  capacidade_litros: number;
+  ocupacao_pct: number;
+  ponto_pedido_litros: number;
+  abaixo_ponto_pedido: boolean;
 };
 
 export type EstoqueMelosaItem = {
@@ -50,7 +65,7 @@ export type EstoqueDashboardResposta = {
     total_devolvido: number;
   };
   tanques_por_combustivel: EstoqueTanqueItem[];
-  tanques_obra: EstoqueTanqueObraItem[];
+  tanques_registrados: EstoqueTanqueRegistradoItem[];
   melosas: EstoqueMelosaItem[];
 };
 
@@ -76,6 +91,7 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
   const [data, setData] = useState<EstoqueDashboardResposta | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detalhe, setDetalhe] = useState<EstoqueDetalheAlvo | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -109,7 +125,7 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
   }, [load]);
 
   const dieselS10 = data?.tanques_por_combustivel?.find((t) => t.combustivel_key === "DIESEL_S10");
-  const tanquesObra = data?.tanques_obra ?? [];
+  const tanquesRegistrados = data?.tanques_registrados ?? [];
   const melosasLista = data?.melosas ?? [];
   const filtroMelosa = ativoMelosa.trim().toUpperCase();
 
@@ -162,35 +178,42 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
         <div className="space-y-6">
           <div>
             <p className={`${labelCls} mb-3`}>
-              Tanques da obra {tanquesObra.length > 0 ? `(${tanquesObra.length})` : ""}
+              Tanques da obra {tanquesRegistrados.length > 0 ? `(${tanquesRegistrados.length})` : ""}
             </p>
-            {tanquesObra.length > 0 ? (
+            {tanquesRegistrados.length > 0 ? (
               <div className="grid grid-cols-2 justify-items-center gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                {tanquesObra.map((t) => {
-                  const titulo =
-                    t.nome?.trim() ||
-                    `Tanque ${t.tanque_numero} - (${t.obra_codigo}${t.obra_nome ? ` - ${t.obra_nome}` : ""})`;
-                  const subtitulo = t.nome?.trim()
-                    ? `${t.obra_codigo}${t.obra_nome ? ` — ${t.obra_nome}` : ""}`
-                    : undefined;
-                  return (
-                    <TanqueGrandeVisual
-                      key={t.ativo}
-                      tipo="tanque"
-                      titulo={titulo}
-                      saldoLitros={t.saldo_litros}
-                      capacidadeLitros={t.capacidade_litros}
-                      ocupacaoPct={t.ocupacao_pct}
-                      cor="#EAB308"
-                      abaixoPonto={t.abaixo_ponto_pedido}
-                      subtitulo={subtitulo}
-                    />
-                  );
-                })}
+                {tanquesRegistrados.map((t) => (
+                  <TanqueGrandeVisual
+                    key={`${t.obra_codigo}-${t.tanque_numero}-${t.ativo}`}
+                    tipo="tanque"
+                    titulo={t.label}
+                    saldoLitros={t.saldo_litros}
+                    capacidadeLitros={t.capacidade_litros}
+                    ocupacaoPct={t.ocupacao_pct}
+                    cor={dieselS10?.cor ?? "#EAB308"}
+                    abaixoPonto={t.abaixo_ponto_pedido}
+                    subtitulo={
+                      t.obra_nome ? `${t.obra_codigo} · ${t.obra_nome}` : `Obra ${t.obra_codigo}`
+                    }
+                    onClick={() => setDetalhe({ kind: "tanque", item: t })}
+                  />
+                ))}
+              </div>
+            ) : dieselS10 ? (
+              <div className="flex justify-center sm:justify-start">
+                <TanqueGrandeVisual
+                  tipo="tanque"
+                  titulo="Diesel S10"
+                  saldoLitros={dieselS10.saldo_litros}
+                  capacidadeLitros={dieselS10.capacidade_litros}
+                  ocupacaoPct={dieselS10.ocupacao_pct}
+                  cor={dieselS10.cor}
+                  abaixoPonto={dieselS10.abaixo_ponto_pedido}
+                />
               </div>
             ) : (
-              <p className="py-4 text-center text-sm text-slate-500 dark:text-slate-400">
-                Nenhum tanque cadastrado no filtro atual. Cadastre em Tanques na web.
+              <p className="py-6 text-sm text-slate-500 dark:text-slate-400">
+                Nenhum tanque cadastrado no filtro atual.
               </p>
             )}
           </div>
@@ -233,6 +256,7 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
                         subtitulo={
                           m.ultimo_ciclo_numero != null ? `Ciclo ${m.ultimo_ciclo_numero}` : undefined
                         }
+                        onClick={() => setDetalhe({ kind: "melosa", item: m })}
                       />
                     </div>
                   );
@@ -245,6 +269,10 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
             )}
           </div>
         </div>
+      ) : null}
+
+      {detalhe ? (
+        <EstoqueDetalheModal alvo={detalhe} token={token} onClose={() => setDetalhe(null)} />
       ) : null}
     </section>
   );

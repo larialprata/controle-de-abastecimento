@@ -5,7 +5,8 @@ export const WEB_PAGES = [
   { key: "equipamentos", label: "Equipamentos", path: "/equipamentos" },
   { key: "tanques", label: "Tanques", path: "/tanques" },
   { key: "bi_tanque", label: "BI Tanque", path: "/bi" },
-  { key: "bi_melosa", label: "BI Melosa", path: "/bi/melosa" },
+  { key: "bi_melosa", label: "BI abastecimentos", path: "/bi/melosa" },
+  { key: "consumo_medio", label: "Consumo médio", path: "/consumo-medio" },
 ] as const;
 
 export type WebPageKey = (typeof WEB_PAGES)[number]["key"];
@@ -85,6 +86,7 @@ export function pathnameToPageKey(pathname: string): WebPageKey {
   if (pathname.startsWith("/equipamentos")) return "equipamentos";
   if (pathname.startsWith("/tanques")) return "tanques";
   if (pathname.startsWith("/bi/melosa")) return "bi_melosa";
+  if (pathname.startsWith("/consumo-medio")) return "consumo_medio";
   if (pathname.startsWith("/bi")) return "bi_tanque";
   return "dashboard";
 }
@@ -96,6 +98,7 @@ export function navItemToPageKey(to: string): WebPageKey {
   if (to === "/equipamentos") return "equipamentos";
   if (to === "/tanques") return "tanques";
   if (to === "/bi/melosa") return "bi_melosa";
+  if (to === "/consumo-medio") return "consumo_medio";
   if (to === "/bi") return "bi_tanque";
   return "dashboard";
 }

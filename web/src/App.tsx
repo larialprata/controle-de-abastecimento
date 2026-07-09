@@ -1,11 +1,13 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 import type React from "react";
-import { AuthProvider, useAuth } from "./state/AuthContext";
+import { AuthProvider } from "./state/AuthProvider";
+import { useAuth } from "./state/useAuth";
 import { ThemeProvider } from "./state/ThemeContext";
 import DashboardLayout from "./components/dashboard/DashboardLayout";
 import LoginPage from "./pages/LoginPage";
 import HomePage from "./pages/HomePage";
 import MelosaBIPage from "./pages/MelosaBIPage";
+import ConsumoMedioPage from "./pages/ConsumoMedioPage";
 import TanqueBIPage from "./pages/TanqueBIPage";
 import UsersPage from "./pages/UsersPage";
 import ContratosPage from "./pages/ContratosPage";
@@ -146,6 +148,14 @@ function AppRoutes() {
           element={
             <RequirePage page="bi_melosa">
               <MelosaBIPage />
+            </RequirePage>
+          }
+        />
+        <Route
+          path="consumo-medio"
+          element={
+            <RequirePage page="consumo_medio">
+              <ConsumoMedioPage />
             </RequirePage>
           }
         />

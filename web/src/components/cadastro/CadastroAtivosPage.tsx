@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Pencil, Plus, QrCode, Trash2, Upload, X } from "lucide-react";
 import { useAuth } from "../../state/AuthContext";
 import type { WebWritePageKey } from "../../lib/webPermissions";
@@ -10,6 +10,7 @@ import {
   labelEquipamentoEmpresa,
   normalizeEquipamentoEmpresa,
 } from "../../lib/equipamentoEmpresa";
+import { EMPRESA_LABEL } from "../../lib/obrasEmpresa";
 import {
   chunkImportRows,
   downloadEquipamentosImportTemplate,
@@ -77,6 +78,7 @@ export default function CadastroAtivosPage({
 }: CadastroAtivosPageProps) {
   const { token, canWriteOnPage, canAccessObra } = useAuth();
   const canWrite = canWriteOnPage(writePageKey);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [equipamentos, setEquipamentos] = useState<EquipamentoRow[]>([]);
   const [obras, setObras] = useState<ObraRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -97,6 +99,7 @@ export default function CadastroAtivosPage({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [formMobilidade, setFormMobilidade] = useState<"" | EquipamentoMobilidade>("");
   const [formEmpresa, setFormEmpresa] = useState("");
+  const [empresaCustomMode, setEmpresaCustomMode] = useState(false);
   const [filtroMobilidade, setFiltroMobilidade] = useState<"" | EquipamentoMobilidade>("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroObraCodigo, setFiltroObraCodigo] = useState("");
@@ -159,6 +162,14 @@ export default function CadastroAtivosPage({
     () => collectEmpresasFromRows(equipamentos),
     [equipamentos],
   );
+
+  const empresasOpcoes = useMemo(() => {
+    const set = new Set<string>(empresasCadastradas);
+    Object.values(EMPRESA_LABEL).forEach((label) => set.add(label));
+    const atual = normalizeEquipamentoEmpresa(formEmpresa);
+    if (atual) set.add(atual);
+    return [...set].sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  }, [empresasCadastradas, formEmpresa]);
 
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase();
@@ -267,17 +278,31 @@ export default function CadastroAtivosPage({
 
   const isEditing = editingAtivoOriginal != null;
 
-  const openAddModal = useCallback(() => {
+  const openAddModalWithAtivo = useCallback((ativo: string) => {
     setEditingAtivoOriginal(null);
-    setFormAtivo("");
+    setFormAtivo(ativo);
     setFormNome("");
     setFormObraCodigo("");
     setFormCapacidadeLitros("");
     setFormMobilidade("");
     setFormEmpresa("");
+    setEmpresaCustomMode(false);
     setFormError(null);
     setFormOpen(true);
   }, []);
+
+  const openAddModal = useCallback(() => {
+    openAddModalWithAtivo("");
+  }, [openAddModalWithAtivo]);
+
+  useEffect(() => {
+    const ativo = searchParams.get("novo")?.trim();
+    if (!ativo || !canWrite) return;
+    openAddModalWithAtivo(ativo.toUpperCase());
+    const next = new URLSearchParams(searchParams);
+    next.delete("novo");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, canWrite, openAddModalWithAtivo, setSearchParams]);
 
   const openEditModal = useCallback((e: EquipamentoRow) => {
     setEditingAtivoOriginal(e.ativo);
@@ -290,7 +315,8 @@ export default function CadastroAtivosPage({
         : "",
     );
     setFormMobilidade(e.mobilidade ?? "");
-    setFormEmpresa(e.empresa ?? "");
+    setFormEmpresa(normalizeEquipamentoEmpresa(e.empresa) ?? "");
+    setEmpresaCustomMode(false);
     setFormError(null);
     setFormOpen(true);
   }, []);
@@ -400,6 +426,7 @@ export default function CadastroAtivosPage({
       setFormCapacidadeLitros("");
       setFormMobilidade("");
       setFormEmpresa("");
+      setEmpresaCustomMode(false);
       await load();
       if (enableQrCode && wasCreate) {
         setQrTarget(savedRow);
@@ -565,21 +592,21 @@ export default function CadastroAtivosPage({
     (canWrite ? 1 : 0);
 
   return (
-    <div>
+    <div className="page-shell">
       <Link
         to="/"
-        className="mb-6 inline-flex items-center gap-2 text-sm font-semibold text-accent hover:underline"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-accent hover:underline"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
         Início
       </Link>
 
-      <header className={`mb-6 p-5 ${glassPanel}`}>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">{title}</h1>
+      <header className={`${glassPanel} px-4 py-4 sm:p-5`}>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">{title}</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">{description}</p>
       </header>
 
-      <div className={`mb-4 flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
+      <div className={`flex flex-wrap items-end gap-3 p-3 sm:gap-4 sm:p-4 ${glassPanel}`}>
         <div className="flex flex-col gap-1">
           <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Atualizar
@@ -770,7 +797,7 @@ export default function CadastroAtivosPage({
       ) : null}
 
       <div className={`overflow-hidden p-0 ${glassPanel}`}>
-        <div className="overflow-x-auto">
+        <div className="table-scroll">
           <table className="w-full min-w-[480px] border-collapse text-sm">
             <thead>
               <tr>
@@ -1023,24 +1050,58 @@ export default function CadastroAtivosPage({
                   <label htmlFor="cadastro-form-empresa" className="mb-1 block text-xs font-bold uppercase text-slate-500">
                     Empresa (opcional)
                   </label>
-                  <input
-                    id="cadastro-form-empresa"
-                    type="text"
-                    list="cadastro-empresas-sugestoes"
-                    className={glassField}
-                    placeholder="Ex.: Dimensional, Construtora Alfa"
-                    value={formEmpresa}
-                    onChange={(e) => setFormEmpresa(e.target.value)}
-                    disabled={formSaving}
-                    maxLength={100}
-                  />
-                  <datalist id="cadastro-empresas-sugestoes">
-                    {empresasCadastradas.map((empresa) => (
-                      <option key={empresa} value={empresa} />
-                    ))}
-                  </datalist>
+                  {empresaCustomMode ? (
+                    <div className="flex gap-2">
+                      <input
+                        id="cadastro-form-empresa"
+                        type="text"
+                        className={glassField}
+                        placeholder="Ex.: Construtora Alfa"
+                        value={formEmpresa}
+                        onChange={(e) => setFormEmpresa(e.target.value)}
+                        disabled={formSaving}
+                        maxLength={100}
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmpresaCustomMode(false);
+                          setFormEmpresa("");
+                        }}
+                        disabled={formSaving}
+                        className="shrink-0 rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+                      >
+                        Lista
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      id="cadastro-form-empresa"
+                      className={glassField}
+                      value={formEmpresa}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "__nova__") {
+                          setEmpresaCustomMode(true);
+                          setFormEmpresa("");
+                        } else {
+                          setFormEmpresa(v);
+                        }
+                      }}
+                      disabled={formSaving}
+                    >
+                      <option value="">Sem empresa</option>
+                      {empresasOpcoes.map((empresa) => (
+                        <option key={empresa} value={empresa}>
+                          {empresa}
+                        </option>
+                      ))}
+                      <option value="__nova__">➕ Nova empresa…</option>
+                    </select>
+                  )}
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Informe o nome da empresa proprietária do equipamento.
+                    Selecione a empresa proprietária ou escolha <strong>Nova empresa</strong> para cadastrar outra.
                   </p>
                 </div>
               ) : null}

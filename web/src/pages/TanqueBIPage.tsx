@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import TanqueTicketModal, { type TanqueTicketRow } from "../components/bi/TanqueTicketModal";
+import TanqueRetiradaEquipamentoModal from "../components/bi/TanqueRetiradaEquipamentoModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
 import { useAuth } from "../state/AuthContext";
@@ -40,6 +41,12 @@ type LinhaTanque = Record<string, unknown> & {
   data_hora?: string;
   litros?: number;
   combustivel_tipo?: string | null;
+  nota_numero?: string | number | null;
+  nota_storage_path?: string | null;
+  valor_unitario?: string | number | null;
+  fornecedor_texto?: string | null;
+  placa_texto?: string | null;
+  placa_caminhao?: string | null;
 };
 
 function fmt(v: unknown): string {
@@ -145,6 +152,15 @@ function fmtInsumoTicket(m: LinhaTanque): string {
 
 function calcQuantidadeLitros(m: LinhaTanque): number | null {
   return resolveLitrosMovimentoTanque(m);
+}
+
+function fmtValorUnitario(m: LinhaTanque): string {
+  if (!isEntradaTanque(m)) return "—";
+  const v = m.valor_unitario;
+  if (v === null || v === undefined || v === "") return "—";
+  const n = typeof v === "number" ? v : Number(String(v).replace(",", "."));
+  if (!Number.isFinite(n)) return fmt(v);
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 }
 
 function fmtQuantidade(m: LinhaTanque): string {
@@ -267,7 +283,7 @@ function TanqueBiScrollTable({
 }: TanqueTableProps) {
   const isRetiradaTable = variant === "retirada";
   const isEntradaTable = variant === "entrada";
-  const colCount = isRetiradaTable ? 20 : 13;
+  const colCount = isRetiradaTable ? 15 : 14;
   const visibleKeys = useMemo(() => rows.map((m) => rowKey(m)), [rows, rowKey]);
   const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selectedKeys.includes(k));
 
@@ -277,7 +293,7 @@ function TanqueBiScrollTable({
         <h2 className="text-base font-bold text-slate-900 dark:text-white">{title}</h2>
         <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
       </div>
-      <div className="overflow-auto" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
+      <div className="table-scroll" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
         <table className="w-max min-w-full border-collapse text-sm">
           <thead>
             <tr className="text-left align-middle">
@@ -308,6 +324,7 @@ function TanqueBiScrollTable({
                   <th className={thCls}>Nº nota</th>
                   <th className={thCls}>Foto nota</th>
                   <th className={thCls}>Valor unit. (L)</th>
+                  <th className={thCls}>Fornecedor</th>
                 </>
               ) : null}
               <th className={thCls}>Patrimônio</th>
@@ -321,12 +338,6 @@ function TanqueBiScrollTable({
                   <th className={thCls}>Foto lacre M.</th>
                 </>
               ) : null}
-              {isRetiradaTable ? (
-                <>
-                  <th className={thCls}>Qtd. abast.</th>
-                  <th className={thCls}>Foto medidor</th>
-                </>
-              ) : null}
               <th className={thCls}>Local</th>
               <th className={thCls}>Obs</th>
             </tr>
@@ -334,10 +345,6 @@ function TanqueBiScrollTable({
           <tbody>
             {rows.map((m, idx) => {
               const insumo = fmtCombustivelCurto(m.combustivel_tipo);
-              const valorUnit =
-                isEntradaTanque(m) && m.valor_unitario != null && m.valor_unitario !== ""
-                  ? fmt(m.valor_unitario)
-                  : "—";
               const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
               const k = rowKey(m);
               const checked = selectedKeys.includes(k);
@@ -372,13 +379,23 @@ function TanqueBiScrollTable({
                   <td className={`${tdCls} max-w-[200px]`}>{fmtDateBr(m.data_hora)}</td>
                   <td className={`${tdCls} max-w-[220px]`}>{fmtObra(m)}</td>
                   <td className={`${tdCls} max-w-[200px]`}>{usuarioCell}</td>
-                  <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
+                  <td className={`${tdCls} whitespace-nowrap font-semibold`}>
+                    <div className="flex items-center gap-2">
+                      <span>{fmtQuantidade(m)}</span>
+                      {isRetiradaTable
+                        ? photo(storagePath(m, "tanque_quantidade_abastecida_storage_path"), "Medidor")
+                        : null}
+                    </div>
+                  </td>
                   <td className={`${tdCls} max-w-[120px]`}>{insumo}</td>
                   {isEntradaTable ? (
                     <>
                       <td className={`${tdCls} max-w-[100px]`}>{fmt(m.nota_numero)}</td>
-                      <td className={tdPhotoCls}>{photo(storagePath(m, "nota_storage_path"), "Nota")}</td>
-                      <td className={`${tdCls} max-w-[120px]`}>{valorUnit}</td>
+                      <td className={tdPhotoCls}>
+                        {photo(storagePath(m, "nota_storage_path"), "Nota")}
+                      </td>
+                      <td className={`${tdCls} max-w-[120px] whitespace-nowrap`}>{fmtValorUnitario(m)}</td>
+                      <td className={`${tdCls} max-w-[160px]`}>{fmtFornecedorRow(m)}</td>
                     </>
                   ) : null}
                   <td className={`${tdCls} max-w-[120px]`}>{fmtPatrimonioRow(m)}</td>
@@ -395,10 +412,6 @@ function TanqueBiScrollTable({
                       <td className={`${tdCls} max-w-[100px]`}>{fmt(m.lacre_melosa_numero)}</td>
                       <td className={tdPhotoCls}>
                         {photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.")}
-                      </td>
-                      <td className={`${tdCls} max-w-[100px]`}>{fmt(m.tanque_quantidade_abastecida)}</td>
-                      <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "tanque_quantidade_abastecida_storage_path"), "Medidor")}
                       </td>
                     </>
                   ) : null}
@@ -443,6 +456,7 @@ export default function TanqueBIPage() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [ticketOpen, setTicketOpen] = useState(false);
+  const [retiradaEquipOpen, setRetiradaEquipOpen] = useState(false);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
 
@@ -517,7 +531,16 @@ export default function TanqueBIPage() {
       rows = rows.filter((r) => ticketNumeroParaFiltro(r.ticket_numero).includes(ticketQ));
     }
     const q = busca.trim().toLowerCase();
-    if (q) rows = rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
+    if (q) {
+      const qCompact = busca.trim().toUpperCase().replace(/\s+/g, "");
+      rows = rows.filter((r) => {
+        if (JSON.stringify(r).toLowerCase().includes(q)) return true;
+        if (!qCompact) return false;
+        return [r.placa_texto, r.placa_caminhao, r.fornecedor_texto]
+          .map((v) => String(v ?? "").toUpperCase().replace(/\s+/g, ""))
+          .some((p) => p.length > 0 && p.includes(qCompact));
+      });
+    }
     return rows;
   }, [raw, busca, filtros, obraCodigosEmpresa, ticketFiltro]);
 
@@ -761,17 +784,17 @@ export default function TanqueBIPage() {
   const authToken = token ?? "";
 
   return (
-    <div>
-      <header className={`mb-6 ${glassPanel} px-5 py-5 text-center md:text-left`}>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">BI — Tanque</h1>
+    <div className="page-shell">
+      <header className={`${glassPanel} px-4 py-4 text-center sm:px-5 sm:py-5 md:text-left`}>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">BI — Tanque</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
           Quantidade (L): entrada usa o campo litros da nota. Na saída, litros = medidor final − medidor
           inicial (medidor acumulado sobe ao abastecer; ex.: 50 → 5000 = 4950 L).
-          O Excel Descarbonize usa a mesma planilha modelo do BI Melosa; só as retiradas entram na exportação.
+          O Excel Descarbonize usa a mesma planilha modelo do BI abastecimentos; só as retiradas entram na exportação.
         </p>
       </header>
 
-      <div className={`mb-4 flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
+      <div className={`flex flex-wrap items-end gap-3 p-3 sm:gap-4 sm:p-4 ${glassPanel}`}>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>Atualizar</span>
           <button
@@ -801,7 +824,7 @@ export default function TanqueBIPage() {
           <span className={labelCls}>Até</span>
           <input type="date" className={glassField} value={dataAte} onChange={(e) => setDataAte(e.target.value)} />
         </div>
-        <div className="flex min-w-[160px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Empresa</span>
           <select
             className={glassSelect}
@@ -816,7 +839,7 @@ export default function TanqueBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[180px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Contrato</span>
           <select className={glassSelect} value={contratoFiltro} onChange={(e) => setContratoFiltro(e.target.value)}>
             <option value="">Todos</option>
@@ -827,7 +850,7 @@ export default function TanqueBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[120px] flex-col gap-1">
+        <div className="filter-field">
           <span className={labelCls}>Nº ticket</span>
           <input
             type="search"
@@ -838,7 +861,7 @@ export default function TanqueBIPage() {
             onChange={(e) => setTicketFiltro(e.target.value)}
           />
         </div>
-        <div className="min-w-[200px] flex-1 flex-col gap-1 sm:min-w-[260px]">
+        <div className="filter-field-wide">
           <span className={labelCls}>Buscar</span>
           <input
             className={`${glassField} w-full`}
@@ -867,6 +890,14 @@ export default function TanqueBIPage() {
       ) : null}
 
       <div className={`mb-4 flex flex-wrap items-center justify-end gap-2 ${glassPanel} px-4 py-3`}>
+        <button
+          type="button"
+          onClick={() => setRetiradaEquipOpen(true)}
+          disabled={loading}
+          className="mr-auto rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Retirar para equipamento
+        </button>
         <button
           type="button"
           onClick={() => void openTicket()}
@@ -986,6 +1017,15 @@ export default function TanqueBIPage() {
       {ticketOpen && ticketRows.length > 0 ? (
         <TanqueTicketModal rows={ticketRows} variant={ticketVariant} onClose={() => setTicketOpen(false)} />
       ) : null}
+
+      <TanqueRetiradaEquipamentoModal
+        open={retiradaEquipOpen}
+        obras={obras}
+        apiBase={apiBase}
+        token={authToken}
+        onClose={() => setRetiradaEquipOpen(false)}
+        onSaved={() => void load()}
+      />
     </div>
   );
 }

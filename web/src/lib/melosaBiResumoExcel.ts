@@ -452,7 +452,7 @@ function buildMonthSheet(
   const sheet = workbook.addWorksheet(finalName);
   initSheetColumns(sheet);
 
-  mergeAndStyle(sheet, 1, `BI Melosa — ${finalName}  ·  ${periodoLabel}`, {
+  mergeAndStyle(sheet, 1, `BI abastecimentos — ${finalName}  ·  ${periodoLabel}`, {
     bg: COLORS.titleBg,
     fg: COLORS.titleFg,
     fontSize: 14,
@@ -523,7 +523,7 @@ export async function downloadMelosaBiResumoExcel(
   }
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Controle Abast — BI Melosa";
+  workbook.creator = "Controle Abast — BI abastecimentos";
   workbook.created = new Date();
 
   const periodoLabel =

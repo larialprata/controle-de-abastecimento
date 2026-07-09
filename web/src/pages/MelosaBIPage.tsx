@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
+import MelosaMovimentacaoFormModal, {
+  type MelosaMovimentacaoFormRow,
+} from "../components/bi/MelosaMovimentacaoFormModal";
 import MelosaTicketModal, { type MelosaTicketRow } from "../components/bi/MelosaTicketModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
@@ -45,6 +49,7 @@ type LinhaMelosa = Record<string, unknown> & {
   placa_texto?: string | null;
   ativo_melosa_texto?: string | null;
   ativo_equipamento_texto?: string | null;
+  fornecedor_texto?: string | null;
   ativo_equipamento_nome?: string | null;
   ativo_equipamento_empresa?: string | null;
   tanque_numero?: number | string | null;
@@ -66,6 +71,7 @@ type LinhaMelosa = Record<string, unknown> & {
   local_longitude?: number | string | null;
   local_address?: string | null;
   usuario_full_name?: string | null;
+  obs?: string | null;
 };
 
 function toMelosaExcelInput(m: LinhaMelosa): MelosaExcelRowInput {
@@ -78,6 +84,7 @@ function toMelosaExcelInput(m: LinhaMelosa): MelosaExcelRowInput {
     insumoRegistro: m.melosa_combustivel_tipo_registro,
     quantidadeAbastecida: m.melosa_quantidade_abastecida,
     placaTexto: m.ativo_melosa_texto ?? m.placa_texto,
+    ativoEquipamento: m.ativo_equipamento_texto ?? m.fornecedor_texto,
   };
 }
 
@@ -198,6 +205,21 @@ function fmtLubrificado(m: LinhaMelosa): string {
   return m.melosa_lubrificado === true ? "Sim" : "—";
 }
 
+function fmtUsuarioMelosa(m: LinhaMelosa): string {
+  const nome = m.usuario_full_name;
+  return typeof nome === "string" && nome.trim() ? nome.trim() : "—";
+}
+
+function fmtOperadorMelosa(m: LinhaMelosa): string {
+  const nome = m.melosa_operador_nome;
+  return typeof nome === "string" && nome.trim() ? nome.trim() : "—";
+}
+
+function fmtMotoristaMelosa(m: LinhaMelosa): string {
+  const nome = m.melosa_motorista_equipamento_abastecido;
+  return typeof nome === "string" && nome.trim() ? nome.trim() : "—";
+}
+
 function fmtInsumoMel(m: LinhaMelosa): string {
   const ret = m.melosa_combustivel_tipo_retirada;
   const reg = m.melosa_combustivel_tipo_registro;
@@ -254,6 +276,17 @@ function fmtAtivoEquipamento(m: LinhaMelosa): string {
     m.ativo_equipamento_texto ?? m.fornecedor_texto,
     m.ativo_equipamento_nome,
   );
+}
+
+function normalizeAtivoKey(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function ativoEquipamentoRaw(m: LinhaMelosa): string {
+  return String(m.ativo_equipamento_texto ?? m.fornecedor_texto ?? "").trim();
 }
 
 function fmtObra(m: LinhaMelosa): string {
@@ -321,7 +354,7 @@ function municipioFromAddress(v: unknown): string {
 }
 
 const PAGE_SIZE = 500;
-const TABLE_COL_COUNT = 15;
+const TABLE_COL_COUNT = 18;
 const TABLE_SCROLL_MAX_HEIGHT = "min(28.5rem, 52vh)";
 
 const labelCls =
@@ -338,24 +371,51 @@ const tdPhotoCls =
 
 export default function MelosaBIPage() {
   const { token } = useAuth();
+  const [searchParams] = useSearchParams();
   const periodoInicial = defaultPeriodoMesAtual();
+  const ativoUrl = searchParams.get("ativo")?.trim() ?? "";
+  const deUrl = searchParams.get("de")?.trim() ?? "";
+  const ateUrl = searchParams.get("ate")?.trim() ?? "";
+  const opUrl = searchParams.get("op")?.trim() ?? "";
   const [raw, setRaw] = useState<LinhaMelosa[]>([]);
   const [obras, setObras] = useState<ObraRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [dataDe, setDataDe] = useState(toDateInputValue(periodoInicial.de));
-  const [dataAte, setDataAte] = useState(toDateInputValue(periodoInicial.ate));
+  const [dataDe, setDataDe] = useState(deUrl || toDateInputValue(periodoInicial.de));
+  const [dataAte, setDataAte] = useState(ateUrl || toDateInputValue(periodoInicial.ate));
   const [empresaFiltro, setEmpresaFiltro] = useState<"" | ObraEmpresa>("");
   const [contratoFiltro, setContratoFiltro] = useState("");
   const [ticketFiltro, setTicketFiltro] = useState("");
-  const [busca, setBusca] = useState("");
+  const [busca, setBusca] = useState(ativoUrl);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [ticketOpen, setTicketOpen] = useState(false);
   const [ticketRows, setTicketRows] = useState<MelosaTicketRow[]>([]);
+  const [patrimonioFiltro, setPatrimonioFiltro] = useState("");
+  const [melosasCadastradas, setMelosasCadastradas] = useState<string[]>([]);
+  const [equipamentosCadastrados, setEquipamentosCadastrados] = useState<Set<string>>(new Set());
+  const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState<"add" | "edit">("add");
+  const [formRow, setFormRow] = useState<MelosaMovimentacaoFormRow | null>(null);
+  const [highlightOp, setHighlightOp] = useState(opUrl);
+  const mapSectionRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setHighlightOp(opUrl);
+  }, [opUrl]);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
+
+  const isEquipamentoNaoCadastrado = useCallback(
+    (m: LinhaMelosa) => {
+      if (equipamentosCadastrados.size === 0) return false;
+      const raw = ativoEquipamentoRaw(m);
+      if (!raw) return false;
+      return !equipamentosCadastrados.has(normalizeAtivoKey(raw));
+    },
+    [equipamentosCadastrados],
+  );
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -376,8 +436,38 @@ export default function MelosaBIPage() {
         offset += PAGE_SIZE;
       }
       const obrasJson = await apiGet<{ obras: ObraRow[] }>("/v1/obras", token);
+      let melosasAtivos: string[] = [];
+      try {
+        const eqJson = await apiGet<{ equipamentos?: { ativo?: string }[] }>(
+          "/v1/equipamentos?tipo=MELOSA",
+          token,
+        );
+        melosasAtivos = (eqJson?.equipamentos ?? [])
+          .map((e) => (typeof e.ativo === "string" ? e.ativo.trim().toUpperCase() : ""))
+          .filter(Boolean);
+      } catch {
+        melosasAtivos = [];
+      }
+      // Considera qualquer ativo cadastrado (EQUIPAMENTO, MELOSA ou TANQUE) como "existente",
+      // pois uma melosa pode abastecer a si mesma e já está cadastrada.
+      let equipamentosAtivos = new Set<string>();
+      try {
+        const eqJson = await apiGet<{ equipamentos?: { ativo?: string }[] }>(
+          "/v1/equipamentos",
+          token,
+        );
+        equipamentosAtivos = new Set(
+          (eqJson?.equipamentos ?? [])
+            .map((e) => normalizeAtivoKey(e.ativo))
+            .filter(Boolean),
+        );
+      } catch {
+        equipamentosAtivos = new Set();
+      }
       setRaw(rows);
       setObras(obrasJson?.obras ?? []);
+      setMelosasCadastradas(melosasAtivos);
+      setEquipamentosCadastrados(equipamentosAtivos);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erro ao carregar");
     } finally {
@@ -416,6 +506,15 @@ export default function MelosaBIPage() {
     [contratoFiltro, dataAte, dataDe],
   );
 
+  const patrimoniosMelosaOpcoes = useMemo(() => {
+    const set = new Set<string>(melosasCadastradas);
+    raw.forEach((r) => {
+      const v = r.ativo_melosa_texto ?? r.placa_texto;
+      if (v != null && String(v).trim()) set.add(String(v).trim().toUpperCase());
+    });
+    return Array.from(set).sort();
+  }, [melosasCadastradas, raw]);
+
   const filtradas = useMemo(() => {
     let rows = raw.filter((r) => passesDashboardFilters(r, filtros));
     if (obraCodigosEmpresa) {
@@ -427,12 +526,49 @@ export default function MelosaBIPage() {
     if (ticketQ) {
       rows = rows.filter((r) => ticketNumeroParaFiltro(r.ticket_numero).includes(ticketQ));
     }
+    if (patrimonioFiltro) {
+      const pat = patrimonioFiltro.trim().toUpperCase();
+      rows = rows.filter((r) => {
+        const v = String(r.ativo_melosa_texto ?? r.placa_texto ?? "").trim().toUpperCase();
+        return v === pat;
+      });
+    }
     const q = busca.trim().toLowerCase();
-    if (q) rows = rows.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
+    if (q) {
+      const qCompact = busca.trim().toUpperCase().replace(/\s+/g, "");
+      rows = rows.filter((r) => {
+        if (JSON.stringify(r).toLowerCase().includes(q)) return true;
+        if (!qCompact) return false;
+        return [
+          r.ativo_melosa_texto,
+          r.ativo_equipamento_texto,
+          r.ativo_equipamento_nome,
+          r.placa_texto,
+          r.fornecedor_texto,
+        ]
+          .map((v) => String(v ?? "").toUpperCase().replace(/\s+/g, ""))
+          .some((p) => p.length > 0 && p.includes(qCompact));
+      });
+    }
     return rows;
-  }, [raw, busca, filtros, obraCodigosEmpresa, ticketFiltro]);
+  }, [raw, busca, filtros, obraCodigosEmpresa, patrimonioFiltro, ticketFiltro]);
 
-  const filtroTextoAtivo = Boolean(busca.trim() || contratoFiltro || empresaFiltro || ticketFiltro.trim());
+  const filtroTextoAtivo = Boolean(
+    busca.trim() || contratoFiltro || empresaFiltro || ticketFiltro.trim() || patrimonioFiltro,
+  );
+
+  useEffect(() => {
+    if (!highlightOp || loading) return;
+    const found = filtradas.some(
+      (r) => String(r.operation_id ?? "").trim() === highlightOp,
+    );
+    if (!found) return;
+    const el = document.getElementById(`mov-${highlightOp}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = window.setTimeout(() => setHighlightOp(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [highlightOp, loading, filtradas]);
 
   const rowKey = useCallback((m: LinhaMelosa, idx: number) => biTableRowKey(m, idx), []);
 
@@ -560,8 +696,10 @@ export default function MelosaBIPage() {
         lat,
         lng,
         key: `${String(m.operation_id ?? "")}-${String(m.id ?? idx)}-${idx}`,
+        operationId: typeof m.operation_id === "string" ? m.operation_id : undefined,
         dataHora: `${fmtDateOnly(m.data_hora)} ${fmtTimeOnly(m.data_hora)}`,
         usuario: fmtAtivoPlaca(m),
+        equipamento: fmtAtivoEquipamento(m),
         obra: fmtObra(m),
         litros: fmtQuantidade(m),
         municipio: municipioFromAddress(m.local_address),
@@ -570,6 +708,60 @@ export default function MelosaBIPage() {
     });
     return out;
   }, [filtradas]);
+
+  const focusOperationId = useMemo(() => {
+    if (selectedRows.length === 0) return null;
+    const last = selectedRows[selectedRows.length - 1];
+    return typeof last.operation_id === "string" ? last.operation_id : null;
+  }, [selectedRows]);
+
+  const focusPointDisponivel = useMemo(
+    () => Boolean(focusOperationId) && mapPoints.some((p) => p.operationId === focusOperationId),
+    [focusOperationId, mapPoints],
+  );
+
+  useEffect(() => {
+    if (!focusPointDisponivel) return;
+    mapSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [focusOperationId, focusPointDisponivel]);
+
+  const openAddForm = useCallback(() => {
+    setFormMode("add");
+    setFormRow(null);
+    setFormOpen(true);
+  }, []);
+
+  const openEditForm = useCallback(() => {
+    if (selectedRows.length !== 1) return;
+    const row = selectedRows[0];
+    const operationId = typeof row.operation_id === "string" ? row.operation_id : "";
+    if (!operationId) return;
+    setFormMode("edit");
+    setFormRow({
+      operation_id: operationId,
+      obra_codigo: typeof row.obra_codigo === "number" ? row.obra_codigo : undefined,
+      data_hora: row.data_hora,
+      ativo_melosa_texto: row.ativo_melosa_texto ?? row.placa_texto,
+      ativo_equipamento_texto: row.ativo_equipamento_texto ?? row.fornecedor_texto,
+      tanque_numero: row.tanque_numero,
+      melosa_combustivel_tipo_retirada: row.melosa_combustivel_tipo_retirada,
+      melosa_combustivel_tipo_registro: row.melosa_combustivel_tipo_registro,
+      melosa_quantidade_abastecida: row.melosa_quantidade_abastecida,
+      litros: row.litros,
+      melosa_categoria: row.melosa_categoria,
+      melosa_horimetro_equipamento_abastecido_numero: row.melosa_horimetro_equipamento_abastecido_numero,
+      melosa_motorista_equipamento_abastecido: row.melosa_motorista_equipamento_abastecido,
+      melosa_operador_nome: row.melosa_operador_nome,
+      melosa_lubrificado: row.melosa_lubrificado,
+      obs: row.obs != null ? String(row.obs) : null,
+    });
+    setFormOpen(true);
+  }, [selectedRows]);
+
+  const handleFormSaved = useCallback(() => {
+    setSelectedKeys([]);
+    void load();
+  }, [load]);
 
   const openDeleteConfirm = useCallback(() => {
     if (!token || selectedOperationIds.length === 0) return;
@@ -642,16 +834,16 @@ export default function MelosaBIPage() {
   const authToken = token ?? "";
 
   return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <header className={`${glassPanel} px-5 py-5 text-center md:text-left`}>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white md:text-3xl">BI — Melosa</h1>
+    <div className="page-shell flex flex-col">
+      <header className={`${glassPanel} px-4 py-4 text-center sm:px-5 sm:py-5 md:text-left`}>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">BI — Abastecimentos</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
           Quantidade (L) informada no app na retirada melosa. Use <strong>Exportar Excel Resumo</strong> para a planilha
-          organizada por empresa do equipamento; <strong>Descarbonize</strong> preenche o modelo GHG a partir da linha 2.
+          organizada por empresa do equipamento; <strong>Descarbonize</strong> preenche o modelo GHG (uma aba por mês) a partir da linha 2.
         </p>
       </header>
 
-      <div className={`flex flex-wrap items-end gap-4 p-4 ${glassPanel}`}>
+      <div className={`flex flex-wrap items-end gap-3 p-3 sm:gap-4 sm:p-4 ${glassPanel}`}>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>Atualizar</span>
           <button
@@ -661,6 +853,17 @@ export default function MelosaBIPage() {
             className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
           >
             {loading ? "A carregar…" : "Recarregar"}
+          </button>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={labelCls}>Movimentação</span>
+          <button
+            type="button"
+            onClick={openAddForm}
+            disabled={loading}
+            className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
+          >
+            Adicionar movimentação
           </button>
         </div>
         <div className="flex flex-col gap-1">
@@ -690,7 +893,7 @@ export default function MelosaBIPage() {
           <span className={labelCls}>Até</span>
           <input type="date" className={glassField} value={dataAte} onChange={(e) => setDataAte(e.target.value)} />
         </div>
-        <div className="flex min-w-[160px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Empresa</span>
           <select
             className={glassSelect}
@@ -705,7 +908,7 @@ export default function MelosaBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[180px] flex-col gap-1">
+        <div className="filter-field-md">
           <span className={labelCls}>Contrato</span>
           <select className={glassSelect} value={contratoFiltro} onChange={(e) => setContratoFiltro(e.target.value)}>
             <option value="">Todos</option>
@@ -716,7 +919,22 @@ export default function MelosaBIPage() {
             ))}
           </select>
         </div>
-        <div className="flex min-w-[120px] flex-col gap-1">
+        <div className="filter-field-md">
+          <span className={labelCls}>Patrimônio melosa</span>
+          <select
+            className={glassSelect}
+            value={patrimonioFiltro}
+            onChange={(e) => setPatrimonioFiltro(e.target.value)}
+          >
+            <option value="">Todos</option>
+            {patrimoniosMelosaOpcoes.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="filter-field">
           <span className={labelCls}>Nº ticket</span>
           <input
             type="search"
@@ -727,7 +945,7 @@ export default function MelosaBIPage() {
             onChange={(e) => setTicketFiltro(e.target.value)}
           />
         </div>
-        <div className="flex min-w-[200px] flex-1 flex-col gap-1 sm:min-w-[260px]">
+        <div className="filter-field-wide">
           <span className={labelCls}>Buscar</span>
           <input
             className={`${glassField} w-full`}
@@ -760,6 +978,14 @@ export default function MelosaBIPage() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            onClick={openEditForm}
+            disabled={loading || selectedRows.length !== 1}
+            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Editar selecionada
+          </button>
+          <button
+            type="button"
             onClick={() => void openTicket()}
             disabled={loading || selectedRows.length === 0}
             className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -783,8 +1009,18 @@ export default function MelosaBIPage() {
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
             Retiradas registradas no app — role horizontalmente se necessário
           </p>
+          {(() => {
+            const naoCadastrados = filtradas.filter(isEquipamentoNaoCadastrado).length;
+            if (naoCadastrados === 0) return null;
+            return (
+              <p className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-amber-200/80 px-2 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-500/25 dark:text-amber-100">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-500" aria-hidden />
+                {naoCadastrados} equipamento(s) com patrimônio não cadastrado no sistema (destacados em amarelo)
+              </p>
+            );
+          })()}
         </div>
-        <div className="min-w-0 overflow-auto" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
+        <div className="table-scroll" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
           <table className="w-full min-w-[1320px] border-collapse text-sm">
             <thead>
               <tr className="text-left align-middle">
@@ -818,6 +1054,9 @@ export default function MelosaBIPage() {
                   <th className={`${thCls} min-w-[88px]`}>Horímetro</th>
                   <th className={`${thCls} min-w-[100px]`}>Foto horímetro</th>
                   <th className={`${thCls} min-w-[88px]`}>Lubrificado</th>
+                  <th className={`${thCls} min-w-[120px]`}>Usuário</th>
+                  <th className={`${thCls} min-w-[120px]`}>Operador</th>
+                  <th className={`${thCls} min-w-[120px]`}>Motorista</th>
                   <th className={`${thCls} min-w-[100px]`}>Foto operador</th>
                   <th className={`${thCls} min-w-[180px]`}>Local</th>
                 </tr>
@@ -828,6 +1067,8 @@ export default function MelosaBIPage() {
                   const k = rowKey(m, idx);
                   const checked = selectedKeys.includes(k);
                   const dataRef = fmtDateOnly(m.data_hora);
+                  const opId = String(m.operation_id ?? "").trim();
+                  const destacada = Boolean(highlightOp) && opId === highlightOp;
 
                   const photo = (path: string | undefined, label: string) => (
                     <StoragePhotoCell
@@ -840,7 +1081,15 @@ export default function MelosaBIPage() {
                   );
 
                   return (
-                    <tr key={k} className={zebra}>
+                    <tr
+                      key={k}
+                      id={opId ? `mov-${opId}` : undefined}
+                      className={`${zebra} ${
+                        destacada
+                          ? "outline outline-2 -outline-offset-2 outline-sky-500 bg-sky-100/70 dark:bg-sky-900/40"
+                          : ""
+                      }`}
+                    >
                       <td className={`${tdCls} w-10`}>
                         <input
                           type="checkbox"
@@ -863,8 +1112,28 @@ export default function MelosaBIPage() {
                       <td className={`${tdCls} max-w-[120px] truncate`} title={fmtAtivoPlaca(m)}>
                         {fmtAtivoPlaca(m)}
                       </td>
-                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtAtivoEquipamento(m)}>
-                        {fmtAtivoEquipamento(m)}
+                      <td
+                        className={`${tdCls} max-w-[140px] truncate ${
+                          isEquipamentoNaoCadastrado(m)
+                            ? "bg-amber-200/80 font-semibold text-amber-900 dark:bg-amber-500/30 dark:text-amber-100"
+                            : ""
+                        }`}
+                        title={
+                          isEquipamentoNaoCadastrado(m)
+                            ? `${fmtAtivoEquipamento(m)} — patrimônio não cadastrado. Clique para cadastrar.`
+                            : fmtAtivoEquipamento(m)
+                        }
+                      >
+                        {isEquipamentoNaoCadastrado(m) ? (
+                          <Link
+                            to={`/equipamentos?novo=${encodeURIComponent(ativoEquipamentoRaw(m))}`}
+                            className="underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:hover:text-white"
+                          >
+                            {fmtAtivoEquipamento(m)}
+                          </Link>
+                        ) : (
+                          fmtAtivoEquipamento(m)
+                        )}
                       </td>
                       <td className={`${tdCls} whitespace-nowrap`}>{fmtInsumoMel(m)}</td>
                       <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
@@ -883,6 +1152,15 @@ export default function MelosaBIPage() {
                         }`}
                       >
                         {fmtLubrificado(m)}
+                      </td>
+                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtUsuarioMelosa(m)}>
+                        {fmtUsuarioMelosa(m)}
+                      </td>
+                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtOperadorMelosa(m)}>
+                        {fmtOperadorMelosa(m)}
+                      </td>
+                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtMotoristaMelosa(m)}>
+                        {fmtMotoristaMelosa(m)}
                       </td>
                       <td className={tdPhotoCls}>
                         {photo(storagePath(m, "melosa_equipamento_operador_storage_path"), "Operador")}
@@ -905,15 +1183,15 @@ export default function MelosaBIPage() {
         </div>
       </div>
 
-      <div className={`flex min-w-0 flex-col overflow-hidden ${glassPanel} p-0`}>
+      <div ref={mapSectionRef} className={`flex min-w-0 flex-col overflow-hidden ${glassPanel} p-0`}>
         <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
           <h2 className="text-base font-bold text-slate-900 dark:text-white">Mapa das localizações</h2>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            Pontos GPS das movimentações filtradas
+            Pontos GPS das movimentações filtradas · selecione uma linha para focar no mapa
           </p>
         </div>
         <div className="relative min-h-[360px] overflow-hidden rounded-b-2xl md:min-h-[420px]">
-          <MovementsMap points={mapPoints} />
+          <MovementsMap points={mapPoints} focusKey={focusOperationId} />
         </div>
       </div>
 
@@ -959,6 +1237,20 @@ export default function MelosaBIPage() {
 
       {lightboxSrc ? (
         <ImagePanZoomLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      ) : null}
+
+      {formOpen ? (
+        <MelosaMovimentacaoFormModal
+          open={formOpen}
+          mode={formMode}
+          initialRow={formRow}
+          obras={obras.map((o) => ({ codigo: o.codigo, nome: o.nome }))}
+          melosasAtivos={patrimoniosMelosaOpcoes}
+          apiBase={apiBase}
+          token={authToken}
+          onClose={() => setFormOpen(false)}
+          onSaved={handleFormSaved}
+        />
       ) : null}
 
       {ticketOpen && ticketRows.length > 0 ? (

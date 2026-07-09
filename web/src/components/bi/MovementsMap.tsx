@@ -5,8 +5,10 @@ export type MapPoint = {
   lat: number;
   lng: number;
   key: string;
+  operationId?: string;
   dataHora?: string;
   usuario?: string;
+  equipamento?: string;
   obra?: string;
   litros?: string;
   municipio?: string;
@@ -74,9 +76,10 @@ function mapPinIcon(color: "green" | "red"): google.maps.Icon {
 type InnerProps = {
   points: MapPoint[];
   apiKey: string;
+  focusKey?: string | null;
 };
 
-function MovementsMapInner({ points, apiKey }: InnerProps) {
+function MovementsMapInner({ points, apiKey, focusKey }: InnerProps) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: "abastecimento-google-maps",
     googleMapsApiKey: apiKey,
@@ -113,10 +116,21 @@ function MovementsMapInner({ points, apiKey }: InnerProps) {
       return;
     }
 
+    if (focusKey) return;
+
     const bounds = new google.maps.LatLngBounds();
     plottedPoints.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
     map.fitBounds(bounds, 48);
-  }, [map, plottedPoints]);
+  }, [map, plottedPoints, focusKey]);
+
+  useEffect(() => {
+    if (!map || !focusKey || !window.google?.maps) return;
+    const target = plottedPoints.find((p) => p.operationId === focusKey);
+    if (!target) return;
+    map.panTo({ lat: target.lat, lng: target.lng });
+    map.setZoom(16);
+    setActiveKey(target.key);
+  }, [map, focusKey, plottedPoints]);
 
   const activePoint = activeKey ? plottedPoints.find((p) => p.key === activeKey) : undefined;
 
@@ -182,7 +196,8 @@ function MovementsMapInner({ points, apiKey }: InnerProps) {
           >
             <div style={{ maxWidth: 280, fontSize: 12, lineHeight: 1.45, color: "#1e293b" }}>
               <div><strong>Data/Hora:</strong> {activePoint.dataHora ?? "—"}</div>
-              <div><strong>Usuário:</strong> {activePoint.usuario ?? "—"}</div>
+              <div><strong>Ativo Melosa:</strong> {activePoint.usuario ?? "—"}</div>
+              <div><strong>Equipamento:</strong> {activePoint.equipamento ?? "—"}</div>
               <div><strong>Obra:</strong> {activePoint.obra ?? "—"}</div>
               <div>
                 <strong>Movimento:</strong>{" "}
@@ -200,7 +215,13 @@ function MovementsMapInner({ points, apiKey }: InnerProps) {
   );
 }
 
-export default function MovementsMap({ points }: { points: MapPoint[] }) {
+export default function MovementsMap({
+  points,
+  focusKey,
+}: {
+  points: MapPoint[];
+  focusKey?: string | null;
+}) {
   const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim() ?? "";
 
   if (!apiKey) {
@@ -213,5 +234,5 @@ export default function MovementsMap({ points }: { points: MapPoint[] }) {
     );
   }
 
-  return <MovementsMapInner points={points} apiKey={apiKey} />;
+  return <MovementsMapInner points={points} apiKey={apiKey} focusKey={focusKey} />;
 }

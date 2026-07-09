@@ -6,6 +6,7 @@ export const WEB_PAGE_KEYS = [
   "tanques",
   "bi_tanque",
   "bi_melosa",
+  "consumo_medio",
 ] as const;
 
 export type WebPageKey = (typeof WEB_PAGE_KEYS)[number];

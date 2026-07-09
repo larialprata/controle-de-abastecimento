@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { useAuth } from "../state/AuthContext";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
+import { fmtLitrosDashboard } from "../lib/combustivelControle";
 import { glassField, glassPanel } from "../lib/glass";
 
 type TanqueRow = {
@@ -10,6 +11,7 @@ type TanqueRow = {
   obra_codigo: number | null;
   tanque_numero: number | null;
   capacidade_litros: number | null;
+  saldo_inicial_litros: number | null;
 };
 
 type ObraRow = { codigo: number; nome: string };
@@ -23,9 +25,20 @@ function labelTanque(row: TanqueRow, obraNome?: string | null): string {
   return `${titulo} - (${obra})`;
 }
 
-function fmtCapacidade(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(v);
+function parseCapacidadeInput(value: string): number | null | "invalid" {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed.replace(",", "."));
+  if (!Number.isFinite(n) || n <= 0) return "invalid";
+  return n;
+}
+
+function parseSaldoInput(value: string): number | null | "invalid" {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed.replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) return "invalid";
+  return n;
 }
 
 export default function TanquesPage() {
@@ -40,11 +53,12 @@ export default function TanquesPage() {
   const [filtroObra, setFiltroObra] = useState("");
 
   const [formOpen, setFormOpen] = useState(false);
-  const [editingAtivo, setEditingAtivo] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<TanqueRow | null>(null);
   const [formTanqueNumero, setFormTanqueNumero] = useState("");
   const [formObraCodigo, setFormObraCodigo] = useState("");
   const [formDescricao, setFormDescricao] = useState("");
   const [formCapacidade, setFormCapacidade] = useState("");
+  const [formSaldo, setFormSaldo] = useState("");
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -87,29 +101,47 @@ export default function TanquesPage() {
         String(t.tanque_numero ?? "").includes(q) ||
         (t.nome ?? "").toLowerCase().includes(q) ||
         obraNome.toLowerCase().includes(q) ||
-        String(t.obra_codigo ?? "").includes(q)
+        String(t.obra_codigo ?? "").includes(q) ||
+        String(t.capacidade_litros ?? "").includes(q) ||
+        String(t.saldo_inicial_litros ?? "").includes(q)
       );
     });
   }, [tanques, busca, filtroObra, obrasPorCodigo]);
 
   function openCreateForm() {
-    setEditingAtivo(null);
+    setEditTarget(null);
     setFormTanqueNumero("");
     setFormObraCodigo(obras[0] ? String(obras[0].codigo) : "");
     setFormDescricao("");
     setFormCapacidade("");
+    setFormSaldo("");
     setFormError(null);
     setFormOpen(true);
   }
 
-  function openEditForm(row: TanqueRow) {
-    setEditingAtivo(row.ativo);
-    setFormTanqueNumero(row.tanque_numero != null ? String(row.tanque_numero) : "");
-    setFormObraCodigo(row.obra_codigo != null ? String(row.obra_codigo) : "");
-    setFormDescricao(row.nome ?? "");
-    setFormCapacidade(row.capacidade_litros != null ? String(row.capacidade_litros) : "");
+  function openEditForm(tanque: TanqueRow) {
+    setEditTarget(tanque);
+    setFormTanqueNumero(tanque.tanque_numero != null ? String(tanque.tanque_numero) : "");
+    setFormObraCodigo(tanque.obra_codigo != null ? String(tanque.obra_codigo) : "");
+    setFormDescricao(tanque.nome?.trim() ?? "");
+    setFormCapacidade(
+      tanque.capacidade_litros != null && Number.isFinite(tanque.capacidade_litros)
+        ? String(tanque.capacidade_litros)
+        : "",
+    );
+    setFormSaldo(
+      tanque.saldo_inicial_litros != null && Number.isFinite(tanque.saldo_inicial_litros)
+        ? String(tanque.saldo_inicial_litros)
+        : "",
+    );
     setFormError(null);
     setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditTarget(null);
+    setFormError(null);
   }
 
   async function submitForm(e: React.FormEvent) {
@@ -119,7 +151,8 @@ export default function TanquesPage() {
     const tanqueNumero = Number(formTanqueNumero.trim());
     const obraCodigo = Number(formObraCodigo);
     const descricao = formDescricao.trim();
-    const capacidade = Number(formCapacidade.trim().replace(",", "."));
+    const capacidade = parseCapacidadeInput(formCapacidade);
+    const saldo = parseSaldoInput(formSaldo);
 
     if (!Number.isInteger(tanqueNumero) || tanqueNumero <= 0) {
       setFormError("Informe um número de tanque válido (ex.: 1, 2, 3).");
@@ -133,30 +166,39 @@ export default function TanquesPage() {
       setFormError("Informe a descrição do tanque.");
       return;
     }
-    if (!Number.isFinite(capacidade) || capacidade <= 0) {
-      setFormError("Informe a capacidade em litros.");
+    if (capacidade === "invalid") {
+      setFormError("Capacidade inválida. Informe um valor maior que zero em litros.");
+      return;
+    }
+    if (saldo === "invalid") {
+      setFormError("Quantidade no tanque inválida. Use zero ou um valor positivo em litros.");
       return;
     }
 
     setFormSaving(true);
     setFormError(null);
     try {
-      const body = {
-        tipo: "TANQUE" as const,
+      const payload = {
+        nome: descricao,
         tanque_numero: tanqueNumero,
         obra_codigo: obraCodigo,
-        nome: descricao,
         capacidade_litros: capacidade,
+        saldo_inicial_litros: saldo,
       };
-      if (editingAtivo) {
-        await apiPatch(`/v1/equipamentos/${encodeURIComponent(editingAtivo)}`, token, body);
+
+      if (editTarget) {
+        await apiPatch(`/v1/equipamentos/${encodeURIComponent(editTarget.ativo)}`, token, payload);
       } else {
-        await apiPost("/v1/equipamentos", token, body);
+        await apiPost("/v1/equipamentos", token, {
+          tipo: "TANQUE",
+          ...payload,
+        });
       }
-      setFormOpen(false);
+
+      closeForm();
       await load();
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : "Erro ao salvar tanque");
+      setFormError(err instanceof Error ? err.message : editTarget ? "Erro ao editar tanque" : "Erro ao criar tanque");
     } finally {
       setFormSaving(false);
     }
@@ -178,12 +220,12 @@ export default function TanquesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="page-shell">
       <header>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Tanques</h1>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">Tanques</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
-          Cadastre os tanques por obra com capacidade em litros. No mobile aparecem como{" "}
-          <strong>Descrição - (obra)</strong> para todos os usuários.
+          Cadastre os <strong>tanques por obra</strong> com capacidade e quantidade atual em litros. Na dashboard,
+          entradas somam e retiradas descontam dessa quantidade. No mobile aparecem para todos os usuários.
         </p>
       </header>
 
@@ -241,7 +283,8 @@ export default function TanquesPage() {
                   <th className="px-2 py-2 font-semibold">Obra</th>
                   <th className="px-2 py-2 font-semibold">Descrição</th>
                   <th className="px-2 py-2 font-semibold">Capacidade (L)</th>
-                  {canWrite ? <th className="px-2 py-2 font-semibold w-24" /> : null}
+                  <th className="px-2 py-2 font-semibold">Qtd. no tanque (L)</th>
+                  {canWrite ? <th className="w-24 px-2 py-2 font-semibold" /> : null}
                 </tr>
               </thead>
               <tbody>
@@ -260,7 +303,10 @@ export default function TanquesPage() {
                     </td>
                     <td className="px-2 py-2.5 text-slate-700 dark:text-slate-300">{t.nome ?? "—"}</td>
                     <td className="px-2 py-2.5 tabular-nums text-slate-700 dark:text-slate-300">
-                      {fmtCapacidade(t.capacidade_litros)}
+                      {t.capacidade_litros != null ? fmtLitrosDashboard(t.capacidade_litros) : "—"}
+                    </td>
+                    <td className="px-2 py-2.5 tabular-nums text-slate-700 dark:text-slate-300">
+                      {t.saldo_inicial_litros != null ? fmtLitrosDashboard(t.saldo_inicial_litros) : "—"}
                     </td>
                     {canWrite ? (
                       <td className="px-2 py-2.5">
@@ -268,7 +314,7 @@ export default function TanquesPage() {
                           <button
                             type="button"
                             onClick={() => openEditForm(t)}
-                            className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
+                            className="rounded-lg p-1.5 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
                             title={`Editar ${labelTanque(t, obrasPorCodigo.get(t.obra_codigo ?? 0))}`}
                           >
                             <Pencil className="h-4 w-4" aria-hidden />
@@ -300,11 +346,11 @@ export default function TanquesPage() {
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${glassPanel}`}>
             <div className="mb-4 flex items-start justify-between gap-2">
               <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                {editingAtivo ? "Editar tanque" : "Criar tanque"}
+                {editTarget ? "Editar tanque" : "Criar tanque"}
               </h2>
               <button
                 type="button"
-                onClick={() => setFormOpen(false)}
+                onClick={closeForm}
                 className="rounded-lg p-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10"
               >
                 <X className="h-5 w-5" aria-hidden />
@@ -356,7 +402,7 @@ export default function TanquesPage() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-400">
-                  Capacidade (L)
+                  Capacidade (litros)
                 </label>
                 <input
                   type="number"
@@ -366,8 +412,29 @@ export default function TanquesPage() {
                   onChange={(e) => setFormCapacidade(e.target.value)}
                   placeholder="Ex.: 10000"
                   className={glassField}
-                  required
                 />
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Usada na dashboard para calcular o nível do tanque. Deixe vazio se ainda não souber.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-400">
+                  Quantidade no tanque agora (litros)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={formSaldo}
+                  onChange={(e) => setFormSaldo(e.target.value)}
+                  placeholder="Ex.: 5000"
+                  className={glassField}
+                />
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Informe quanto tem no tanque hoje. Só entradas e retiradas <strong>depois</strong> de salvar passam a
+                  alterar o nível na dashboard — o histórico anterior já está nesse valor.
+                </p>
               </div>
 
               {formError ? (
@@ -377,7 +444,7 @@ export default function TanquesPage() {
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setFormOpen(false)}
+                  onClick={closeForm}
                   className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold dark:border-white/15"
                 >
                   Cancelar
@@ -387,7 +454,7 @@ export default function TanquesPage() {
                   disabled={formSaving}
                   className="flex-1 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                 >
-                  {formSaving ? "Salvando…" : editingAtivo ? "Salvar" : "Criar"}
+                  {formSaving ? "Salvando…" : editTarget ? "Salvar" : "Criar"}
                 </button>
               </div>
             </form>

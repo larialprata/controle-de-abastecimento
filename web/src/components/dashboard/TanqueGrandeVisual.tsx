@@ -11,6 +11,7 @@ type Props = {
   abaixoPonto: boolean;
   subtitulo?: string;
   tipo?: "tanque" | "melosa";
+  onClick?: () => void;
 };
 
 const ESCALA_PCTS = [100, 75, 50, 25, 0] as const;
@@ -33,6 +34,7 @@ export default function TanqueGrandeVisual({
   abaixoPonto,
   subtitulo,
   tipo = "melosa",
+  onClick,
 }: Props) {
   const alvoPct = Math.min(100, Math.max(0, ocupacaoPct));
 
@@ -47,9 +49,28 @@ export default function TanqueGrandeVisual({
       ? "border-amber-400/40 dark:border-amber-500/30"
       : "border-sky-400/40 dark:border-sky-500/30";
 
+  const clicavel = typeof onClick === "function";
+  const interacao = clicavel
+    ? "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-lg hover:ring-2 hover:ring-sky-400/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+    : "";
+
   return (
     <article
-      className={`flex w-[168px] flex-col rounded-2xl border bg-white/60 shadow-sm backdrop-blur-sm dark:bg-slate-900/50 ${bordaTipo}`}
+      className={`flex w-[168px] flex-col rounded-2xl border bg-white/60 shadow-sm backdrop-blur-sm dark:bg-slate-900/50 ${bordaTipo} ${interacao}`}
+      onClick={onClick}
+      onKeyDown={
+        clicavel
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
+      role={clicavel ? "button" : undefined}
+      tabIndex={clicavel ? 0 : undefined}
+      title={clicavel ? `Ver resumo de ${titulo}` : undefined}
     >
       <header className="flex h-10 shrink-0 items-center justify-center border-b border-white/40 px-2 dark:border-white/10">
         <h3 className="truncate text-center text-xs font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100">

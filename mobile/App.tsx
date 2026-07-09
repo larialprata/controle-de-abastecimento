@@ -203,7 +203,7 @@ type Screen =
   | { name: "login" }
   | { name: "registro" }
   | { name: "home" }
-  | { name: "form"; tipo: MovimentoTipo; retiradaStep?: "dados" | "detalhes" | "quantidade_abastecida" | "resumo" }
+  | { name: "form"; tipo: MovimentoTipo; retiradaStep?: "dados" | "detalhes" | "quantidade_abastecida" | "resumo"; entradaStep?: "dados" | "detalhes" | "resumo" }
   | { name: "melosa"; step: "register" | "quantidade_abastecida" | "horimetro" | "resumo" };
 
 /** Espaço reservado no scroll para o rodapé fixo (Salvar/Cancelar) + barra do sistema. */
@@ -662,7 +662,6 @@ function FormActionFooter({ isDarkMode, children }: { isDarkMode: boolean; child
 
 function GpsLocationBlock({
   isDarkMode,
-  busy,
   label,
   localLatitude,
   localLongitude,
@@ -671,7 +670,6 @@ function GpsLocationBlock({
   showDetails = true,
 }: {
   isDarkMode: boolean;
-  busy: boolean;
   label: string;
   localLatitude: number | null;
   localLongitude: number | null;
@@ -679,20 +677,18 @@ function GpsLocationBlock({
   onCapture: () => void;
   showDetails?: boolean;
 }) {
+  const onCaptureRef = useRef(onCapture);
+  onCaptureRef.current = onCapture;
+
+  useEffect(() => {
+    onCaptureRef.current();
+  }, []);
+
   return (
     <>
       <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8, textAlign: "center" }]}>
         {label}
       </Text>
-      <View style={[styles.locationButtonWrap, { marginTop: 2, marginBottom: 0 }]}>
-        <TouchableOpacity
-          style={[styles.ghostButtonLocation, styles.ghostButtonLocationCompact, !isDarkMode ? styles.ghostButtonLight : null]}
-          onPress={onCapture}
-          disabled={busy}
-        >
-          <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Obter localização</Text>
-        </TouchableOpacity>
-      </View>
       {showDetails ? (
         <>
           {localLatitude != null && localLongitude != null ? (
@@ -701,7 +697,7 @@ function GpsLocationBlock({
             </Text>
           ) : (
             <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6, textAlign: "center" }]}>
-              Aguardando GPS… toque em “Obter localização” se não atualizar.
+              Aguardando GPS…
             </Text>
           )}
           <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4, textAlign: "center" }]}>
@@ -859,7 +855,10 @@ export default function App() {
       if (screen.tipo === "ENTRADA_TANQUE_OBRA" || screen.tipo === "RETIRADA_TANQUE") {
         safeCaptureLocationAndAddress();
       }
-      if (screen.tipo !== "RETIRADA_TANQUE" || screen.retiradaStep !== "resumo") {
+      if (
+        (screen.tipo !== "RETIRADA_TANQUE" || screen.retiradaStep !== "resumo") &&
+        (screen.tipo !== "ENTRADA_TANQUE_OBRA" || screen.entradaStep !== "resumo")
+      ) {
         setSignatureScrollLocked(false);
       }
       return;
@@ -1028,6 +1027,13 @@ export default function App() {
           if (equipamento) {
             applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true });
           } else {
+            setMelosaEquipamentoNomeTexto("");
+            setMelosaEquipamentoEmpresa("");
+          }
+        })
+        .catch(() => {
+          // Patrimônio não cadastrado (404) ou erro de rede: apenas limpa os dados.
+          if (seq === melosaAtivoLookupSeqRef.current) {
             setMelosaEquipamentoNomeTexto("");
             setMelosaEquipamentoEmpresa("");
           }
@@ -1214,6 +1220,12 @@ export default function App() {
         setMelosaEquipamentoNomeTexto("");
         setMelosaEquipamentoEmpresa("");
       }
+    } catch {
+      // Patrimônio não cadastrado (404) ou erro de rede: não bloqueia o registro.
+      if (seq === melosaAtivoLookupSeqRef.current) {
+        setMelosaEquipamentoNomeTexto("");
+        setMelosaEquipamentoEmpresa("");
+      }
     } finally {
       if (seq === melosaAtivoLookupSeqRef.current) {
         setMelosaEquipamentoAtivoLookupLoading(false);
@@ -1348,7 +1360,12 @@ export default function App() {
 
   function isNetworkFailureMessage(message: string) {
     const m = message.toLowerCase();
-    return m.includes("network request failed") || m.includes("failed to fetch") || m.includes("network error");
+    return (
+      m.includes("network request failed") ||
+      m.includes("failed to fetch") ||
+      m.includes("network error") ||
+      m.includes("tempo limite de rede")
+    );
   }
 
   function isInvalidTokenMessage(message: string) {
@@ -1926,7 +1943,9 @@ export default function App() {
         const ensureMsg = String(ensureErr?.message ?? ensureErr);
         if (isNetworkFailureMessage(ensureMsg)) {
           throw new Error(
-            `Falha de rede ao chamar /v1/auth/ensure-role na API (${env.API_URL?.trim() ?? "API_URL não configurada"}).`
+            `Falha de rede ao chamar /v1/auth/ensure-role na API (${env.API_URL?.trim() ?? "API_URL não configurada"}). ` +
+              "Confirme que a API está rodando (npm run dev na pasta api), celular e PC na mesma rede, " +
+              "e que EXPO_PUBLIC_API_URL no mobile/.env usa o IPv4 atual do PC (ipconfig). Reinicie o Expo após alterar o .env."
           );
         }
         throw new Error(`Falha em /v1/auth/ensure-role: ${ensureMsg}`);
@@ -2180,6 +2199,72 @@ export default function App() {
     setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "resumo" });
   }
 
+  function continueEntradaTanqueDados() {
+    if (!tanqueNumero) {
+      Alert.alert(
+        "Tanque obrigatório",
+        tanquesObra.length === 0
+          ? "Nenhum tanque cadastrado para esta obra. Peça ao administrador cadastrar em Tanques na web."
+          : "Selecione o tanque da obra.",
+      );
+      return;
+    }
+    if (!obraCombustivelTipo.trim()) {
+      Alert.alert("Combustível obrigatório", "Selecione o tipo de combustível.");
+      return;
+    }
+    if (!placaTexto.trim()) {
+      Alert.alert("Placa obrigatória", "Informe a placa do veículo.");
+      return;
+    }
+    if (!fornecedorTexto.trim()) {
+      Alert.alert("Fornecedor obrigatório", "Informe o fornecedor.");
+      return;
+    }
+    setMessage(null);
+    setScreen({ name: "form", tipo: "ENTRADA_TANQUE_OBRA", entradaStep: "detalhes" });
+  }
+
+  function continueEntradaTanqueDetalhes() {
+    const litros = parseLitros(litrosText);
+    if (litros == null || litros < 0) {
+      Alert.alert("Litros inválidos", "Informe uma quantidade em litros.");
+      return;
+    }
+    const valorUnitario = parseDecimal(valorUnitarioText);
+    if (valorUnitario === null || valorUnitario < 0) {
+      Alert.alert("Valor unitário inválido", "Informe um valor unitário válido.");
+      return;
+    }
+    if (!notaNumero.trim()) {
+      Alert.alert("Número da nota obrigatório", "Informe o número da nota.");
+      return;
+    }
+    if (!notaFotoUri) {
+      Alert.alert("Foto da nota obrigatória", "Selecione uma foto da nota fiscal.");
+      return;
+    }
+    if (!isOnline) {
+      Alert.alert("Requer internet", "Para enviar a foto da nota, você precisa estar online.");
+      return;
+    }
+    setMessage(null);
+    setScreen({ name: "form", tipo: "ENTRADA_TANQUE_OBRA", entradaStep: "resumo" });
+  }
+
+  function continueEntradaTanqueResumo() {
+    if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaOperadorDataUrl)) {
+      Alert.alert("Assinatura obrigatória", "Peça ao operador do tanque para assinar no resumo.");
+      return;
+    }
+    if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaMelosaDataUrl)) {
+      Alert.alert("Assinatura obrigatória", "Peça ao responsável pela entrega para assinar no resumo.");
+      return;
+    }
+    setMessage(null);
+    void submitMovement();
+  }
+
   function continueRetiradaTanqueResumo() {
     if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaOperadorDataUrl)) {
       Alert.alert("Assinatura obrigatória", "Peça ao operador do tanque para assinar no resumo.");
@@ -2274,6 +2359,18 @@ export default function App() {
         return;
       }
     }
+    if (isEntradaTanqueObra) {
+      if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaOperadorDataUrl)) {
+        Alert.alert("Assinatura obrigatória", "Peça ao operador do tanque para assinar no resumo.");
+        setBusy(false);
+        return;
+      }
+      if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaMelosaDataUrl)) {
+        Alert.alert("Assinatura obrigatória", "Peça ao responsável pela entrega para assinar no resumo.");
+        setBusy(false);
+        return;
+      }
+    }
     if (isRetiradaTanque) {
       if (!placaTexto.trim()) {
         Alert.alert("Patrimônio obrigatório", "Selecione o patrimônio (melosa).");
@@ -2328,7 +2425,7 @@ export default function App() {
         return;
       }
       if (localLatitude == null || localLongitude == null) {
-        Alert.alert("Local obrigatório", "Use “Obter localização”.");
+        Alert.alert("Local obrigatório", "Aguarde a captura do GPS ou verifique se os serviços de localização estão ativos.");
         return;
       }
     }
@@ -2344,6 +2441,7 @@ export default function App() {
 
     if (isEntradaTanqueObra) {
       const NOTA_BUCKET = "notas";
+      const TANQUE_ASSINATURAS_BUCKET = "melosa_assinaturas";
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
       if (!userId) throw new Error("Usuário não encontrado para upload da nota.");
@@ -2360,6 +2458,42 @@ export default function App() {
       });
 
       notaStoragePath = filePath;
+
+      async function uploadBase64ToBucket(bucket: string, path: string, dataUrl: string, label: string) {
+        const { base64, contentType } = parseBase64DataUrl(dataUrl);
+        const arrayBuffer = base64ToArrayBuffer(base64);
+        const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
+          contentType,
+          upsert: true,
+        });
+        if (error) {
+          const msg = String(error.message ?? error);
+          const alreadyExists =
+            msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
+          if (!alreadyExists) {
+            throw new Error(`Falha ao enviar ${label}: ${msg}`);
+          }
+        }
+      }
+
+      const assinaturaOperadorPath = `${userId}/tanque/entrada/assinaturas/operador/${operationId}.png`;
+      const assinaturaEntregaPath = `${userId}/tanque/entrada/assinaturas/entrega/${operationId}.png`;
+
+      await uploadBase64ToBucket(
+        TANQUE_ASSINATURAS_BUCKET,
+        assinaturaOperadorPath,
+        tanqueAssinaturaOperadorDataUrl as string,
+        "assinatura do operador do tanque",
+      );
+      await uploadBase64ToBucket(
+        TANQUE_ASSINATURAS_BUCKET,
+        assinaturaEntregaPath,
+        tanqueAssinaturaMelosaDataUrl as string,
+        "assinatura do responsável pela entrega",
+      );
+
+      tanqueAssinaturaOperadorStoragePath = assinaturaOperadorPath;
+      tanqueAssinaturaMelosaStoragePath = assinaturaEntregaPath;
     }
 
     if (isRetiradaTanque) {
@@ -2472,9 +2606,9 @@ export default function App() {
       lacre_melosa_storage_path: isRetiradaTanque ? lacreMelosaStoragePath : null,
       tanque_quantidade_abastecida: isRetiradaTanque ? tanqueQuantidadeAbastecidaTexto.trim() : null,
       tanque_quantidade_abastecida_storage_path: isRetiradaTanque ? tanqueQuantidadeAbastecidaStoragePath : null,
-      tanque_operador_nome: isRetiradaTanque ? driverFullName.trim() || null : null,
-      tanque_assinatura_operador_storage_path: isRetiradaTanque ? tanqueAssinaturaOperadorStoragePath : null,
-      tanque_assinatura_melosa_storage_path: isRetiradaTanque ? tanqueAssinaturaMelosaStoragePath : null,
+      tanque_operador_nome: isTanqueObra ? driverFullName.trim() || null : null,
+      tanque_assinatura_operador_storage_path: isTanqueObra ? tanqueAssinaturaOperadorStoragePath : null,
+      tanque_assinatura_melosa_storage_path: isTanqueObra ? tanqueAssinaturaMelosaStoragePath : null,
       retirada_horimetro_foto_storage_path: null,
 
       local_latitude: localLatitude,
@@ -2786,8 +2920,10 @@ export default function App() {
       return;
     }
 
+    // Busca a descrição/empresa em segundo plano; não bloqueia o avanço mesmo que
+    // o patrimônio não esteja cadastrado ou a rede falhe.
     if (isOnline && session?.access_token) {
-      await lookupMelosaEquipamentoPatrimonio(melosaFornecedorTexto);
+      void lookupMelosaEquipamentoPatrimonio(melosaFornecedorTexto);
     }
 
     setMessage(null);
@@ -3215,18 +3351,15 @@ export default function App() {
 
               {!isMelosaUser ? (
                 <TouchableOpacity
-                  style={[
-                    styles.homeActionCard,
-                    styles.homeActionCardDisabled,
-                    !isDarkMode ? styles.homeActionCardLight : null,
-                    !isDarkMode ? styles.homeActionCardDisabledLight : null,
-                  ]}
-                  disabled
-                  activeOpacity={1}
+                  style={[styles.homeActionCard, !isDarkMode ? styles.homeActionCardLight : null]}
+                  onPress={() => {
+                    resetForm();
+                    setScreen({ name: "form", tipo: "ENTRADA_TANQUE_OBRA", entradaStep: "dados" });
+                  }}
                 >
                   <AdaptiveCardText
-                    style={[styles.homeActionTitle, styles.homeActionTitleDisabled, { fontSize: layout.actionTitleFontSize }]}
-                    lightStyle={styles.homeActionTitleDisabledLight}
+                    style={[styles.homeActionTitle, { fontSize: layout.actionTitleFontSize }]}
+                    lightStyle={styles.homeActionTitleLight}
                     isDarkMode={isDarkMode}
                   >
                     Registrar entrada no tanque da obra
@@ -3983,6 +4116,11 @@ export default function App() {
   if (isTanqueObra) {
     const isEntradaTanqueObra = tipoAtual === "ENTRADA_TANQUE_OBRA";
     const isRetiradaTanque = tipoAtual === "RETIRADA_TANQUE";
+    const entradaStep =
+      screen.name === "form" && screen.tipo === "ENTRADA_TANQUE_OBRA" ? (screen.entradaStep ?? "dados") : "dados";
+    const isEntradaDados = isEntradaTanqueObra && entradaStep === "dados";
+    const isEntradaDetalhes = isEntradaTanqueObra && entradaStep === "detalhes";
+    const isEntradaResumo = isEntradaTanqueObra && entradaStep === "resumo";
     const retiradaStep =
       screen.name === "form" && screen.tipo === "RETIRADA_TANQUE" ? (screen.retiradaStep ?? "dados") : "dados";
     const isRetiradaDados = isRetiradaTanque && retiradaStep === "dados";
@@ -4006,6 +4144,12 @@ export default function App() {
           ? "Quantidade abastecida"
           : isRetiradaResumo
             ? "Resumo e assinaturas"
+            : isEntradaDados
+              ? "Dados da entrada"
+              : isEntradaDetalhes
+                ? "Nota fiscal e quantidade"
+                : isEntradaResumo
+                  ? "Resumo e assinaturas"
         : title;
 
     const tanqueActionFooter = (
@@ -4016,6 +4160,14 @@ export default function App() {
             onPress={() => {
               setBusy(false);
               setMessage(null);
+              if (isEntradaResumo) {
+                setScreen({ name: "form", tipo: "ENTRADA_TANQUE_OBRA", entradaStep: "detalhes" });
+                return;
+              }
+              if (isEntradaDetalhes) {
+                setScreen({ name: "form", tipo: "ENTRADA_TANQUE_OBRA", entradaStep: "dados" });
+                return;
+              }
               if (isRetiradaQuantidadeAbastecida) {
                 setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "detalhes" });
                 return;
@@ -4033,7 +4185,9 @@ export default function App() {
             }}
           >
             <Text style={[styles.secondaryButtonText, !isDarkMode ? styles.secondaryButtonTextLight : null]}>
-              {isRetiradaDetalhes || isRetiradaQuantidadeAbastecida || isRetiradaResumo ? "Voltar" : "Cancelar"}
+              {isRetiradaDetalhes || isRetiradaQuantidadeAbastecida || isRetiradaResumo || isEntradaDetalhes || isEntradaResumo
+                ? "Voltar"
+                : "Cancelar"}
             </Text>
           </TouchableOpacity>
           {isRetiradaDados ? (
@@ -4068,10 +4222,34 @@ export default function App() {
             >
               <Text style={styles.primaryButtonText}>{busy ? "Salvando..." : "Salvar"}</Text>
             </TouchableOpacity>
+          ) : isEntradaDados ? (
+            <TouchableOpacity
+              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
+              disabled={busy}
+              onPress={continueEntradaTanqueDados}
+            >
+              <Text style={styles.primaryButtonText}>Próximo</Text>
+            </TouchableOpacity>
+          ) : isEntradaDetalhes ? (
+            <TouchableOpacity
+              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy || !isOnline ? { opacity: 0.7 } : null]}
+              disabled={busy || !isOnline}
+              onPress={continueEntradaTanqueDetalhes}
+            >
+              <Text style={styles.primaryButtonText}>Próximo</Text>
+            </TouchableOpacity>
+          ) : isEntradaResumo ? (
+            <TouchableOpacity
+              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
+              disabled={busy}
+              onPress={continueEntradaTanqueResumo}
+            >
+              <Text style={styles.primaryButtonText}>{busy ? "Salvando..." : "Salvar"}</Text>
+            </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy || (isEntradaTanqueObra && !isOnline) ? { opacity: 0.7 } : null]}
-              disabled={busy || (isEntradaTanqueObra && !isOnline)}
+              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
+              disabled={busy}
               onPress={submitMovement}
             >
               <Text style={styles.primaryButtonText}>{busy ? "Salvando..." : "Salvar"}</Text>
@@ -4087,18 +4265,18 @@ export default function App() {
         <SafeAreaView style={styles.screenSafeArea}>
           <View style={styles.screenShell}>
             <FormScreenScroll
-              layoutKey={isRetiradaTanque ? retiradaStep : tipoAtual ?? "form"}
+              layoutKey={isRetiradaTanque ? retiradaStep : isEntradaTanqueObra ? entradaStep : tipoAtual ?? "form"}
               scrollEnabled={!signatureScrollLocked}
-              nestedScrollEnabled={isRetiradaResumo}
-              preferCenter={!isRetiradaResumo}
-              keyboardDismissMode={isRetiradaResumo ? "none" : "on-drag"}
-              contentContainerStyle={isRetiradaResumo ? styles.resumoScrollContent : undefined}
+              nestedScrollEnabled={isRetiradaResumo || isEntradaResumo}
+              preferCenter={!isRetiradaResumo && !isEntradaResumo}
+              keyboardDismissMode={isRetiradaResumo || isEntradaResumo ? "none" : "on-drag"}
+              contentContainerStyle={isRetiradaResumo || isEntradaResumo ? styles.resumoScrollContent : undefined}
             >
               <CardMeasuredWrap
                 layout={layout}
                 isDarkMode={isDarkMode}
                 onBoundsChange={setCardBounds}
-                innerStyle={isRetiradaResumo ? styles.glassInnerCompact : undefined}
+                innerStyle={isRetiradaResumo || isEntradaResumo ? styles.glassInnerCompact : undefined}
               >
               <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>Registrar</Text>
               <Text
@@ -4201,7 +4379,7 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaTanqueObra ? (
+              {isEntradaDados ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Motorista (usuário)</Text>
                   <TextInput
@@ -4550,7 +4728,7 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaTanqueObra ? (
+              {isEntradaDetalhes ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Quantidade (L)</Text>
                   <TextInput
@@ -4564,7 +4742,7 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaTanqueObra ? (
+              {isEntradaDetalhes ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Valor Unitário Insumo</Text>
                   <TextInput
@@ -4588,10 +4766,9 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaTanqueObra ? (
+              {isEntradaDetalhes ? (
                 <GpsLocationBlock
                   isDarkMode={isDarkMode}
-                  busy={busy}
                   label="Local (GPS)"
                   localLatitude={localLatitude}
                   localLongitude={localLongitude}
@@ -4600,7 +4777,7 @@ export default function App() {
                 />
               ) : null}
 
-              {isEntradaTanqueObra ? (
+              {isEntradaDetalhes ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>Foto da nota</Text>
                   <View style={[styles.photoBox, !isDarkMode ? styles.photoBoxLight : null]}>
@@ -4629,7 +4806,7 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaTanqueObra ? (
+              {isEntradaDetalhes ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>OBS</Text>
                   <TextInput
@@ -4644,10 +4821,157 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaTanqueObra && !isOnline ? (
+              {isEntradaDetalhes && !isOnline ? (
                 <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>
                   Você está offline. Para enviar foto da nota, precisa estar online.
                 </Text>
+              ) : null}
+
+              {isEntradaResumo ? (
+                <>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
+                    Confira os dados antes de salvar
+                  </Text>
+
+                  <View
+                    style={[
+                      styles.melosaResumoQuantidadeHero,
+                      !isDarkMode ? styles.melosaResumoQuantidadeHeroLight : styles.melosaResumoQuantidadeHeroDark,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.melosaResumoQuantidadeLabel,
+                        !isDarkMode ? styles.melosaResumoQuantidadeLabelLight : styles.melosaResumoQuantidadeLabelDark,
+                      ]}
+                    >
+                      Quantidade recebida
+                    </Text>
+                    <View style={styles.melosaResumoQuantidadeValueRow}>
+                      <Text
+                        style={[
+                          styles.melosaResumoQuantidadeValue,
+                          !isDarkMode ? styles.melosaResumoQuantidadeValueLight : styles.melosaResumoQuantidadeValueDark,
+                        ]}
+                      >
+                        {litrosText.trim() || "—"}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.melosaResumoQuantidadeUnit,
+                          !isDarkMode ? styles.melosaResumoQuantidadeUnitLight : styles.melosaResumoQuantidadeUnitDark,
+                        ]}
+                      >
+                        L
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.melosaResumoQuantidadeInsumo,
+                        !isDarkMode ? styles.melosaResumoQuantidadeInsumoLight : styles.melosaResumoQuantidadeInsumoDark,
+                      ]}
+                    >
+                      {insumoTanqueResumoLabel}
+                    </Text>
+                  </View>
+
+                  <View style={[styles.melosaResumoBox, !isDarkMode ? styles.melosaResumoBoxLight : styles.melosaResumoBoxDark]}>
+                    <ScrollView
+                      style={styles.melosaResumoSummaryScroll}
+                      contentContainerStyle={styles.melosaResumoSummaryScrollContent}
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator
+                    >
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Obra
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {obraTanqueResumoLabel}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Tanque
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {tanqueSelecionado
+                            ? tanqueSelecionado.nome?.trim()
+                              ? `Tanque ${tanqueSelecionado.tanque_numero} — ${tanqueSelecionado.nome}`
+                              : `Tanque ${tanqueSelecionado.tanque_numero}`
+                            : "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Placa
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {placaTexto.trim() || "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Fornecedor
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {fornecedorTexto.trim() || "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Motorista (operador)
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {driverFullName.trim() || "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Nº da nota
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {notaNumero.trim() || "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Valor unitário
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {valorUnitarioText.trim() ? `R$ ${valorUnitarioText.trim()}` : "—"}
+                        </Text>
+                      </View>
+                      {obs.trim() ? (
+                        <View style={styles.melosaResumoRow}>
+                          <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                            OBS
+                          </Text>
+                          <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                            {obs.trim()}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </ScrollView>
+                  </View>
+
+                  <View style={styles.melosaResumoSignatures} collapsable={false}>
+                    <MelosaSignaturePad
+                      label={`Operador do tanque (${driverFullName.trim() || "—"})`}
+                      isDarkMode={isDarkMode}
+                      onSigned={setTanqueAssinaturaOperadorDataUrl}
+                      onClear={() => setTanqueAssinaturaOperadorDataUrl(null)}
+                      onScrollLockChange={setSignatureScrollLocked}
+                    />
+                    <MelosaSignaturePad
+                      label={`Responsável pela entrega (${fornecedorTexto.trim() || "—"})`}
+                      isDarkMode={isDarkMode}
+                      onSigned={setTanqueAssinaturaMelosaDataUrl}
+                      onClear={() => setTanqueAssinaturaMelosaDataUrl(null)}
+                      onScrollLockChange={setSignatureScrollLocked}
+                    />
+                  </View>
+                </>
               ) : null}
 
               {message ? <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>{message}</Text> : null}
@@ -4731,7 +5055,6 @@ export default function App() {
 
             <GpsLocationBlock
               isDarkMode={isDarkMode}
-              busy={busy}
               label="Local (GPS)"
               localLatitude={localLatitude}
               localLongitude={localLongitude}
