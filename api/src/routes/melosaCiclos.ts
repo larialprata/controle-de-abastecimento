@@ -49,6 +49,9 @@ router.get("/melosa-ciclos", requireAuth, async (req: AuthedRequest, res) => {
     const obraScope = await getUserObraCodigos(service, req.userId);
     const ativo = typeof req.query.ativo === "string" ? req.query.ativo.trim() : "";
     const apenasSuspeitos = req.query.suspeitos === "1" || req.query.suspeitos === "true";
+    const obraCodigoRaw =
+      typeof req.query.obra_codigo === "string" ? Number(req.query.obra_codigo) : null;
+    const obraCodigo = obraCodigoRaw != null && Number.isFinite(obraCodigoRaw) ? obraCodigoRaw : null;
     const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : 100;
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
 
@@ -60,7 +63,14 @@ router.get("/melosa-ciclos", requireAuth, async (req: AuthedRequest, res) => {
 
     if (ativo) query = query.ilike("ativo_melosa_texto", ativo);
     if (apenasSuspeitos) query = query.eq("status", "suspeito");
-    if (obraScope) query = query.in("obra_codigo", obraScope);
+    if (obraCodigo != null) {
+      if (obraScope && !obraScope.includes(obraCodigo)) {
+        return res.status(403).json({ error: "Sem acesso a esta obra." });
+      }
+      query = query.eq("obra_codigo", obraCodigo);
+    } else if (obraScope) {
+      query = query.in("obra_codigo", obraScope);
+    }
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: error.message });

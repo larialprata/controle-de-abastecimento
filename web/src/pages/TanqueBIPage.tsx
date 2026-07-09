@@ -7,6 +7,8 @@ import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
 import { useAuth } from "../state/AuthContext";
 import { apiGet, apiPost } from "../lib/api";
 import { fmtTicketNumero, ticketNumeroParaFiltro } from "../lib/ticketNumero";
+import { enrichMelosaTicketRowsWithSignatures } from "../lib/melosaPhotoUrl";
+import { fmtEquipamentoTicketLabel, enrichMelosaRowsWithEquipamentoDescricao } from "../lib/equipamentoTicketLabel";
 import { downloadTanqueDescarbonizeExcel, type TanqueExcelRowInput } from "../lib/tanqueDescarbonizeExcel";
 import { resolveLitrosMovimentoTanque } from "../lib/descarbonizeExcel";
 import { biMovementRowKey, resolveSelectedRows } from "../lib/biSelection";
@@ -47,6 +49,12 @@ type LinhaTanque = Record<string, unknown> & {
   fornecedor_texto?: string | null;
   placa_texto?: string | null;
   placa_caminhao?: string | null;
+  tanque_texto?: string | null;
+  tanque_operador_nome?: string | null;
+  tanque_assinatura_operador_storage_path?: string | null;
+  tanque_assinatura_melosa_storage_path?: string | null;
+  fornecedor_nome?: string | null;
+  ativo_equipamento_nome?: string | null;
 };
 
 function fmt(v: unknown): string {
@@ -213,26 +221,41 @@ function isTicketavelTanque(m: LinhaTanque): boolean {
 
 function buildTanqueTicketRow(m: LinhaTanque): TanqueTicketRow {
   const responsavel =
-    typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
-      ? m.usuario_full_name.trim()
-      : "—";
+    typeof m.tanque_operador_nome === "string" && m.tanque_operador_nome.trim()
+      ? m.tanque_operador_nome.trim()
+      : typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
+        ? m.usuario_full_name.trim()
+        : "—";
   const entrada = isEntradaTanque(m);
   const nota = m.nota_numero != null && String(m.nota_numero).trim() ? String(m.nota_numero).trim() : "";
+  const assinaturaMotoristaPath =
+    typeof m.tanque_assinatura_melosa_storage_path === "string"
+      ? m.tanque_assinatura_melosa_storage_path
+      : null;
+  const assinaturaOperadorPath =
+    typeof m.tanque_assinatura_operador_storage_path === "string"
+      ? m.tanque_assinatura_operador_storage_path
+      : null;
+  const movimento = entrada ? "Entrada" : "Saída";
+  const obsBase = m.obs != null && String(m.obs).trim() ? String(m.obs).trim() : "";
+  const observacoes = obsBase ? `${movimento} · ${obsBase}` : movimento;
+
   return {
     numero: fmtTicketNumero(m.ticket_numero),
     data: fmtDateOnly(m.data_hora),
     responsavelAbastecimento: responsavel,
-    placaAtivo: entrada ? (nota ? `NF ${nota}` : "—") : fmtPatrimonioRow(m),
+    placaAtivo: entrada ? (nota ? `NF ${nota}` : fmtPlacaRow(m)) : fmtPatrimonioRow(m),
     insumo: fmtInsumoTicket(m),
-    horimetro: entrada ? fmtTanqueNumRow(m) : fmtHorimetroRow(m),
+    horimetro: "—",
     litros: fmtQuantidade(m),
+    nomeMotorista: entrada ? responsavel : fmt(m.tanque_texto),
     equipamento: entrada
-      ? `Entrada${fmtEquipamentoRow(m) !== "—" ? ` · ${fmtEquipamentoRow(m)}` : ""}`
-      : fmtEquipamentoRow(m),
-    movimento: entrada ? "Entrada" : "Saída",
+      ? fmtEquipamentoTicketLabel(m.fornecedor_texto, m.fornecedor_nome ?? m.ativo_equipamento_nome)
+      : fmtPatrimonioRow(m),
     obra: fmtObra(m),
-    observacoes: m.obs != null && String(m.obs).trim() ? String(m.obs).trim() : "",
-    nome: responsavel,
+    observacoes,
+    assinaturaMotoristaPath,
+    assinaturaOperadorPath,
   };
 }
 
@@ -456,6 +479,7 @@ export default function TanqueBIPage() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [ticketOpen, setTicketOpen] = useState(false);
+  const [ticketRows, setTicketRows] = useState<TanqueTicketRow[]>([]);
   const [retiradaEquipOpen, setRetiradaEquipOpen] = useState(false);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
@@ -565,11 +589,6 @@ export default function TanqueBIPage() {
     return Array.from(set);
   }, [selectedRows]);
 
-  const ticketRows = useMemo(
-    () => selectedTicketRows.map((m) => buildTanqueTicketRow(m)),
-    [selectedTicketRows],
-  );
-
   const ticketVariant = useMemo((): ObraEmpresa => {
     const set = empresasDasLinhas(
       obras,
@@ -610,7 +629,57 @@ export default function TanqueBIPage() {
           return r;
         }),
       );
+
+      const selectedWithNumeros = selectedTicketRows.map((r) => {
+        const op = typeof r.operation_id === "string" ? r.operation_id : "";
+        const n = op ? numeros[op] : undefined;
+        return n != null ? { ...r, ticket_numero: n } : r;
+      });
+
+      const withDescricao = await enrichMelosaRowsWithEquipamentoDescricao(
+        selectedWithNumeros,
+        async (ativo, obraCodigo) => {
+          const tryLookup = async (obra: number | null) => {
+            try {
+              const json = (await apiPost("/v1/equipamentos/qr/lookup", token, {
+                qr: ativo,
+                obra_codigo: obra,
+              })) as { equipamento?: { nome?: string | null } };
+              const nome = json.equipamento?.nome?.trim();
+              return nome ? { nome } : null;
+            } catch {
+              return null;
+            }
+          };
+          const comObra = await tryLookup(obraCodigo);
+          if (comObra?.nome) return comObra;
+          if (obraCodigo != null) return tryLookup(null);
+          return null;
+        },
+      );
+
+      const rowsForTicket = withDescricao.map((r) => buildTanqueTicketRow(r));
+      setTicketRows(rowsForTicket);
       setTicketOpen(true);
+
+      void enrichMelosaTicketRowsWithSignatures(token, rowsForTicket).then((enriched) => {
+        setTicketRows(enriched);
+        const semPaths = enriched.every(
+          (r) => !r.assinaturaMotoristaPath?.trim() && !r.assinaturaOperadorPath?.trim(),
+        );
+        const falhaCarregar = enriched.some(
+          (r) =>
+            (r.assinaturaMotoristaPath?.trim() && !r.assinaturaMotoristaUrl) ||
+            (r.assinaturaOperadorPath?.trim() && !r.assinaturaOperadorUrl),
+        );
+        if (falhaCarregar) {
+          window.alert("Não foi possível carregar as assinaturas. Reinicie a API e tente novamente.");
+        } else if (semPaths) {
+          window.alert(
+            "Este registro não tem assinaturas salvas. Use um registro feito no app com assinatura na última página.",
+          );
+        }
+      });
     } catch (err: unknown) {
       window.alert(err instanceof Error ? err.message : "Erro ao gerar número do ticket");
     } finally {
@@ -1015,7 +1084,12 @@ export default function TanqueBIPage() {
       ) : null}
 
       {ticketOpen && ticketRows.length > 0 ? (
-        <TanqueTicketModal rows={ticketRows} variant={ticketVariant} onClose={() => setTicketOpen(false)} />
+        <TanqueTicketModal
+          rows={ticketRows}
+          variant={ticketVariant}
+          apiToken={token ?? undefined}
+          onClose={() => setTicketOpen(false)}
+        />
       ) : null}
 
       <TanqueRetiradaEquipamentoModal

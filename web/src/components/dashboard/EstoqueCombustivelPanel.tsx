@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { apiGet } from "../../lib/api";
-import { glassPanel, glassSelect } from "../../lib/glass";
+import { glassPanel } from "../../lib/glass";
 import TanqueGrandeVisual from "./TanqueGrandeVisual";
 import EstoqueDetalheModal, { type EstoqueDetalheAlvo } from "./EstoqueDetalheModal";
 
@@ -69,11 +69,10 @@ export type EstoqueDashboardResposta = {
   melosas: EstoqueMelosaItem[];
 };
 
-type ObraOption = { codigo: number; nome: string };
-
 type Props = {
   token: string | null;
   ativoMelosa?: string;
+  obraCodigo?: string;
 };
 
 const labelCls =
@@ -85,20 +84,15 @@ function metricasMelosa(m: EstoqueMelosaItem) {
   return { cap, ocup };
 }
 
-export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Props) {
-  const [obras, setObras] = useState<ObraOption[]>([]);
-  const [obraCodigo, setObraCodigo] = useState<string>("");
+export default function EstoqueCombustivelPanel({
+  token,
+  ativoMelosa = "",
+  obraCodigo = "",
+}: Props) {
   const [data, setData] = useState<EstoqueDashboardResposta | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detalhe, setDetalhe] = useState<EstoqueDetalheAlvo | null>(null);
-
-  useEffect(() => {
-    if (!token) return;
-    apiGet<{ obras: ObraOption[] }>("/v1/obras", token)
-      .then((json) => setObras(json?.obras ?? []))
-      .catch(() => setObras([]));
-  }, [token]);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -126,8 +120,11 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
 
   const dieselS10 = data?.tanques_por_combustivel?.find((t) => t.combustivel_key === "DIESEL_S10");
   const tanquesRegistrados = data?.tanques_registrados ?? [];
-  const melosasLista = data?.melosas ?? [];
   const filtroMelosa = ativoMelosa.trim().toUpperCase();
+  const melosasLista = (data?.melosas ?? []).filter((m) => {
+    if (!filtroMelosa) return true;
+    return m.ativo.toUpperCase().includes(filtroMelosa);
+  });
 
   return (
     <section className={`${glassPanel} overflow-hidden p-4 md:p-6`}>
@@ -135,30 +132,15 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
         <h2 className="text-lg font-bold uppercase tracking-wide text-slate-900 dark:text-white">
           Dashboard estoque tanques
         </h2>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            className={`${glassSelect} min-w-[10rem]`}
-            value={obraCodigo}
-            onChange={(e) => setObraCodigo(e.target.value)}
-            aria-label="Filtrar por obra"
-          >
-            <option value="">Todas as obras</option>
-            {obras.map((o) => (
-              <option key={o.codigo} value={String(o.codigo)}>
-                {o.codigo} — {o.nome}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={load}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/40 bg-white/50 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-white/70 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Atualizar
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-white/40 bg-white/50 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-white/70 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Atualizar
+        </button>
       </div>
 
       {error ? (
@@ -235,16 +217,8 @@ export default function EstoqueCombustivelPanel({ token, ativoMelosa = "" }: Pro
               <div className="grid grid-cols-2 justify-items-center gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                 {melosasLista.map((m) => {
                   const { cap, ocup } = metricasMelosa(m);
-                  const destacada = filtroMelosa.length > 0 && m.ativo.toUpperCase() === filtroMelosa;
                   return (
-                    <div
-                      key={m.ativo}
-                      className={
-                        destacada
-                          ? "rounded-2xl ring-2 ring-sky-500 ring-offset-2 ring-offset-transparent dark:ring-offset-slate-900"
-                          : ""
-                      }
-                    >
+                    <div key={m.ativo}>
                       <TanqueGrandeVisual
                         tipo="melosa"
                         titulo={m.ativo}

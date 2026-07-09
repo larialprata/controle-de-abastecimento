@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { apiGet } from "../../lib/api";
 import { fmtLitrosDashboard } from "../../lib/combustivelControle";
-import { glassField, glassPanel } from "../../lib/glass";
+import { glassPanel } from "../../lib/glass";
 
 export type FluxoEventoTipo =
   | "entrada_tanque"
@@ -58,8 +58,8 @@ export type MelosaFluxoResposta = {
 
 type Props = {
   token: string | null;
-  ativosDisponiveis: string[];
-  ativoInicial?: string;
+  ativo: string;
+  obraCodigo?: string;
 };
 
 const labelCls =
@@ -135,8 +135,7 @@ function StatMini({
   );
 }
 
-export default function MelosaFluxoPanel({ token, ativosDisponiveis, ativoInicial = "" }: Props) {
-  const [ativo, setAtivo] = useState(ativoInicial);
+export default function MelosaFluxoPanel({ token, ativo, obraCodigo = "" }: Props) {
   const [fluxo, setFluxo] = useState<MelosaFluxoResposta | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,6 +149,7 @@ export default function MelosaFluxoPanel({ token, ativosDisponiveis, ativoInicia
     setError(null);
     try {
       const params = new URLSearchParams({ ativo: ativo.trim() });
+      if (obraCodigo) params.set("obra_codigo", obraCodigo);
       const data = await apiGet<MelosaFluxoResposta>(`/v1/melosa-ciclos/fluxo?${params}`, token);
       setFluxo(data);
     } catch (err: unknown) {
@@ -158,11 +158,7 @@ export default function MelosaFluxoPanel({ token, ativosDisponiveis, ativoInicia
     } finally {
       setLoading(false);
     }
-  }, [token, ativo]);
-
-  useEffect(() => {
-    setAtivo(ativoInicial);
-  }, [ativoInicial]);
+  }, [token, ativo, obraCodigo]);
 
   useEffect(() => {
     void loadFluxo();
@@ -181,40 +177,23 @@ export default function MelosaFluxoPanel({ token, ativosDisponiveis, ativoInicia
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
               Análise de fluxo — tanque → melosa → equipamentos
             </h2>
+            {ativo.trim() ? (
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
+                Melosa: <strong>{ativo.trim()}</strong>
+                {loading ? " · carregando…" : null}
+              </p>
+            ) : (
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
+                Use o filtro da dashboard para selecionar uma melosa.
+              </p>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <label className="filter-field-md">
-          <span className={labelCls}>Melosa</span>
-          <input
-            className={glassField}
-            list="melosas-fluxo-list"
-            placeholder="Ex.: CCL1999"
-            value={ativo}
-            onChange={(e) => setAtivo(e.target.value)}
-          />
-          <datalist id="melosas-fluxo-list">
-            {ativosDisponiveis.map((a) => (
-              <option key={a} value={a} />
-            ))}
-          </datalist>
-        </label>
-        <button
-          type="button"
-          onClick={() => void loadFluxo()}
-          disabled={loading || !ativo.trim()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-50 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          {loading ? "Carregando…" : "Atualizar fluxo"}
-        </button>
-      </div>
-
       {!ativo.trim() ? (
         <p className="rounded-xl border border-dashed border-slate-300/80 px-4 py-8 text-center text-sm text-slate-500 dark:border-white/15 dark:text-slate-400">
-          Selecione ou digite uma melosa para ver o fluxo completo.
+          Informe uma melosa no filtro acima para ver o fluxo completo.
         </p>
       ) : null}
 

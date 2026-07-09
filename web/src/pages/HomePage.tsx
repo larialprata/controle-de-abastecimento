@@ -29,7 +29,7 @@ import {
   type DashboardCicloExcelRow,
   type DashboardDesvioExcelRow,
 } from "../lib/dashboardCiclosExcel";
-import { glassField, glassPanel } from "../lib/glass";
+import { glassField, glassPanel, glassSelect } from "../lib/glass";
 
 type MelosaCiclo = {
   id: string;
@@ -134,7 +134,10 @@ export default function HomePage() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filtroAtivo, setFiltroAtivo] = useState("");
+  const [filtroObra, setFiltroObra] = useState("");
   const [apenasSuspeitos, setApenasSuspeitos] = useState(false);
+  const [obrasOpcoes, setObrasOpcoes] = useState<{ codigo: number; nome: string }[]>([]);
+  const [melosasOpcoes, setMelosasOpcoes] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -150,9 +153,11 @@ export default function HomePage() {
     try {
       const params = new URLSearchParams({ limit: "200" });
       if (filtroAtivo.trim()) params.set("ativo", filtroAtivo.trim());
+      if (filtroObra) params.set("obra_codigo", filtroObra);
       if (apenasSuspeitos) params.set("suspeitos", "1");
       const desvioParams = new URLSearchParams({ limit: "100" });
       if (filtroAtivo.trim()) desvioParams.set("ativo", filtroAtivo.trim());
+      if (filtroObra) desvioParams.set("obra_codigo", filtroObra);
 
       const [jsonCiclos, jsonDesvios] = await Promise.all([
         apiGet<{ ciclos: MelosaCiclo[] }>(`/v1/melosa-ciclos?${params}`, token),
@@ -171,7 +176,43 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [token, filtroAtivo, apenasSuspeitos]);
+  }, [token, filtroAtivo, filtroObra, apenasSuspeitos]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [obrasRes, melosasRes] = await Promise.all([
+          apiGet<{ obras: { codigo: number; nome: string }[] }>("/v1/obras", token),
+          apiGet<{ equipamentos: { ativo: string }[] }>("/v1/equipamentos?tipo=MELOSA", token),
+        ]);
+        if (cancelled) return;
+        setObrasOpcoes((obrasRes.obras ?? []).sort((a, b) => a.codigo - b.codigo));
+        setMelosasOpcoes(
+          Array.from(new Set((melosasRes.equipamentos ?? []).map((e) => e.ativo).filter(Boolean))).sort((a, b) =>
+            a.localeCompare(b, "pt-BR"),
+          ),
+        );
+      } catch {
+        if (!cancelled) {
+          setObrasOpcoes([]);
+          setMelosasOpcoes([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const melosasDatalist = useMemo(() => {
+    const set = new Set(melosasOpcoes);
+    ciclos.forEach((c) => {
+      if (c.ativo_melosa_texto.trim()) set.add(c.ativo_melosa_texto.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [ciclos, melosasOpcoes]);
 
   const closeDeleteModal = useCallback(() => {
     if (deleteSaving) return;
@@ -333,9 +374,70 @@ export default function HomePage() {
 
   return (
     <div className="page-shell">
-      <EstoqueCombustivelPanel token={token} ativoMelosa={filtroAtivo} />
+      <section className={`${glassPanel} p-4 md:p-5`}>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-4 border-b border-white/30 pb-4 dark:border-white/10">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Filtros da dashboard</h2>
+            <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
+              Aplicam-se ao estoque, fluxo, alertas e ciclos abaixo.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-60 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            {loading ? "Atualizando…" : "Atualizar tudo"}
+          </button>
+        </div>
 
-      <MelosaFluxoPanel token={token} ativosDisponiveis={ativosUnicos} ativoInicial={filtroAtivo} />
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="filter-field-md">
+            <span className={labelCls}>Melosa</span>
+            <input
+              className={glassField}
+              list="dashboard-melosas-list"
+              placeholder="Ex.: CCL1999 (vazio = todas)"
+              value={filtroAtivo}
+              onChange={(e) => setFiltroAtivo(e.target.value)}
+            />
+            <datalist id="dashboard-melosas-list">
+              {melosasDatalist.map((a) => (
+                <option key={a} value={a} />
+              ))}
+            </datalist>
+          </label>
+          <label className="filter-field-md">
+            <span className={labelCls}>Obra</span>
+            <select
+              className={glassSelect}
+              value={filtroObra}
+              onChange={(e) => setFiltroObra(e.target.value)}
+            >
+              <option value="">Todas as obras</option>
+              {obrasOpcoes.map((o) => (
+                <option key={o.codigo} value={String(o.codigo)}>
+                  {o.codigo} — {o.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 pb-2 text-sm text-slate-700 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={apenasSuspeitos}
+              onChange={(e) => setApenasSuspeitos(e.target.checked)}
+            />
+            Somente suspeitos
+          </label>
+        </div>
+      </section>
+
+      <EstoqueCombustivelPanel token={token} ativoMelosa={filtroAtivo} obraCodigo={filtroObra} />
+
+      <MelosaFluxoPanel token={token} ativo={filtroAtivo} obraCodigo={filtroObra} />
 
       {/* Alertas */}
       <section className={`${glassPanel} p-4 md:p-5`}>
@@ -524,25 +626,12 @@ export default function HomePage() {
         />
 
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="filter-field-md">
-              <span className={labelCls}>Filtrar melosa</span>
-              <input
-                className={glassField}
-                placeholder="Ex.: CCL1999"
-                value={filtroAtivo}
-                onChange={(e) => setFiltroAtivo(e.target.value)}
-              />
-            </label>
-            <label className="flex items-center gap-2 pb-2 text-sm text-slate-700 dark:text-slate-300">
-              <input
-                type="checkbox"
-                checked={apenasSuspeitos}
-                onChange={(e) => setApenasSuspeitos(e.target.checked)}
-              />
-              Somente suspeitos
-            </label>
-          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            {ciclos.length} {ciclos.length === 1 ? "ciclo" : "ciclos"} no filtro atual
+            {filtroAtivo.trim() ? ` · melosa ${filtroAtivo.trim()}` : ""}
+            {filtroObra ? ` · obra ${filtroObra}` : ""}
+            {apenasSuspeitos ? " · somente suspeitos" : ""}
+          </p>
 
           <div className="flex flex-wrap gap-2">
             <button

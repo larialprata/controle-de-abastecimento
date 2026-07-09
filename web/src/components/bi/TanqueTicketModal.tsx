@@ -1,6 +1,7 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Printer, X } from "lucide-react";
 import type { ObraEmpresa } from "../../lib/obrasEmpresa";
+import { enrichMelosaTicketRowsWithSignatures } from "../../lib/melosaPhotoUrl";
 import DimensionalAbastecimentoTicket, {
   type DimensionalAbastecimentoRow,
 } from "./DimensionalAbastecimentoTicket";
@@ -13,17 +14,21 @@ export type TanqueTicketRow = {
   insumo: string;
   horimetro: string;
   litros: string;
+  nomeMotorista: string;
   equipamento: string;
-  movimento: string;
   obra: string;
   observacoes: string;
-  nome: string;
+  assinaturaMotoristaPath?: string | null;
+  assinaturaOperadorPath?: string | null;
+  assinaturaMotoristaUrl?: string | null;
+  assinaturaOperadorUrl?: string | null;
 };
 
 type Props = {
   rows: TanqueTicketRow[];
   variant: ObraEmpresa;
   onClose: () => void;
+  apiToken?: string;
 };
 
 const MONTHS_PT = [
@@ -139,7 +144,6 @@ function DelurbTanqueTicket({ rows, onClose }: { rows: TanqueTicketRow[]; onClos
               <thead>
                 <tr className="bg-white">
                   <th className="w-10 border border-black px-1 py-2 text-center font-bold">ITEM</th>
-                  <th className="border border-black px-2 py-2 text-center font-bold">MOV.</th>
                   <th className="border border-black px-2 py-2 text-center font-bold">DATA</th>
                   <th className="border border-black px-2 py-2 text-center font-bold">
                     RESPONSÁVEL
@@ -156,12 +160,12 @@ function DelurbTanqueTicket({ rows, onClose }: { rows: TanqueTicketRow[]; onClos
                     <br />
                     COMBUSTÍVEL
                   </th>
-                  <th className="border border-black px-2 py-2 text-center font-bold">KM/HORÍM.</th>
+                  <th className="border border-black px-2 py-2 text-center font-bold">KM</th>
                   <th className="border border-black px-2 py-2 text-center font-bold">LITROS</th>
                   <th className="border border-black px-2 py-2 text-center font-bold">
-                    EQUIPAMENTO/
+                    NOME
                     <br />
-                    FORNECEDOR
+                    MOTORISTA
                   </th>
                 </tr>
               </thead>
@@ -171,7 +175,6 @@ function DelurbTanqueTicket({ rows, onClose }: { rows: TanqueTicketRow[]; onClos
                     <td className="border border-black px-1 py-2 text-center align-middle font-semibold">
                       {idx + 1}
                     </td>
-                    <td className="border border-black px-2 py-2 text-center align-middle">{row.movimento}</td>
                     <td className="border border-black px-2 py-2 text-center align-middle">{row.data}</td>
                     <td className="border border-black px-2 py-2 text-center align-middle">
                       {row.responsavelAbastecimento}
@@ -184,7 +187,7 @@ function DelurbTanqueTicket({ rows, onClose }: { rows: TanqueTicketRow[]; onClos
                     <td className="border border-black px-2 py-2 text-center align-middle font-semibold">
                       {row.litros}
                     </td>
-                    <td className="border border-black px-2 py-2 text-center align-middle">{row.equipamento}</td>
+                    <td className="border border-black px-2 py-2 text-center align-middle">{row.nomeMotorista}</td>
                   </tr>
                 ))}
                 {rows.length < 10
@@ -193,7 +196,7 @@ function DelurbTanqueTicket({ rows, onClose }: { rows: TanqueTicketRow[]; onClos
                         <td className="border border-black px-1 py-2 text-center align-middle text-slate-400">
                           {rows.length + i + 1}
                         </td>
-                        <td className="border border-black" colSpan={8} />
+                        <td className="border border-black" colSpan={7} />
                       </tr>
                     ))
                   : null}
@@ -219,9 +222,29 @@ function DelurbTanqueTicket({ rows, onClose }: { rows: TanqueTicketRow[]; onClos
   );
 }
 
-export default function TanqueTicketModal({ rows, variant, onClose }: Props) {
+export default function TanqueTicketModal({ rows, variant, onClose, apiToken }: Props) {
+  const [rowsWithSignatures, setRowsWithSignatures] = useState(rows);
+  const [loadingSignatures, setLoadingSignatures] = useState(false);
+
+  useEffect(() => {
+    setRowsWithSignatures(rows);
+    if (variant !== "DIMENSIONAL" || !apiToken?.trim()) return;
+
+    let cancelled = false;
+    setLoadingSignatures(true);
+    void enrichMelosaTicketRowsWithSignatures(apiToken, rows).then((enriched) => {
+      if (!cancelled) {
+        setRowsWithSignatures(enriched);
+        setLoadingSignatures(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [rows, variant, apiToken]);
+
   if (variant === "DIMENSIONAL") {
-    const dimensionalRows: DimensionalAbastecimentoRow[] = rows.map((row) => ({
+    const dimensionalRows: DimensionalAbastecimentoRow[] = rowsWithSignatures.map((row) => ({
       numero: row.numero,
       data: row.data,
       insumo: row.insumo,
@@ -229,15 +252,20 @@ export default function TanqueTicketModal({ rows, variant, onClose }: Props) {
       equipamento: row.equipamento,
       obra: row.obra,
       horimetro: row.horimetro,
-      observacoes: row.observacoes || `${row.movimento}${row.placaAtivo !== "—" ? ` · ${row.placaAtivo}` : ""}`,
-      nome: row.nome,
+      observacoes: row.observacoes,
+      nome: row.nomeMotorista,
       responsavelAbastecimento: row.responsavelAbastecimento,
+      assinaturaMotoristaPath: row.assinaturaMotoristaPath,
+      assinaturaOperadorPath: row.assinaturaOperadorPath,
+      assinaturaMotoristaUrl: row.assinaturaMotoristaUrl,
+      assinaturaOperadorUrl: row.assinaturaOperadorUrl,
     }));
     return (
       <DimensionalAbastecimentoTicket
         rows={dimensionalRows}
         tituloSub="Tanque — obra"
         printId="tanque-dimensional-ticket-print"
+        loadingSignatures={loadingSignatures}
         onClose={onClose}
       />
     );
