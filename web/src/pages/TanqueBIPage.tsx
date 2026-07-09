@@ -90,10 +90,6 @@ function fmtPatrimonioRow(m: LinhaTanque): string {
   return fmt(m.placa_texto ?? m.placa_caminhao);
 }
 
-function fmtEquipamentoRow(m: LinhaTanque): string {
-  return fmt(m.fornecedor_texto);
-}
-
 function fmtHorimetroRow(m: LinhaTanque): string {
   return isRetiradaTanque(m) ? fmt(m.tanque_texto) : "—";
 }

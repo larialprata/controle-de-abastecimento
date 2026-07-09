@@ -5,7 +5,6 @@ import {
   ArrowUp,
   Droplets,
   Fuel,
-  Loader2,
   TrendingDown,
 } from "lucide-react";
 import { apiGet } from "../../lib/api";
