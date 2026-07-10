@@ -1,5 +1,7 @@
 import { apiPost } from "../lib/api";
-import { getOutboxPending, deleteOutbox } from "../db/sqlite";
+import { deletePendingMedia, getOutboxPending, deleteOutbox, getPendingMedia } from "../db/sqlite";
+import { readImageUriAsArrayBuffer } from "../lib/readImageUri";
+import { supabase } from "../lib/supabase";
 import type { MovimentacaoPayload } from "../types/movimentacao";
 
 const LEGACY_MELOSA_KEYS = [
@@ -66,6 +68,29 @@ function explainSyncError(message: string): string {
   return message;
 }
 
+async function uploadPendingMediaForOperation(operationId: string): Promise<void> {
+  const rows = getPendingMedia(operationId);
+  if (rows.length === 0) return;
+
+  for (const row of rows) {
+    const { arrayBuffer, contentType } = await readImageUriAsArrayBuffer(row.local_uri);
+    const { error } = await supabase.storage.from(row.bucket).upload(row.storage_path, arrayBuffer, {
+      contentType: contentType || row.content_type,
+      upsert: true,
+    });
+    if (error) {
+      const msg = String(error.message ?? error);
+      const alreadyExists =
+        msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
+      if (!alreadyExists) {
+        throw new Error(`Falha ao enviar foto (${row.storage_path}): ${msg}`);
+      }
+    }
+  }
+
+  deletePendingMedia(operationId);
+}
+
 export async function syncOutbox(token: string) {
   const pending = getOutboxPending();
   if (pending.length === 0) {
@@ -90,6 +115,7 @@ export async function syncOutbox(token: string) {
     }
 
     try {
+      await uploadPendingMediaForOperation(row.operation_id);
       const resp = await apiPost<{
         medidor_continuidade?: {
           status?: string;

@@ -50,6 +50,7 @@ import {
 } from "./src/lib/equipamentoQr";
 import { normalizeAtivoPatrimonio } from "./src/lib/equipamentoAtivo";
 import { base64ToArrayBuffer, parseBase64DataUrl } from "./src/lib/signatureImage";
+import { extFromUri, stageImageFromDataUrl, stageImageFromUri } from "./src/sync/offlineMedia";
 
 type TanqueCadastrado = {
   ativo: string;
@@ -2174,10 +2175,6 @@ export default function App() {
       Alert.alert("Foto obrigatória", "Selecione a foto do lacre da melosa.");
       return;
     }
-    if (!isOnline) {
-      Alert.alert("Requer internet", "Para enviar as fotos, você precisa estar online.");
-      return;
-    }
     setMessage(null);
     setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "quantidade_abastecida" });
   }
@@ -2189,10 +2186,6 @@ export default function App() {
     }
     if (!tanqueQuantidadeAbastecidaFotoUri) {
       Alert.alert("Foto obrigatória", "Selecione a foto do medidor de abastecimento.");
-      return;
-    }
-    if (!isOnline) {
-      Alert.alert("Requer internet", "Para enviar as fotos, você precisa estar online.");
       return;
     }
     setMessage(null);
@@ -2242,10 +2235,6 @@ export default function App() {
     }
     if (!notaFotoUri) {
       Alert.alert("Foto da nota obrigatória", "Selecione uma foto da nota fiscal.");
-      return;
-    }
-    if (!isOnline) {
-      Alert.alert("Requer internet", "Para enviar a foto da nota, você precisa estar online.");
       return;
     }
     setMessage(null);
@@ -2353,11 +2342,6 @@ export default function App() {
         Alert.alert("Foto da nota obrigatória", "Selecione uma foto da nota fiscal.");
         return;
       }
-
-      if (!isOnline) {
-        Alert.alert("Requer internet", "Para enviar a foto da nota, você precisa estar online.");
-        return;
-      }
     }
     if (isEntradaTanqueObra) {
       if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaOperadorDataUrl)) {
@@ -2409,10 +2393,6 @@ export default function App() {
         return;
       }
       litros = litrosTanque;
-      if (!isOnline) {
-        Alert.alert("Requer internet", "Para enviar fotos, você precisa estar online.");
-        return;
-      }
     }
 
     if (tipoAtual === "RETIRADA_MELOSA") {
@@ -2442,54 +2422,27 @@ export default function App() {
     if (isEntradaTanqueObra) {
       const NOTA_BUCKET = "notas";
       const TANQUE_ASSINATURAS_BUCKET = "melosa_assinaturas";
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) throw new Error("Usuário não encontrado para upload da nota.");
+      const userId = session?.user?.id;
+      if (!userId) throw new Error("Usuário não encontrado para salvar as fotos.");
 
-      const { arrayBuffer: notaBytes, contentType: notaContentType } = await readImageUriAsArrayBuffer(notaFotoUri as string);
-      const extMatch = String(notaFotoUri).match(/\.(\w+)(?:\?|#|$)/);
-      const ext = (extMatch?.[1] ?? "jpg").toLowerCase();
-      const safeExt = ext === "png" ? "png" : "jpg";
-      const filePath = `${userId}/notas/${operationId}.${safeExt}`;
-
-      await supabase.storage.from(NOTA_BUCKET).upload(filePath, notaBytes, {
-        contentType: notaContentType,
-        upsert: false,
-      });
-
+      const filePath = `${userId}/notas/${operationId}.${extFromUri(notaFotoUri as string)}`;
+      await stageImageFromUri(operationId, NOTA_BUCKET, filePath, notaFotoUri as string);
       notaStoragePath = filePath;
-
-      async function uploadBase64ToBucket(bucket: string, path: string, dataUrl: string, label: string) {
-        const { base64, contentType } = parseBase64DataUrl(dataUrl);
-        const arrayBuffer = base64ToArrayBuffer(base64);
-        const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
-          contentType,
-          upsert: true,
-        });
-        if (error) {
-          const msg = String(error.message ?? error);
-          const alreadyExists =
-            msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
-          if (!alreadyExists) {
-            throw new Error(`Falha ao enviar ${label}: ${msg}`);
-          }
-        }
-      }
 
       const assinaturaOperadorPath = `${userId}/tanque/entrada/assinaturas/operador/${operationId}.png`;
       const assinaturaEntregaPath = `${userId}/tanque/entrada/assinaturas/entrega/${operationId}.png`;
 
-      await uploadBase64ToBucket(
+      await stageImageFromDataUrl(
+        operationId,
         TANQUE_ASSINATURAS_BUCKET,
         assinaturaOperadorPath,
         tanqueAssinaturaOperadorDataUrl as string,
-        "assinatura do operador do tanque",
       );
-      await uploadBase64ToBucket(
+      await stageImageFromDataUrl(
+        operationId,
         TANQUE_ASSINATURAS_BUCKET,
         assinaturaEntregaPath,
         tanqueAssinaturaMelosaDataUrl as string,
-        "assinatura do responsável pela entrega",
       );
 
       tanqueAssinaturaOperadorStoragePath = assinaturaOperadorPath;
@@ -2501,76 +2454,34 @@ export default function App() {
       const LACRE_MELOSA_BUCKET = "lacre_melosa";
       const FOTO_QUANTIDADE_ABASTECIDA_BUCKET = "foto_quantidade_abastecida";
       const TANQUE_ASSINATURAS_BUCKET = "melosa_assinaturas";
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) throw new Error("Usuário não encontrado para upload das fotos dos lacres.");
+      const userId = session?.user?.id;
+      if (!userId) throw new Error("Usuário não encontrado para salvar as fotos.");
 
-      async function uploadBase64ToBucket(bucket: string, path: string, dataUrl: string, label: string) {
-        const { base64, contentType } = parseBase64DataUrl(dataUrl);
-        const arrayBuffer = base64ToArrayBuffer(base64);
-        const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
-          contentType,
-          upsert: true,
-        });
-        if (error) {
-          const msg = String(error.message ?? error);
-          const alreadyExists =
-            msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
-          if (!alreadyExists) {
-            throw new Error(`Falha ao enviar ${label}: ${msg}`);
-          }
-        }
-      }
-
-      function extFromUri(uri: string) {
-        const extMatch = String(uri).match(/\.(\w+)(?:\?|#|$)/);
-        const ext = (extMatch?.[1] ?? "jpg").toLowerCase();
-        return ext === "png" ? "png" : "jpg";
-      }
-
-      const tanqueExt = extFromUri(lacreTanqueFotoUri as string);
-      const melosaExt = extFromUri(lacreMelosaFotoUri as string);
-      const quantidadeExt = extFromUri(tanqueQuantidadeAbastecidaFotoUri as string);
-      const tanquePath = `${userId}/lacres/tanque/${operationId}.${tanqueExt}`;
-      const melosaPath = `${userId}/lacres/melosa/${operationId}.${melosaExt}`;
-      const quantidadePath = `${userId}/tanque/quantidade/${operationId}.${quantidadeExt}`;
+      const tanquePath = `${userId}/lacres/tanque/${operationId}.${extFromUri(lacreTanqueFotoUri as string)}`;
+      const melosaPath = `${userId}/lacres/melosa/${operationId}.${extFromUri(lacreMelosaFotoUri as string)}`;
+      const quantidadePath = `${userId}/tanque/quantidade/${operationId}.${extFromUri(tanqueQuantidadeAbastecidaFotoUri as string)}`;
       const assinaturaOperadorPath = `${userId}/tanque/assinaturas/operador/${operationId}.png`;
       const assinaturaMelosaPath = `${userId}/tanque/assinaturas/melosa/${operationId}.png`;
 
-      const { arrayBuffer: tanqueBytes, contentType: tanqueContentType } = await readImageUriAsArrayBuffer(lacreTanqueFotoUri as string);
-      const { arrayBuffer: melosaBytes, contentType: melosaContentType } = await readImageUriAsArrayBuffer(lacreMelosaFotoUri as string);
-      const { arrayBuffer: quantidadeBytes, contentType: quantidadeContentType } = await readImageUriAsArrayBuffer(
-        tanqueQuantidadeAbastecidaFotoUri as string
+      await stageImageFromUri(operationId, LACRE_TANQUE_BUCKET, tanquePath, lacreTanqueFotoUri as string);
+      await stageImageFromUri(operationId, LACRE_MELOSA_BUCKET, melosaPath, lacreMelosaFotoUri as string);
+      await stageImageFromUri(
+        operationId,
+        FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+        quantidadePath,
+        tanqueQuantidadeAbastecidaFotoUri as string,
       );
-
-      const uploads = [
-        supabase.storage.from(LACRE_TANQUE_BUCKET).upload(tanquePath, tanqueBytes, {
-          contentType: tanqueContentType,
-          upsert: false,
-        }),
-        supabase.storage.from(LACRE_MELOSA_BUCKET).upload(melosaPath, melosaBytes, {
-          contentType: melosaContentType,
-          upsert: false,
-        }),
-        supabase.storage.from(FOTO_QUANTIDADE_ABASTECIDA_BUCKET).upload(quantidadePath, quantidadeBytes, {
-          contentType: quantidadeContentType,
-          upsert: false,
-        }),
-      ];
-
-      await Promise.all(uploads);
-
-      await uploadBase64ToBucket(
+      await stageImageFromDataUrl(
+        operationId,
         TANQUE_ASSINATURAS_BUCKET,
         assinaturaOperadorPath,
         tanqueAssinaturaOperadorDataUrl as string,
-        "assinatura do operador do tanque",
       );
-      await uploadBase64ToBucket(
+      await stageImageFromDataUrl(
+        operationId,
         TANQUE_ASSINATURAS_BUCKET,
         assinaturaMelosaPath,
         tanqueAssinaturaMelosaDataUrl as string,
-        "assinatura do responsável pela melosa",
       );
 
       lacreTanqueStoragePath = tanquePath;
@@ -2619,7 +2530,11 @@ export default function App() {
 
     enqueueOutbox(operationId, payload);
     setPending(outboxCount());
-    setMessage("Registro salvo offline. Sincronizando se estiver online...");
+    setMessage(
+      isOnline
+        ? "Registro salvo. Sincronizando..."
+        : "Registro salvo no celular. Será enviado quando houver internet.",
+    );
 
     if (isOnline) {
       // Não bloqueia a UI no clique de salvar.
@@ -2628,7 +2543,7 @@ export default function App() {
           if (r.synced > 0) setMessage(`Sincronizado: ${r.synced} registro(s).`);
         })
         .catch((e: any) => {
-          setMessage(`Registro salvo offline. Falha ao sincronizar: ${String(e?.message ?? e)}`);
+          setMessage(`Registro salvo no celular. Falha ao sincronizar: ${String(e?.message ?? e)}`);
         })
         .finally(() => {
           setPending(outboxCount());
@@ -2710,71 +2625,19 @@ export default function App() {
       return;
     }
 
-    if (!isOnline) {
-      Alert.alert("Requer internet", "Para enviar as fotos, você precisa estar online.");
-      return;
-    }
-
     setBusy(true);
     try {
     const operationId = uuidv4();
-    let userId: string | null = null;
-    try {
-      const { data: userData } = await supabase.auth.getUser();
-      userId = userData.user?.id ?? null;
-    } catch {
-      userId = null;
-    }
-    if (!userId) throw new Error("Usuário não encontrado para upload das fotos.");
+    const userId = session?.user?.id;
+    if (!userId) throw new Error("Usuário não encontrado para salvar as fotos.");
 
     const FOTO_QUANTIDADE_ABASTECIDA_BUCKET = "foto_quantidade_abastecida";
     const MELOSA_HORIMETRO_BUCKET = "melosa_horimetro_equipamento_abastecido";
     const MELOSA_EQUIPAMENTO_OPERADOR_BUCKET = "melosa_equipamento_operador";
     const MELOSA_ASSINATURAS_BUCKET = "melosa_assinaturas";
-    function extFromUri(uri: string) {
-      const extMatch = uri.match(/\.(\w+)(?:\?|#|$)/);
-      const ext = (extMatch?.[1] ?? "jpg").toLowerCase();
-      return ext === "png" ? "png" : "jpg";
-    }
 
-    async function uploadToBucket(bucket: string, path: string, uri: string, label: string) {
-      const { arrayBuffer, contentType } = await readImageUriAsArrayBuffer(uri);
-      const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
-        contentType,
-        upsert: true,
-      });
-      if (error) {
-        const msg = String(error.message ?? error);
-        const alreadyExists =
-          msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
-        if (!alreadyExists) {
-          throw new Error(`Falha ao enviar ${label}: ${msg}`);
-        }
-      }
-    }
-
-    async function uploadBase64ToBucket(bucket: string, path: string, dataUrl: string, label: string) {
-      const { base64, contentType } = parseBase64DataUrl(dataUrl);
-      const arrayBuffer = base64ToArrayBuffer(base64);
-      const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
-        contentType,
-        upsert: true,
-      });
-      if (error) {
-        const msg = String(error.message ?? error);
-        const alreadyExists =
-          msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
-        if (!alreadyExists) {
-          throw new Error(`Falha ao enviar ${label}: ${msg}`);
-        }
-      }
-    }
-
-    const extQuantidade = extFromUri(melosaQuantidadeAbastecidaFotoUri as string);
-    const extOperador = extFromUri(melosaEquipamentoOperadorFotoUri as string);
-
-    const quantidadePath = `${userId}/melosa/quantidade-abastecida/${operationId}.${extQuantidade}`;
-    const operadorPath = `${userId}/melosa/equipamento-operador/${operationId}.${extOperador}`;
+    const quantidadePath = `${userId}/melosa/quantidade-abastecida/${operationId}.${extFromUri(melosaQuantidadeAbastecidaFotoUri as string)}`;
+    const operadorPath = `${userId}/melosa/equipamento-operador/${operationId}.${extFromUri(melosaEquipamentoOperadorFotoUri as string)}`;
     const assinaturaOperadorPath = `${userId}/melosa/assinaturas/operador/${operationId}.png`;
     const assinaturaMotoristaPath = `${userId}/melosa/assinaturas/motorista/${operationId}.png`;
 
@@ -2782,53 +2645,41 @@ export default function App() {
     const hasMelosaHorimetroFoto = incluirHorimetro && !!melosaHorimetroEquipamentoFotoUri;
     let horimetroPath: string | null = null;
     if (hasMelosaHorimetroFoto) {
-      const extHorimetro = extFromUri(melosaHorimetroEquipamentoFotoUri as string);
-      horimetroPath = `${userId}/melosa/horimetro/${operationId}.${extHorimetro}`;
+      horimetroPath = `${userId}/melosa/horimetro/${operationId}.${extFromUri(melosaHorimetroEquipamentoFotoUri as string)}`;
     }
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData.session?.access_token) {
-      throw new Error("Sessão expirada. Faça login novamente antes de enviar as fotos.");
+    await stageImageFromUri(
+      operationId,
+      FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+      quantidadePath,
+      melosaQuantidadeAbastecidaFotoUri as string,
+    );
+    if (hasMelosaHorimetroFoto && horimetroPath) {
+      await stageImageFromUri(
+        operationId,
+        MELOSA_HORIMETRO_BUCKET,
+        horimetroPath,
+        melosaHorimetroEquipamentoFotoUri as string,
+      );
     }
-
-    const uploads = [
-      uploadToBucket(
-        FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
-        quantidadePath,
-        melosaQuantidadeAbastecidaFotoUri as string,
-        "foto da quantidade abastecida"
-      ),
-      ...(hasMelosaHorimetroFoto && horimetroPath
-        ? [
-            uploadToBucket(
-              MELOSA_HORIMETRO_BUCKET,
-              horimetroPath,
-              melosaHorimetroEquipamentoFotoUri as string,
-              "foto do hodômetro"
-            ),
-          ]
-        : []),
-      uploadToBucket(
-        MELOSA_EQUIPAMENTO_OPERADOR_BUCKET,
-        operadorPath,
-        melosaEquipamentoOperadorFotoUri as string,
-        "foto do equipamento com operador/motorista"
-      ),
-      uploadBase64ToBucket(
-        MELOSA_ASSINATURAS_BUCKET,
-        assinaturaOperadorPath,
-        melosaAssinaturaOperadorDataUrl as string,
-        "assinatura do operador da melosa"
-      ),
-      uploadBase64ToBucket(
-        MELOSA_ASSINATURAS_BUCKET,
-        assinaturaMotoristaPath,
-        melosaAssinaturaMotoristaDataUrl as string,
-        "assinatura do motorista"
-      ),
-    ];
-
-    await Promise.all(uploads);
+    await stageImageFromUri(
+      operationId,
+      MELOSA_EQUIPAMENTO_OPERADOR_BUCKET,
+      operadorPath,
+      melosaEquipamentoOperadorFotoUri as string,
+    );
+    await stageImageFromDataUrl(
+      operationId,
+      MELOSA_ASSINATURAS_BUCKET,
+      assinaturaOperadorPath,
+      melosaAssinaturaOperadorDataUrl as string,
+    );
+    await stageImageFromDataUrl(
+      operationId,
+      MELOSA_ASSINATURAS_BUCKET,
+      assinaturaMotoristaPath,
+      melosaAssinaturaMotoristaDataUrl as string,
+    );
 
     const payload: MovimentacaoPayload = {
       operation_id: operationId,
@@ -2878,27 +2729,23 @@ export default function App() {
 
     enqueueOutbox(operationId, payload);
     setPending(outboxCount());
-    setMessage("Registro (melosa) salvo localmente. Sincronizando...");
+    setMessage(
+      isOnline
+        ? "Registro salvo. Sincronizando..."
+        : "Registro salvo no celular. Será enviado quando houver internet.",
+    );
 
-    let syncedOk = false;
-    try {
-      const r = await syncOutboxWithTokenRetry();
-      syncedOk = r.synced > 0;
-      if (syncedOk) {
-        setMessage(`Sincronizado: ${r.synced} registro(s).`);
-      } else {
-        throw new Error("O servidor não confirmou o registro. Tente sincronizar novamente na tela inicial.");
-      }
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      setMessage(`Falha ao sincronizar: ${msg}`);
-      Alert.alert(
-        "Sincronização pendente",
-        `As fotos foram enviadas, mas o servidor não gravou o registro completo.\n\n${msg}\n\nO registro ficou na fila local — use "Sincronizar pendentes" na tela inicial após atualizar a API.`
-      );
-      return;
-    } finally {
-      setPending(outboxCount());
+    if (isOnline) {
+      void syncOutboxWithTokenRetry()
+        .then((r) => {
+          if (r.synced > 0) setMessage(`Sincronizado: ${r.synced} registro(s).`);
+        })
+        .catch((e: any) => {
+          setMessage(`Registro salvo no celular. Falha ao sincronizar: ${String(e?.message ?? e)}`);
+        })
+        .finally(() => {
+          setPending(outboxCount());
+        });
     }
 
     resetMelosaFlow();
@@ -4092,7 +3939,7 @@ export default function App() {
 
               {(isHorimetro || isResumo) && !isOnline ? (
                 <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 10 }]}>
-                  Você está offline. Para enviar fotos, precisa estar online.
+                  Offline: o registro será salvo no celular e enviado quando houver internet.
                 </Text>
               ) : null}
 
@@ -4232,8 +4079,8 @@ export default function App() {
             </TouchableOpacity>
           ) : isEntradaDetalhes ? (
             <TouchableOpacity
-              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy || !isOnline ? { opacity: 0.7 } : null]}
-              disabled={busy || !isOnline}
+              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
+              disabled={busy}
               onPress={continueEntradaTanqueDetalhes}
             >
               <Text style={styles.primaryButtonText}>Próximo</Text>
@@ -4823,7 +4670,7 @@ export default function App() {
 
               {isEntradaDetalhes && !isOnline ? (
                 <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>
-                  Você está offline. Para enviar foto da nota, precisa estar online.
+                  Offline: o registro será salvo no celular e enviado quando houver internet.
                 </Text>
               ) : null}
 
