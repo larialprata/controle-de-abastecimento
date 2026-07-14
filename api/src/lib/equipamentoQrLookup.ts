@@ -11,6 +11,7 @@ export type EquipamentoQrLookupResult = {
   ativo: string;
   nome: string | null;
   empresa: string | null;
+  placa: string | null;
   contrato: string | null;
   obra_externa: string | null;
   source: "abast" | "externo";
@@ -96,6 +97,7 @@ type AbastEquipamentoRow = {
   ativo: string;
   nome: string | null;
   empresa: string | null;
+  placa: string | null;
 };
 
 async function resolveDadosExternos(
@@ -155,6 +157,7 @@ function buildLookupResult(input: {
   ativo: string;
   abastNome: string | null | undefined;
   abastEmpresa: string | null | undefined;
+  abastPlaca?: string | null | undefined;
   externoNome: string | null | undefined;
   externoEmpresa: string | null | undefined;
   externoContrato?: string | null;
@@ -167,6 +170,7 @@ function buildLookupResult(input: {
     empresa:
       normalizeEquipamentoEmpresa(input.abastEmpresa) ??
       normalizeEquipamentoEmpresa(input.externoEmpresa),
+    placa: input.abastPlaca?.trim() || null,
     contrato: input.externoContrato?.trim() || null,
     obra_externa: input.externoObra?.trim() || null,
     source: input.source,
@@ -189,6 +193,7 @@ export async function lookupEquipamentoFromQr(
         ativo: abast.ativo,
         abastNome: abast.nome,
         abastEmpresa: abast.empresa,
+        abastPlaca: abast.placa,
         externoNome: externos.nome,
         externoEmpresa: externos.empresa,
         externoContrato: externos.contrato,
@@ -204,6 +209,7 @@ export async function lookupEquipamentoFromQr(
       ativo: parsed.ativo.trim(),
       nome: null,
       empresa: null,
+      placa: null,
       contrato: null,
       obra_externa: null,
       source: "abast",
@@ -227,6 +233,7 @@ export async function lookupEquipamentoFromQr(
       ativo: abast.ativo,
       abastNome: abast.nome,
       abastEmpresa: abast.empresa,
+      abastPlaca: abast.placa,
       externoNome: externo.name,
       externoEmpresa: externo.company_name,
       externoContrato: externoMeta.contrato,
@@ -239,6 +246,7 @@ export async function lookupEquipamentoFromQr(
     ativo,
     abastNome: null,
     abastEmpresa: null,
+    abastPlaca: null,
     externoNome: externo.name,
     externoEmpresa: externo.company_name,
     externoContrato: externoMeta.contrato,
@@ -262,6 +270,7 @@ export async function lookupEquipamentoByAtivo(
       ativo: abast.ativo,
       abastNome: abast.nome,
       abastEmpresa: abast.empresa,
+      abastPlaca: abast.placa,
       externoNome: externos.nome,
       externoEmpresa: externos.empresa,
       externoContrato: externos.contrato,
@@ -279,6 +288,7 @@ export async function lookupEquipamentoByAtivo(
       ativo: normalizeAtivoPlacaExterno(externoSemObra.ativo_placa),
       abastNome: null,
       abastEmpresa: null,
+      abastPlaca: null,
       externoNome: externoSemObra.name,
       externoEmpresa: externoSemObra.company_name,
       externoContrato: metaSemObra.contrato,
@@ -292,6 +302,7 @@ export async function lookupEquipamentoByAtivo(
     ativo: normalizeAtivoPlacaExterno(externo.ativo_placa),
     abastNome: null,
     abastEmpresa: null,
+    abastPlaca: null,
     externoNome: externo.name,
     externoEmpresa: externo.company_name,
     externoContrato: meta.contrato,

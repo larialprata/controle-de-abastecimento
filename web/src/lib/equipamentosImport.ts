@@ -12,6 +12,7 @@ export type EquipamentoImportRow = {
   obra_nome?: string;
   mobilidade?: EquipamentoMobilidade | null;
   empresa?: string | null;
+  placa?: string | null;
 };
 
 export type EquipamentoImportParseError = {
@@ -23,7 +24,6 @@ const HEADER_ALIASES: Record<string, string> = {
   ativo: "ativo",
   patrimonio: "ativo",
   patrimônio: "ativo",
-  placa: "ativo",
   codigo: "ativo",
   código: "ativo",
   id: "ativo",
@@ -48,6 +48,11 @@ const HEADER_ALIASES: Record<string, string> = {
   empresa: "empresa",
   proprietario: "empresa",
   proprietário: "empresa",
+
+  placa: "placa",
+  placa_veiculo: "placa",
+  placa_caminhao: "placa",
+  placa_caminhão: "placa",
 };
 
 function normalizeHeader(h: string): string {
@@ -173,6 +178,11 @@ function mapRow(
   }
   const empresa = parseEquipamentoEmpresa(raw.empresa);
 
+  const placaRaw = cellStr(raw.placa);
+  const placa = placaRaw
+    ? placaRaw.toUpperCase().replace(/[\s\-]/g, "") || null
+    : null;
+
   const nomeFinal = nome || ativo;
   const mobilidade = resolveMobilidadeEquipamento(nomeFinal, mobilidadeExplicit);
 
@@ -185,6 +195,7 @@ function mapRow(
       obra_nome,
       mobilidade,
       empresa,
+      placa,
     },
   };
 }
@@ -239,10 +250,10 @@ export async function parseEquipamentosImportFile(
 export function downloadEquipamentosImportTemplate(): void {
   const wb = XLSX.utils.book_new();
   const data = [
-    ["ativo", "descricao", "obra_codigo", "mobilidade", "empresa"],
-    ["ASD123", "Escavadeira CAT 320", "00.230", "Móvel", "Dimensional"],
-    ["GER-01", "Gerador obra central", "", "Estacionário", "Construtora Alfa"],
-    ["CAM-88", "Caminhão basculante", "00.229", "Móvel", "Transportes Beta"],
+    ["ativo", "descricao", "placa", "obra_codigo", "mobilidade", "empresa"],
+    ["REVTR02", "Rebocador", "KVW2O9X", "00.230", "Móvel", "Dimensional"],
+    ["ASD123", "Escavadeira CAT 320", "", "00.230", "Móvel", "Dimensional"],
+    ["GER-01", "Gerador obra central", "", "", "Estacionário", "Construtora Alfa"],
   ];
   const sheet = XLSX.utils.aoa_to_sheet(data);
   XLSX.utils.book_append_sheet(wb, sheet, "Equipamentos");

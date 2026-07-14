@@ -787,6 +787,7 @@ export default function App() {
   const [melosaObraCodigo, setMelosaObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
   const [melosaPlacaTexto, setMelosaPlacaTexto] = useState("");
   const [melosaFornecedorTexto, setMelosaFornecedorTexto] = useState("");
+  const [melosaEquipamentoPlacaTexto, setMelosaEquipamentoPlacaTexto] = useState("");
   const [melosaEquipamentoNomeTexto, setMelosaEquipamentoNomeTexto] = useState("");
   const [melosaEquipamentoEmpresa, setMelosaEquipamentoEmpresa] = useState("");
   const [melosaEquipamentoQrOpen, setMelosaEquipamentoQrOpen] = useState(false);
@@ -794,6 +795,7 @@ export default function App() {
   const [melosaEquipamentoAtivoLookupLoading, setMelosaEquipamentoAtivoLookupLoading] = useState(false);
   const melosaAtivoLookupSeqRef = useRef(0);
   const skipMelosaAtivoLookupRef = useRef(false);
+  const skipMelosaPlacaLookupRef = useRef(false);
   const [melosaTanqueNumero, setMelosaTanqueNumero] = useState<1 | 2>(1);
   const [melosaRegKmText, setMelosaRegKmText] = useState("");
   const [melosaRegLitrosText, setMelosaRegLitrosText] = useState("");
@@ -1006,8 +1008,10 @@ export default function App() {
 
     const ativo = melosaFornecedorTexto.trim();
     if (!ativo) {
-      setMelosaEquipamentoNomeTexto("");
-      setMelosaEquipamentoEmpresa("");
+      if (!melosaEquipamentoPlacaTexto.trim()) {
+        setMelosaEquipamentoNomeTexto("");
+        setMelosaEquipamentoEmpresa("");
+      }
       setMelosaEquipamentoAtivoLookupLoading(false);
       return;
     }
@@ -1026,14 +1030,15 @@ export default function App() {
         .then((equipamento) => {
           if (seq !== melosaAtivoLookupSeqRef.current) return;
           if (equipamento) {
-            applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true });
+            applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
           } else {
             setMelosaEquipamentoNomeTexto("");
             setMelosaEquipamentoEmpresa("");
+            skipMelosaPlacaLookupRef.current = true;
+            setMelosaEquipamentoPlacaTexto("");
           }
         })
         .catch(() => {
-          // Patrimônio não cadastrado (404) ou erro de rede: apenas limpa os dados.
           if (seq === melosaAtivoLookupSeqRef.current) {
             setMelosaEquipamentoNomeTexto("");
             setMelosaEquipamentoEmpresa("");
@@ -1047,7 +1052,54 @@ export default function App() {
     }, 500);
 
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [melosaFornecedorTexto, melosaObraCodigo, session?.access_token, isOnline, screen]);
+
+  useEffect(() => {
+    if (screen.name !== "melosa" || screen.step !== "register") return;
+
+    const placa = melosaEquipamentoPlacaTexto.trim();
+    if (!placa) {
+      setMelosaEquipamentoAtivoLookupLoading(false);
+      return;
+    }
+
+    if (skipMelosaPlacaLookupRef.current) {
+      skipMelosaPlacaLookupRef.current = false;
+      return;
+    }
+
+    if (!session?.access_token || !isOnline) return;
+
+    const seq = ++melosaAtivoLookupSeqRef.current;
+    const timer = setTimeout(() => {
+      setMelosaEquipamentoAtivoLookupLoading(true);
+      void fetchMelosaEquipamentoByAtivo(placa)
+        .then((equipamento) => {
+          if (seq !== melosaAtivoLookupSeqRef.current) return;
+          if (equipamento) {
+            applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
+          } else {
+            setMelosaEquipamentoNomeTexto("");
+            setMelosaEquipamentoEmpresa("");
+          }
+        })
+        .catch(() => {
+          if (seq === melosaAtivoLookupSeqRef.current) {
+            setMelosaEquipamentoNomeTexto("");
+            setMelosaEquipamentoEmpresa("");
+          }
+        })
+        .finally(() => {
+          if (seq === melosaAtivoLookupSeqRef.current) {
+            setMelosaEquipamentoAtivoLookupLoading(false);
+          }
+        });
+    }, 500);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [melosaEquipamentoPlacaTexto, melosaObraCodigo, session?.access_token, isOnline, screen]);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -1108,6 +1160,7 @@ export default function App() {
     setMelosaObraCodigo(obrasDisponiveis[0]?.codigo ?? 229);
     setMelosaPlacaTexto("");
     setMelosaFornecedorTexto("");
+    setMelosaEquipamentoPlacaTexto("");
     setMelosaEquipamentoNomeTexto("");
     setMelosaEquipamentoEmpresa("");
     setMelosaEquipamentoQrOpen(false);
@@ -1142,6 +1195,7 @@ export default function App() {
     ativo: string;
     nome: string | null;
     empresa: string | null;
+    placa?: string | null;
     contrato?: string | null;
     obra_externa?: string | null;
     source: string;
@@ -1155,12 +1209,16 @@ export default function App() {
   }
 
   function applyMelosaEquipamentoFromLookup(
-    equipamento: Pick<MelosaEquipamentoLookup, "ativo" | "nome" | "empresa">,
-    options?: { updateAtivo?: boolean },
+    equipamento: Pick<MelosaEquipamentoLookup, "ativo" | "nome" | "empresa" | "placa">,
+    options?: { updateAtivo?: boolean; updatePlaca?: boolean },
   ) {
     if (options?.updateAtivo && equipamento.ativo?.trim()) {
       skipMelosaAtivoLookupRef.current = true;
       setMelosaFornecedorTexto(equipamento.ativo);
+    }
+    if (options?.updatePlaca) {
+      skipMelosaPlacaLookupRef.current = true;
+      setMelosaEquipamentoPlacaTexto((equipamento.placa ?? "").trim().toUpperCase());
     }
     setMelosaEquipamentoNomeTexto(pickMelosaEquipamentoDescricao(equipamento.ativo, equipamento.nome));
     setMelosaEquipamentoEmpresa(equipamento.empresa ?? "");
@@ -1216,13 +1274,38 @@ export default function App() {
       const equipamento = await fetchMelosaEquipamentoByAtivo(ativo.trim());
       if (seq !== melosaAtivoLookupSeqRef.current) return;
       if (equipamento) {
-        applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true });
+        applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
       } else {
         setMelosaEquipamentoNomeTexto("");
         setMelosaEquipamentoEmpresa("");
       }
     } catch {
       // Patrimônio não cadastrado (404) ou erro de rede: não bloqueia o registro.
+      if (seq === melosaAtivoLookupSeqRef.current) {
+        setMelosaEquipamentoNomeTexto("");
+        setMelosaEquipamentoEmpresa("");
+      }
+    } finally {
+      if (seq === melosaAtivoLookupSeqRef.current) {
+        setMelosaEquipamentoAtivoLookupLoading(false);
+      }
+    }
+  }
+
+  async function lookupMelosaEquipamentoPorPlaca(placa: string) {
+    if (!session?.access_token || !isOnline || !placa.trim()) return;
+    const seq = ++melosaAtivoLookupSeqRef.current;
+    setMelosaEquipamentoAtivoLookupLoading(true);
+    try {
+      const equipamento = await fetchMelosaEquipamentoByAtivo(placa.trim());
+      if (seq !== melosaAtivoLookupSeqRef.current) return;
+      if (equipamento) {
+        applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
+      } else {
+        setMelosaEquipamentoNomeTexto("");
+        setMelosaEquipamentoEmpresa("");
+      }
+    } catch {
       if (seq === melosaAtivoLookupSeqRef.current) {
         setMelosaEquipamentoNomeTexto("");
         setMelosaEquipamentoEmpresa("");
@@ -1250,8 +1333,9 @@ export default function App() {
     try {
       const equipamento = await lookupMelosaEquipamentoFromQrScan(qrData);
       skipMelosaAtivoLookupRef.current = true;
+      skipMelosaPlacaLookupRef.current = true;
       setMelosaFornecedorTexto(equipamento.ativo);
-      applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true });
+      applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
       setMelosaEquipamentoQrOpen(false);
       const origem =
         equipamento.source === "externo"
@@ -1261,31 +1345,35 @@ export default function App() {
             : "cadastro local";
       const descricao = pickMelosaEquipamentoDescricao(equipamento.ativo, equipamento.nome);
       const descricaoLabel = descricao ? `\nDescrição: ${descricao}` : "";
+      const placaLabel = equipamento.placa?.trim() ? `\nPlaca: ${equipamento.placa.trim()}` : "";
       const contratoLabel = equipamento.contrato?.trim() ? `\nContrato: ${equipamento.contrato.trim()}` : "";
       const obraLabel = equipamento.obra_externa?.trim() ? `\nObra: ${equipamento.obra_externa.trim()}` : "";
       Alert.alert(
         "Equipamento identificado",
-        `Ativo: ${equipamento.ativo}\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}${descricaoLabel}${contratoLabel}${obraLabel}\n\nFonte: ${origem}`,
+        `Ativo: ${equipamento.ativo}${placaLabel}\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}${descricaoLabel}${contratoLabel}${obraLabel}\n\nFonte: ${origem}`,
       );
     } catch (e: unknown) {
       const ativoLocal = parseAbastEquipamentoQrAtivo(qrData);
       if (ativoLocal) {
         const equipamento = await fetchMelosaEquipamentoByAtivo(ativoLocal);
         skipMelosaAtivoLookupRef.current = true;
+        skipMelosaPlacaLookupRef.current = true;
         setMelosaFornecedorTexto(equipamento?.ativo ?? ativoLocal);
         if (equipamento) {
-          applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true });
+          applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
         } else {
           setMelosaEquipamentoNomeTexto("");
           setMelosaEquipamentoEmpresa("");
+          setMelosaEquipamentoPlacaTexto("");
         }
         setMelosaEquipamentoQrOpen(false);
         const empresaLabel = equipamento?.empresa
           ? `\nEmpresa: ${labelEquipamentoEmpresa(equipamento.empresa)}`
           : "";
+        const placaLabel = equipamento?.placa?.trim() ? `\nPlaca: ${equipamento.placa.trim()}` : "";
         Alert.alert(
           "Equipamento identificado (QR interno)",
-          `Ativo: ${equipamento?.ativo ?? ativoLocal}${empresaLabel}\n\n${equipamento ? "Dados carregados da API." : "Os dados completos não puderam ser carregados da API. Confira o ativo antes de salvar."}`,
+          `Ativo: ${equipamento?.ativo ?? ativoLocal}${placaLabel}${empresaLabel}\n\n${equipamento ? "Dados carregados da API." : "Os dados completos não puderam ser carregados da API. Confira o ativo antes de salvar."}`,
         );
         return;
       }
@@ -2762,15 +2850,46 @@ export default function App() {
       Alert.alert("Ativo Melosa obrigatório", "Informe o Ativo Melosa.");
       return;
     }
-    if (!melosaFornecedorTexto.trim()) {
-      Alert.alert("Ativo do Equipamento obrigatório", "Informe o Ativo do Equipamento.");
+
+    const ativo = melosaFornecedorTexto.trim();
+    const placa = melosaEquipamentoPlacaTexto.trim();
+    if (!ativo && !placa) {
+      Alert.alert("Equipamento obrigatório", "Informe o Ativo ou a Placa do Equipamento.");
       return;
     }
 
-    // Busca a descrição/empresa em segundo plano; não bloqueia o avanço mesmo que
-    // o patrimônio não esteja cadastrado ou a rede falhe.
     if (isOnline && session?.access_token) {
-      void lookupMelosaEquipamentoPatrimonio(melosaFornecedorTexto);
+      if (ativo) {
+        void lookupMelosaEquipamentoPatrimonio(ativo);
+      } else if (placa) {
+        setMelosaEquipamentoAtivoLookupLoading(true);
+        try {
+          const equipamento = await fetchMelosaEquipamentoByAtivo(placa);
+          if (equipamento?.ativo?.trim()) {
+            applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
+          } else {
+            Alert.alert(
+              "Equipamento não encontrado",
+              "Não encontramos um ativo para essa placa. Informe o Ativo do Equipamento.",
+            );
+            return;
+          }
+        } catch {
+          Alert.alert(
+            "Equipamento não encontrado",
+            "Não encontramos um ativo para essa placa. Informe o Ativo do Equipamento.",
+          );
+          return;
+        } finally {
+          setMelosaEquipamentoAtivoLookupLoading(false);
+        }
+      }
+    } else if (!ativo) {
+      Alert.alert(
+        "Ativo do Equipamento obrigatório",
+        "Sem internet, informe o Ativo do Equipamento (não apenas a placa).",
+      );
+      return;
     }
 
     setMessage(null);
@@ -3310,7 +3429,8 @@ export default function App() {
       : melosaHorimetroEquipamentoNumero.trim() || "—";
     const quantidadeResumoValor = melosaQuantidadeAbastecidaTexto.trim() || "—";
     const insumoResumoLabel = melosaWdrCombustivelTipo === "GASOLINA" ? "Gasolina" : "Diesel";
-    const patrimonioPreenchido = melosaFornecedorTexto.trim().length > 0;
+    const patrimonioPreenchido =
+      melosaFornecedorTexto.trim().length > 0 || melosaEquipamentoPlacaTexto.trim().length > 0;
     const equipamentoDadosVisiveis =
       isRegister &&
       patrimonioPreenchido &&
@@ -3474,10 +3594,25 @@ export default function App() {
                     onChangeText={setMelosaFornecedorTexto}
                     onEndEditing={() => void lookupMelosaEquipamentoPatrimonio(melosaFornecedorTexto)}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Patrimônio / identificação (com ou sem espaço)"
+                    placeholder="Ex.: REVTR02"
                     placeholderTextColor={inputPlaceholderColor}
                     autoCapitalize="characters"
                   />
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                    Placa do Equipamento
+                  </Text>
+                  <TextInput
+                    value={melosaEquipamentoPlacaTexto}
+                    onChangeText={setMelosaEquipamentoPlacaTexto}
+                    onEndEditing={() => void lookupMelosaEquipamentoPorPlaca(melosaEquipamentoPlacaTexto)}
+                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                    placeholder="Ex.: KVW2O9X"
+                    placeholderTextColor={inputPlaceholderColor}
+                    autoCapitalize="characters"
+                  />
+                  <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
+                    Digite o ativo ou a placa — o outro campo é preenchido automaticamente.
+                  </Text>
                   {melosaEquipamentoQrLoading || melosaEquipamentoAtivoLookupLoading ? (
                     <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
                       Buscando dados do equipamento…
@@ -3493,9 +3628,13 @@ export default function App() {
                       Empresa: {labelEquipamentoEmpresa(melosaEquipamentoEmpresa)}
                     </Text>
                   ) : null}
-                  {equipamentoDadosVisiveis && isOnline && !melosaEquipamentoNomeTexto.trim() && !melosaEquipamentoEmpresa.trim() ? (
+                  {equipamentoDadosVisiveis &&
+                  isOnline &&
+                  !melosaEquipamentoNomeTexto.trim() &&
+                  !melosaEquipamentoEmpresa.trim() &&
+                  (melosaFornecedorTexto.trim() || melosaEquipamentoPlacaTexto.trim()) ? (
                     <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
-                      Patrimônio não encontrado no cadastro. Confira o código ou use o QR code.
+                      Equipamento não encontrado no cadastro. Confira o ativo/placa ou use o QR code.
                     </Text>
                   ) : null}
                   {equipamentoDadosVisiveis && !isOnline ? (
@@ -3859,6 +3998,14 @@ export default function App() {
                       </Text>
                       <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
                         {melosaFornecedorTexto.trim() || "—"}
+                      </Text>
+                    </View>
+                    <View style={styles.melosaResumoRow}>
+                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                        Placa Equipamento
+                      </Text>
+                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                        {melosaEquipamentoPlacaTexto.trim() || "—"}
                       </Text>
                     </View>
                     <View style={styles.melosaResumoRow}>

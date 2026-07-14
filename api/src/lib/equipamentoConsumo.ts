@@ -69,6 +69,9 @@ export type PeriodoAnteriorResumo = {
 export type EquipamentoConsumoResposta = {
   periodo: { de: string | null; ate: string | null };
   equipamentos: ConsumoEquipamento[];
+  /** Litros abastecidos em equipamentos no período (exclui tanque/melosa). */
+  total_litros_equipamentos: number;
+  abastecimentos_equipamentos: number;
   sem_dados_horimetro: number;
   sem_horimetro_rows: SemHorimetroRow[];
   horimetro_regressivo_total: number;
@@ -296,6 +299,46 @@ export function buildConsumoPorEquipamento(
   };
 }
 
+function isAtivoTanquePattern(ativo: string): boolean {
+  // Ex.: T229-1 — patrimônio gerado para tanques de obra
+  return /^T\d+-\d+$/i.test(ativo.trim());
+}
+
+async function fetchAtivosSomenteEquipamento(
+  service: SupabaseClient,
+  ativos: string[],
+): Promise<Set<string>> {
+  const wanted = new Set(
+    ativos.map((a) => normAtivo(a)).filter((a) => a && !isAtivoTanquePattern(a)),
+  );
+  if (wanted.size === 0) return new Set();
+
+  const { data, error } = await service
+    .from("equipamentos")
+    .select("ativo")
+    .eq("tipo", "EQUIPAMENTO");
+  if (error) throw new Error(error.message);
+
+  const permitidos = new Set<string>();
+  (data ?? []).forEach((row) => {
+    const ativo = normAtivo(row.ativo);
+    if (wanted.has(ativo)) permitidos.add(ativo);
+  });
+  return permitidos;
+}
+
+function filtrarRowsSomenteEquipamento(
+  rows: MelosaAbastecimentoRow[],
+  ativosEquipamento: Set<string>,
+): MelosaAbastecimentoRow[] {
+  return rows.filter((r) => {
+    const ativo = normAtivo(r.ativo_equipamento_texto);
+    if (!ativo || isAtivoTanquePattern(ativo)) return false;
+    // Sem cadastro como EQUIPAMENTO: não entra no consumo médio (evita tanque/melosa/texto livre)
+    return ativosEquipamento.has(ativo);
+  });
+}
+
 async function fetchMobilidadePorAtivo(
   service: SupabaseClient,
   ativos: string[],
@@ -452,10 +495,16 @@ export async function buildEquipamentoConsumoDashboard(
   filtros: EquipamentoConsumoFiltros,
   obraScope: number[] | null,
 ): Promise<EquipamentoConsumoResposta> {
-  const [rows, metas] = await Promise.all([
+  const [rowsRaw, metas] = await Promise.all([
     fetchMovimentacoes(service, filtros, obraScope),
     fetchConsumoMetas(service),
   ]);
+
+  const ativosBrutos = Array.from(
+    new Set(rowsRaw.map((r) => normAtivo(r.ativo_equipamento_texto)).filter(Boolean)),
+  );
+  const ativosEquipamento = await fetchAtivosSomenteEquipamento(service, ativosBrutos);
+  const rows = filtrarRowsSomenteEquipamento(rowsRaw, ativosEquipamento);
 
   const ativos = Array.from(
     new Set(rows.map((r) => normAtivo(r.ativo_equipamento_texto)).filter(Boolean)),
@@ -468,15 +517,29 @@ export async function buildEquipamentoConsumoDashboard(
   const built = buildConsumoPorEquipamento(rows, mobilidadePorAtivo);
   const equipamentos = built.equipamentos.filter((e) => e.leituras_com_horimetro >= 2);
 
+  let totalLitrosEquipamentos = 0;
+  let abastecimentosEquipamentos = 0;
+  rows.forEach((row) => {
+    const litros = litrosFromRow(row);
+    if (litros <= 0) return;
+    totalLitrosEquipamentos += litros;
+    abastecimentosEquipamentos += 1;
+  });
+
   let periodoAnterior: PeriodoAnteriorResumo | null = null;
   if (filtros.compararPeriodoAnterior && filtros.de && filtros.ate) {
     const prev = calcPeriodoAnterior(filtros.de, filtros.ate);
     if (prev) {
-      const prevRows = await fetchMovimentacoes(
+      const prevRowsRaw = await fetchMovimentacoes(
         service,
         { ...filtros, de: prev.de, ate: prev.ate, compararPeriodoAnterior: false },
         obraScope,
       );
+      const prevAtivosBrutos = Array.from(
+        new Set(prevRowsRaw.map((r) => normAtivo(r.ativo_equipamento_texto)).filter(Boolean)),
+      );
+      const prevAtivosEquipamento = await fetchAtivosSomenteEquipamento(service, prevAtivosBrutos);
+      const prevRows = filtrarRowsSomenteEquipamento(prevRowsRaw, prevAtivosEquipamento);
       const prevBuilt = buildConsumoPorEquipamento(prevRows, mobilidadePorAtivo);
       const porAtivo: PeriodoAnteriorResumo["por_ativo"] = {};
       prevBuilt.equipamentos
@@ -494,6 +557,8 @@ export async function buildEquipamentoConsumoDashboard(
   return {
     periodo: { de: filtros.de ?? null, ate: filtros.ate ?? null },
     equipamentos,
+    total_litros_equipamentos: totalLitrosEquipamentos,
+    abastecimentos_equipamentos: abastecimentosEquipamentos,
     sem_dados_horimetro: built.sem_dados_horimetro,
     sem_horimetro_rows: built.sem_horimetro_rows,
     horimetro_regressivo_total: built.horimetro_regressivo_total,

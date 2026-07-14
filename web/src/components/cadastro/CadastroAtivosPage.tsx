@@ -34,6 +34,7 @@ type EquipamentoRow = {
   capacidade_litros?: number | null;
   mobilidade?: EquipamentoMobilidade | null;
   empresa?: string | null;
+  placa?: string | null;
 };
 
 const MOBILIDADE_LABEL: Record<EquipamentoMobilidade, string> = {
@@ -54,6 +55,7 @@ export type CadastroAtivosPageProps = {
   addLabel: string;
   showMobilidade?: boolean;
   showEmpresa?: boolean;
+  showPlaca?: boolean;
   enableImport?: boolean;
   enableBulkSelect?: boolean;
   enableQrCode?: boolean;
@@ -71,6 +73,7 @@ export default function CadastroAtivosPage({
   addLabel,
   showMobilidade = false,
   showEmpresa = false,
+  showPlaca = false,
   enableImport = false,
   enableBulkSelect = false,
   enableQrCode = false,
@@ -99,6 +102,7 @@ export default function CadastroAtivosPage({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [formMobilidade, setFormMobilidade] = useState<"" | EquipamentoMobilidade>("");
   const [formEmpresa, setFormEmpresa] = useState("");
+  const [formPlaca, setFormPlaca] = useState("");
   const [empresaCustomMode, setEmpresaCustomMode] = useState(false);
   const [filtroMobilidade, setFiltroMobilidade] = useState<"" | EquipamentoMobilidade>("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
@@ -194,6 +198,7 @@ export default function CadastroAtivosPage({
       return (
         (e.ativo ?? "").toLowerCase().includes(q) ||
         (e.nome ?? "").toLowerCase().includes(q) ||
+        (e.placa ?? "").toLowerCase().includes(q) ||
         (e.mobilidade ? MOBILIDADE_LABEL[e.mobilidade].toLowerCase().includes(q) : false) ||
         (e.empresa ? labelEquipamentoEmpresa(e.empresa).toLowerCase().includes(q) : false)
       );
@@ -286,6 +291,7 @@ export default function CadastroAtivosPage({
     setFormCapacidadeLitros("");
     setFormMobilidade("");
     setFormEmpresa("");
+    setFormPlaca("");
     setEmpresaCustomMode(false);
     setFormError(null);
     setFormOpen(true);
@@ -316,6 +322,7 @@ export default function CadastroAtivosPage({
     );
     setFormMobilidade(e.mobilidade ?? "");
     setFormEmpresa(normalizeEquipamentoEmpresa(e.empresa) ?? "");
+    setFormPlaca(e.placa ?? "");
     setEmpresaCustomMode(false);
     setFormError(null);
     setFormOpen(true);
@@ -399,6 +406,11 @@ export default function CadastroAtivosPage({
       payload.empresa = normalizeEquipamentoEmpresa(formEmpresa);
     }
 
+    if (showPlaca) {
+      const placaNorm = formPlaca.trim().toUpperCase().replace(/[\s\-]/g, "");
+      payload.placa = placaNorm || null;
+    }
+
     setFormSaving(true);
     setFormError(null);
     try {
@@ -407,6 +419,9 @@ export default function CadastroAtivosPage({
       } else {
         await apiPost("/v1/equipamentos", token, payload);
       }
+      const placaSaved = showPlaca
+        ? formPlaca.trim().toUpperCase().replace(/[\s\-]/g, "") || null
+        : null;
       const savedRow: EquipamentoRow = {
         ativo: ativoTrim,
         nome: nomeTrim || ativoTrim,
@@ -416,6 +431,7 @@ export default function CadastroAtivosPage({
           ? resolveMobilidadeEquipamento(nomeTrim || ativoTrim, formMobilidade || null)
           : null,
         empresa: showEmpresa ? normalizeEquipamentoEmpresa(formEmpresa) : null,
+        placa: placaSaved,
       };
       const wasCreate = !isEditing;
       setFormOpen(false);
@@ -426,6 +442,7 @@ export default function CadastroAtivosPage({
       setFormCapacidadeLitros("");
       setFormMobilidade("");
       setFormEmpresa("");
+      setFormPlaca("");
       setEmpresaCustomMode(false);
       await load();
       if (enableQrCode && wasCreate) {
@@ -444,6 +461,7 @@ export default function CadastroAtivosPage({
     formCapacidadeLitros,
     formMobilidade,
     formEmpresa,
+    formPlaca,
     formNome,
     formObraCodigo,
     isEditing,
@@ -451,6 +469,7 @@ export default function CadastroAtivosPage({
     showCapacidade,
     showMobilidade,
     showEmpresa,
+    showPlaca,
     showObra,
     enableQrCode,
     token,
@@ -585,6 +604,7 @@ export default function CadastroAtivosPage({
   const colCount =
     (showSelection ? 1 : 0) +
     2 +
+    (showPlaca ? 1 : 0) +
     (showObra ? 1 : 0) +
     (showEmpresa ? 1 : 0) +
     (showMobilidade ? 1 : 0) +
@@ -748,7 +768,7 @@ export default function CadastroAtivosPage({
           </span>
           <input
             type="search"
-            placeholder="Ativo ou descrição…"
+            placeholder="Ativo, placa ou descrição…"
             className={glassField}
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
@@ -823,6 +843,11 @@ export default function CadastroAtivosPage({
                 <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                   Descrição
                 </th>
+                {showPlaca ? (
+                  <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
+                    Placa
+                  </th>
+                ) : null}
                 {showObra ? (
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Obra
@@ -899,6 +924,13 @@ export default function CadastroAtivosPage({
                         <span className="font-semibold text-slate-900 dark:text-white">{e.nome || "—"}</span>
                       )}
                     </td>
+                    {showPlaca ? (
+                      <td className="border-b border-slate-100 px-4 py-3 dark:border-white/5">
+                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                          {e.placa || "—"}
+                        </span>
+                      </td>
+                    ) : null}
                     {showObra ? (
                       <td className="border-b border-slate-100 px-4 py-3 text-slate-600 dark:border-white/5 dark:text-slate-400">
                         {e.obra_codigo != null ? `${e.obra_codigo} - ${obraNome ?? "?"}` : "—"}
@@ -1007,6 +1039,28 @@ export default function CadastroAtivosPage({
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{ativoHint}</p>
                 ) : null}
               </div>
+
+              {showPlaca ? (
+                <div>
+                  <label htmlFor="cadastro-form-placa" className="mb-1 block text-xs font-bold uppercase text-slate-500">
+                    Placa (opcional)
+                  </label>
+                  <input
+                    id="cadastro-form-placa"
+                    type="text"
+                    className={glassField}
+                    placeholder="Ex.: KVW2O9X"
+                    value={formPlaca}
+                    onChange={(e) => setFormPlaca(e.target.value.toUpperCase())}
+                    disabled={formSaving}
+                    maxLength={20}
+                    autoCapitalize="characters"
+                  />
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Associe a placa do veículo ao patrimônio (ex.: REVTR02 → KVW2O9X).
+                  </p>
+                </div>
+              ) : null}
 
               <div>
                 <label htmlFor="cadastro-form-nome" className="mb-1 block text-xs font-bold uppercase text-slate-500">
@@ -1207,10 +1261,9 @@ export default function CadastroAtivosPage({
 
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
               Envie um arquivo <strong>.xlsx</strong> ou <strong>.csv</strong>. Aceita colunas{" "}
-              <code className="text-xs">PATRIMÔNIO</code> / <code className="text-xs">EQUIPAMENTO</code> ou o modelo
-              padrão (coluna <strong>empresa</strong> opcional: informe o nome da empresa, ex.{" "}
-              <strong>Dimensional</strong>, <strong>Construtora Alfa</strong>). Linhas duplicadas são unificadas
-              por patrimônio.
+              <code className="text-xs">ativo</code>, <code className="text-xs">descricao</code>,{" "}
+              <code className="text-xs">placa</code> (opcional), obra, mobilidade e empresa. Linhas duplicadas são
+              unificadas por patrimônio.
             </p>
 
             <div className="mt-4 space-y-4">

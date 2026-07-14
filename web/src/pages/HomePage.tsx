@@ -18,7 +18,7 @@ import DashboardAlertaCicloModal, {
   type DashboardAlertaCiclo,
 } from "../components/dashboard/DashboardAlertaCicloModal";
 import DashboardCard from "../components/dashboard/DashboardCard";
-import MelosaFluxoPanel from "../components/dashboard/MelosaFluxoPanel";
+import ConsumoMedioResumoPanel from "../components/dashboard/ConsumoMedioResumoPanel";
 import EstoqueCombustivelPanel from "../components/dashboard/EstoqueCombustivelPanel";
 import DashboardResumoSection from "../components/dashboard/DashboardResumoSection";
 import { useAuth } from "../state/AuthContext";
@@ -379,7 +379,7 @@ export default function HomePage() {
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Filtros da dashboard</h2>
             <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
-              Aplicam-se ao estoque, fluxo, alertas e ciclos abaixo.
+              Aplicam-se ao estoque, consumo médio, alertas e ciclos abaixo.
             </p>
           </div>
           <button
@@ -437,7 +437,7 @@ export default function HomePage() {
 
       <EstoqueCombustivelPanel token={token} ativoMelosa={filtroAtivo} obraCodigo={filtroObra} />
 
-      <MelosaFluxoPanel token={token} ativo={filtroAtivo} obraCodigo={filtroObra} />
+      <ConsumoMedioResumoPanel token={token} obraCodigo={filtroObra} ativoMelosa={filtroAtivo} />
 
       {/* Alertas */}
       <section className={`${glassPanel} p-4 md:p-5`}>

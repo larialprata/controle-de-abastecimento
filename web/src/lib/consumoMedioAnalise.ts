@@ -48,6 +48,9 @@ export type PeriodoAnteriorResumo = {
 export type EquipamentoConsumoResposta = {
   periodo: { de: string | null; ate: string | null };
   equipamentos: ConsumoEquipamento[];
+  /** Litros abastecidos em equipamentos no período (exclui tanque/melosa). */
+  total_litros_equipamentos?: number;
+  abastecimentos_equipamentos?: number;
   sem_dados_horimetro: number;
   sem_horimetro_rows: SemHorimetroRow[];
   horimetro_regressivo_total: number;

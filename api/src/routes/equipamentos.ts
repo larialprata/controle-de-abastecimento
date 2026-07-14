@@ -31,6 +31,14 @@ function buildTanqueAtivo(obraCodigo: number, tanqueNumero: number): string {
 const equipamentoTipoSchema = z.enum(["TANQUE", "MELOSA", "EQUIPAMENTO"]);
 const equipamentoMobilidadeSchema = z.enum(["ESTACIONARIO", "MOVEL"]);
 const equipamentoEmpresaInputSchema = z.string().trim().max(100).nullable().optional();
+const equipamentoPlacaInputSchema = z.string().trim().max(20).nullable().optional();
+
+/** Normaliza placa: maiúsculas, sem espaços (ex.: KVW2O9X). */
+function normalizeEquipamentoPlaca(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const norm = value.trim().toUpperCase().replace(/[\s\-]/g, "");
+  return norm || null;
+}
 
 const createEquipamentoSchema = z
   .object({
@@ -43,6 +51,7 @@ const createEquipamentoSchema = z
     saldo_inicial_litros: z.number().nonnegative().nullable().optional(),
     mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
     empresa: equipamentoEmpresaInputSchema,
+    placa: equipamentoPlacaInputSchema,
   })
   .superRefine((data, ctx) => {
     if (data.tipo === "MELOSA" && data.obra_codigo != null) {
@@ -117,14 +126,30 @@ const createEquipamentoSchema = z
         path: ["empresa"],
       });
     }
+    if (data.tipo !== "EQUIPAMENTO" && data.placa != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Placa só se aplica a equipamentos.",
+        path: ["placa"],
+      });
+    }
   });
 
 const EQUIPAMENTO_SELECT =
-  "ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, saldo_inicial_litros, saldo_inicial_em, mobilidade, empresa";
+  "ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, saldo_inicial_litros, saldo_inicial_em, mobilidade, empresa, placa";
 
 function formatEquipamentoDbError(message: string): string {
   if (message.includes("invalid input value for enum equipamento_empresa")) {
     return "Banco desatualizado: execute migration_equipamento_empresa_text.sql no SQL Editor do Supabase.";
+  }
+  if (
+    message.includes("equipamentos_placa_unique_idx") ||
+    (message.includes("placa") && message.toLowerCase().includes("duplicate"))
+  ) {
+    return "Já existe um equipamento com essa placa.";
+  }
+  if (message.includes("column") && message.includes("placa") && message.includes("does not exist")) {
+    return "Banco desatualizado: execute migration_equipamento_placa.sql no SQL Editor do Supabase.";
   }
   return message;
 }
@@ -176,49 +201,97 @@ async function resolveEquipamentoQrResponse(input: {
 }
 
 async function loadAbastEquipamentoByAtivo(
-  ativo: string,
+  ativoOuPlaca: string,
   obraCodigo?: number | null,
-): Promise<{ ativo: string; nome: string | null; empresa: string | null } | null> {
+): Promise<{ ativo: string; nome: string | null; empresa: string | null; placa: string | null } | null> {
   const service = createSupabaseServiceRole();
-  const norm = normalizeAtivoPlacaExterno(ativo);
+  const norm = normalizeAtivoPlacaExterno(ativoOuPlaca);
   if (!norm) return null;
 
-  const searchNeedles = expandAtivoSearchNeedles(ativo);
+  const searchNeedles = expandAtivoSearchNeedles(ativoOuPlaca);
+
+  function mapRow(row: {
+    ativo: string;
+    nome: string | null;
+    empresa: string | null;
+    placa?: string | null;
+  }) {
+    return {
+      ativo: row.ativo,
+      nome: row.nome,
+      empresa: row.empresa,
+      placa: row.placa?.trim() ? normalizeAtivoPlacaExterno(row.placa) : null,
+    };
+  }
+
+  function matchesAtivoOrPlaca(row: { ativo: string; placa?: string | null }): boolean {
+    if (normalizeAtivoPlacaExterno(row.ativo) === norm) return true;
+    if (row.placa && normalizeAtivoPlacaExterno(row.placa) === norm) return true;
+    return false;
+  }
 
   async function findInScope(scopeObra?: number | null) {
     for (const needle of searchNeedles) {
-      let query = service
+      let byAtivo = service
         .from("equipamentos")
-        .select("ativo, nome, empresa")
+        .select("ativo, nome, empresa, placa")
         .eq("tipo", "EQUIPAMENTO")
         .ilike("ativo", needle);
       if (scopeObra != null && scopeObra > 0) {
-        query = query.eq("obra_codigo", scopeObra);
+        byAtivo = byAtivo.eq("obra_codigo", scopeObra);
       }
-      const { data, error } = await query.limit(8);
-      if (error) throw error;
-      const match = (data ?? []).find((row) => normalizeAtivoPlacaExterno(row.ativo) === norm);
-      if (match) {
-        return { ativo: match.ativo, nome: match.nome, empresa: match.empresa };
+      const { data: ativoRows, error: ativoErr } = await byAtivo.limit(8);
+      if (ativoErr) {
+        if (ativoErr.message.includes("placa") && ativoErr.message.includes("does not exist")) {
+          throw new Error(
+            "Banco desatualizado: execute migration_equipamento_placa.sql no SQL Editor do Supabase.",
+          );
+        }
+        throw ativoErr;
       }
+      const ativoMatch = (ativoRows ?? []).find((row) => matchesAtivoOrPlaca(row));
+      if (ativoMatch) return mapRow(ativoMatch);
+
+      let byPlaca = service
+        .from("equipamentos")
+        .select("ativo, nome, empresa, placa")
+        .eq("tipo", "EQUIPAMENTO")
+        .ilike("placa", needle);
+      if (scopeObra != null && scopeObra > 0) {
+        byPlaca = byPlaca.eq("obra_codigo", scopeObra);
+      }
+      const { data: placaRows, error: placaErr } = await byPlaca.limit(8);
+      if (placaErr) {
+        if (placaErr.message.includes("placa") && placaErr.message.includes("does not exist")) {
+          throw new Error(
+            "Banco desatualizado: execute migration_equipamento_placa.sql no SQL Editor do Supabase.",
+          );
+        }
+        throw placaErr;
+      }
+      const placaMatch = (placaRows ?? []).find((row) => matchesAtivoOrPlaca(row));
+      if (placaMatch) return mapRow(placaMatch);
     }
 
     let fallbackQuery = service
       .from("equipamentos")
-      .select("ativo, nome, empresa")
+      .select("ativo, nome, empresa, placa")
       .eq("tipo", "EQUIPAMENTO");
     if (scopeObra != null && scopeObra > 0) {
       fallbackQuery = fallbackQuery.eq("obra_codigo", scopeObra);
     }
     const { data: rows, error: fallbackError } = await fallbackQuery;
-    if (fallbackError) throw fallbackError;
-    const fallbackMatch = (rows ?? []).find((row) => normalizeAtivoPlacaExterno(row.ativo) === norm);
+    if (fallbackError) {
+      if (fallbackError.message.includes("placa") && fallbackError.message.includes("does not exist")) {
+        throw new Error(
+          "Banco desatualizado: execute migration_equipamento_placa.sql no SQL Editor do Supabase.",
+        );
+      }
+      throw fallbackError;
+    }
+    const fallbackMatch = (rows ?? []).find((row) => matchesAtivoOrPlaca(row));
     if (!fallbackMatch) return null;
-    return {
-      ativo: fallbackMatch.ativo,
-      nome: fallbackMatch.nome,
-      empresa: fallbackMatch.empresa,
-    };
+    return mapRow(fallbackMatch);
   }
 
   if (obraCodigo != null && obraCodigo > 0) {
@@ -394,7 +467,16 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
   }
 
-  const { tipo, obra_codigo, capacidade_litros, saldo_inicial_litros, mobilidade, empresa, tanque_numero } = parsed.data;
+  const {
+    tipo,
+    obra_codigo,
+    capacidade_litros,
+    saldo_inicial_litros,
+    mobilidade,
+    empresa,
+    placa,
+    tanque_numero,
+  } = parsed.data;
   const service = createSupabaseServiceRole();
 
   try {
@@ -484,10 +566,15 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
       mobilidade:
         tipo === "EQUIPAMENTO" ? resolveMobilidadeEquipamento(nome, mobilidade) : null,
       empresa: tipo === "EQUIPAMENTO" ? normalizeEquipamentoEmpresa(empresa) : null,
+      placa: tipo === "EQUIPAMENTO" ? normalizeEquipamentoPlaca(placa) : null,
     })
     .select(EQUIPAMENTO_SELECT)
     .single();
-  if (error) return res.status(500).json({ error: formatEquipamentoDbError(error.message) });
+  if (error) {
+    const formatted = formatEquipamentoDbError(error.message);
+    const status = formatted.includes("Já existe um equipamento com essa placa") ? 409 : 500;
+    return res.status(status).json({ error: formatted });
+  }
   return res.status(201).json({ equipamento: data });
 });
 
@@ -499,6 +586,7 @@ const importItemSchema = z.object({
   obra_nome: z.string().trim().max(300).optional(),
   mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
   empresa: equipamentoEmpresaInputSchema.optional(),
+  placa: equipamentoPlacaInputSchema,
 });
 
 const importEquipamentosSchema = z.object({
@@ -614,6 +702,7 @@ router.post("/equipamentos/import", requireAuth, async (req: AuthedRequest, res)
       capacidade_litros: null,
       mobilidade: resolveMobilidadeEquipamento(nome, item.mobilidade),
       empresa: normalizeEquipamentoEmpresa(item.empresa),
+      placa: normalizeEquipamentoPlaca(item.placa),
     };
 
     if (existing) {
@@ -647,6 +736,7 @@ const updateEquipamentoSchema = z
     saldo_inicial_litros: z.number().nonnegative().nullable().optional(),
     mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
     empresa: equipamentoEmpresaInputSchema,
+    placa: equipamentoPlacaInputSchema,
   })
   .superRefine((data, ctx) => {
     if (data.tipo === "MELOSA" && data.obra_codigo != null) {
@@ -668,6 +758,13 @@ const updateEquipamentoSchema = z
         code: z.ZodIssueCode.custom,
         message: "Empresa só se aplica a equipamentos.",
         path: ["empresa"],
+      });
+    }
+    if (data.tipo != null && data.tipo !== "EQUIPAMENTO" && data.placa != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Placa só se aplica a equipamentos.",
+        path: ["placa"],
       });
     }
     if (data.tipo != null && data.tipo !== "TANQUE" && data.saldo_inicial_litros != null) {
@@ -696,7 +793,7 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
   const service = createSupabaseServiceRole();
   const { data: existing, error: findErr } = await service
     .from("equipamentos")
-    .select("ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, mobilidade, empresa")
+    .select("ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, mobilidade, empresa, placa")
     .eq("ativo", ativoAtual)
     .maybeSingle();
   if (findErr) return res.status(500).json({ error: findErr.message });
@@ -772,6 +869,15 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
     empresa = normalizeEquipamentoEmpresa(existing.empresa);
   }
 
+  let placa: string | null;
+  if (tipo !== "EQUIPAMENTO") {
+    placa = null;
+  } else if (parsed.data.placa !== undefined) {
+    placa = normalizeEquipamentoPlaca(parsed.data.placa);
+  } else {
+    placa = normalizeEquipamentoPlaca(existing.placa);
+  }
+
   let tanqueNumeroAtualizado: number | null = null;
   let ativoFinal = ativoNovo;
   if (tipo === "TANQUE") {
@@ -817,6 +923,7 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
       tanque_numero: tipo === "TANQUE" ? tanqueNumeroAtualizado : null,
       mobilidade,
       empresa,
+      placa,
       ...(parsed.data.capacidade_litros !== undefined
         ? {
             capacidade_litros:
@@ -836,7 +943,11 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
     .eq("ativo", ativoAtual)
     .select(EQUIPAMENTO_SELECT)
     .single();
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    const formatted = formatEquipamentoDbError(error.message);
+    const status = formatted.includes("Já existe um equipamento com essa placa") ? 409 : 500;
+    return res.status(status).json({ error: formatted });
+  }
   return res.json({ equipamento: data });
 });
 
