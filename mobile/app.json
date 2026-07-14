@@ -39,6 +39,13 @@
           "cameraPermission": "Permitir acesso à câmera para ler QR codes de equipamentos."
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permitir acesso à galeria para anexar fotos dos registros de combustível.",
+          "cameraPermission": "Permitir acesso à câmera para fotos de horímetro, lacres e comprovantes."
+        }
+      ],
       "./plugins/withAndroidSdkLocalProperties.js",
       "./plugins/withExpoAutolinkingProjectRoot.js",
       "./plugins/withReactNativeMonorepoGradle.js",

@@ -26,11 +26,16 @@ import {
 } from "react-native";
 import * as Location from "expo-location";
 import NetInfo from "@react-native-community/netinfo";
-import * as ImagePicker from "expo-image-picker";
 import { Picker } from "@react-native-picker/picker";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./src/lib/supabase";
 import { env } from "./src/lib/env";
+import { pickImageFromCamera, pickImageFromLibrary } from "./src/lib/pickImage";
+import {
+  clearMelosaFlowCheckpoint,
+  loadMelosaFlowCheckpoint,
+  saveMelosaFlowCheckpoint,
+} from "./src/lib/melosaFlowCheckpoint";
 import { clearOutbox, enqueueOutbox, initDb, outboxCount } from "./src/db/sqlite";
 import { syncOutbox } from "./src/sync/syncOutbox";
 import { OBRAS } from "./src/constants/obras";
@@ -733,6 +738,8 @@ export default function App() {
 
   const [screen, setScreen] = useState<Screen>({ name: "login" });
   const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const logoutIntentionalRef = useRef(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
@@ -885,41 +892,157 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-      if (data.session) setScreen({ name: "home" });
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!mounted) return;
+        setSession(data.session);
+
+        if (data.session) {
+          const checkpoint = await loadMelosaFlowCheckpoint();
+          if (checkpoint?.screenStep) {
+            applyMelosaFlowCheckpoint(checkpoint);
+            setScreen({ name: "melosa", step: checkpoint.screenStep });
+          } else {
+            setScreen({ name: "home" });
+          }
+        }
+      } finally {
+        if (mounted) setAuthReady(true);
+      }
     })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      if (!mounted) return;
+
+      if (event === "SIGNED_OUT") {
+        if (logoutIntentionalRef.current) {
+          logoutIntentionalRef.current = false;
+          setSession(null);
+          setScreen({ name: "login" });
+          return;
+        }
+
+        // Offline: ignore logout acidental (refresh de token falhou sem rede).
+        const net = await NetInfo.fetch();
+        const online = Boolean(net.isInternetReachable ?? net.isConnected);
+        if (!online) {
+          const { data } = await supabase.auth.getSession();
+          if (data.session) {
+            setSession(data.session);
+            return;
+          }
+        }
+
+        setSession(null);
+        setScreen({ name: "login" });
+        return;
+      }
+
+      if (nextSession) {
+        setSession(nextSession);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function applyMelosaFlowCheckpoint(checkpoint: Awaited<ReturnType<typeof loadMelosaFlowCheckpoint>>) {
+    if (!checkpoint) return;
+    setMelosaObraCodigo(checkpoint.melosaObraCodigo);
+    setMelosaPlacaTexto(checkpoint.melosaPlacaTexto);
+    setMelosaFornecedorTexto(checkpoint.melosaFornecedorTexto);
+    setMelosaEquipamentoPlacaTexto(checkpoint.melosaEquipamentoPlacaTexto);
+    setMelosaEquipamentoNomeTexto(checkpoint.melosaEquipamentoNomeTexto);
+    setMelosaEquipamentoEmpresa(checkpoint.melosaEquipamentoEmpresa);
+    setMelosaQuantidadeAbastecidaTexto(checkpoint.melosaQuantidadeAbastecidaTexto);
+    setMelosaQuantidadeAbastecidaFotoUri(checkpoint.melosaQuantidadeAbastecidaFotoUri);
+    setMelosaHorimetroEquipamentoNumero(checkpoint.melosaHorimetroEquipamentoNumero);
+    setMelosaHorimetroEquipamentoFotoUri(checkpoint.melosaHorimetroEquipamentoFotoUri);
+    setMelosaNaoTenhoHorimetro(checkpoint.melosaNaoTenhoHorimetro);
+    setMelosaHorimetroMotivo(checkpoint.melosaHorimetroMotivo);
+    setMelosaLubrificado(checkpoint.melosaLubrificado);
+    setMelosaMotoristaEquipamentoTexto(checkpoint.melosaMotoristaEquipamentoTexto);
+    setMelosaEquipamentoOperadorFotoUri(checkpoint.melosaEquipamentoOperadorFotoUri);
+    setMelosaWdrCombustivelTipo(checkpoint.melosaWdrCombustivelTipo);
+    setMelosaAssinaturaOperadorDataUrl(checkpoint.melosaAssinaturaOperadorDataUrl);
+    setMelosaAssinaturaMotoristaDataUrl(checkpoint.melosaAssinaturaMotoristaDataUrl);
+    setLocalLatitude(checkpoint.localLatitude);
+    setLocalLongitude(checkpoint.localLongitude);
+    setLocalAddress(checkpoint.localAddress);
+  }
+
+  async function persistMelosaFlowCheckpoint(
+    step?: "register" | "quantidade_abastecida" | "horimetro" | "resumo",
+  ) {
+    const screenStep =
+      step ??
+      (screen.name === "melosa" ? screen.step : "horimetro");
+    await saveMelosaFlowCheckpoint({
+      savedAt: new Date().toISOString(),
+      screenStep,
+      melosaObraCodigo,
+      melosaPlacaTexto,
+      melosaFornecedorTexto,
+      melosaEquipamentoPlacaTexto,
+      melosaEquipamentoNomeTexto,
+      melosaEquipamentoEmpresa,
+      melosaQuantidadeAbastecidaTexto,
+      melosaQuantidadeAbastecidaFotoUri,
+      melosaHorimetroEquipamentoNumero,
+      melosaHorimetroEquipamentoFotoUri,
+      melosaNaoTenhoHorimetro,
+      melosaHorimetroMotivo,
+      melosaLubrificado,
+      melosaMotoristaEquipamentoTexto,
+      melosaEquipamentoOperadorFotoUri,
+      melosaWdrCombustivelTipo,
+      melosaAssinaturaOperadorDataUrl,
+      melosaAssinaturaMotoristaDataUrl,
+      localLatitude,
+      localLongitude,
+      localAddress,
+    });
+  }
 
   useEffect(() => {
     if (!session?.access_token) return;
     (async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      const uid = userData.user?.id ?? null;
-      setAuthUserId(uid);
-      const email = userData.user?.email ?? "";
-      let fullName = "";
-      if (uid) {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("full_name, is_melosa")
-          .eq("user_id", uid)
-          .maybeSingle();
-        if (prof?.full_name && String(prof.full_name).trim()) fullName = String(prof.full_name).trim();
-        setIsMelosaUser(Boolean((prof as any)?.is_melosa));
+      try {
+        // Offline: usa dados já na sessão sem chamar a rede.
+        const uid = session.user?.id ?? null;
+        setAuthUserId(uid);
+        const email = session.user?.email ?? "";
+        let fullName = "";
+        const meta = session.user?.user_metadata as Record<string, unknown> | undefined;
+        if (typeof meta?.full_name === "string" && meta.full_name.trim()) {
+          fullName = meta.full_name.trim();
+        }
+
+        const net = await NetInfo.fetch();
+        const online = Boolean(net.isInternetReachable ?? net.isConnected);
+        if (online && uid) {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("full_name, is_melosa")
+            .eq("user_id", uid)
+            .maybeSingle();
+          if (prof?.full_name && String(prof.full_name).trim()) fullName = String(prof.full_name).trim();
+          setIsMelosaUser(Boolean((prof as { is_melosa?: boolean } | null)?.is_melosa));
+        }
+
+        setDriverFullName(fullName || email);
+      } catch {
+        // Mantém o que já houver — não derruba o login offline.
       }
-      if (!fullName) {
-        const meta = userData.user?.user_metadata as Record<string, unknown> | undefined;
-        if (typeof meta?.full_name === "string" && meta.full_name.trim()) fullName = meta.full_name.trim();
-      }
-      setDriverFullName(fullName || email);
-    })().catch(() => {
-      setDriverFullName("");
-      setAuthUserId(null);
-      setIsMelosaUser(false);
-    });
-  }, [session?.access_token]);
+    })();
+  }, [session?.access_token, session?.user]);
 
   useEffect(() => {
     if (!session?.access_token) {
@@ -1471,6 +1594,14 @@ export default function App() {
       return current.access_token;
     }
 
+    // Sem internet: mantém o token local — o registro fica na fila offline
+    // e o refresh acontece quando houver conexão.
+    const net = await NetInfo.fetch();
+    const online = Boolean(net.isInternetReachable ?? net.isConnected);
+    if (!online) {
+      return current.access_token;
+    }
+
     const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
     if (refreshErr || !refreshed.session?.access_token) {
       throw new Error("Sessão expirada. Faça login novamente.");
@@ -1511,359 +1642,149 @@ export default function App() {
   }
 
   async function pickCnhPhotoFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto da CNH.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setCnhPhotoUri(asset.uri);
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto da CNH.",
+    );
+    if (uri) setCnhPhotoUri(uri);
   }
 
   async function pickCnhPhotoFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto da CNH.");
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setCnhPhotoUri(asset.uri);
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto da CNH.",
+    );
+    if (uri) setCnhPhotoUri(uri);
   }
 
   async function pickNotaFotoFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto da nota.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setNotaFotoUri(asset.uri);
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto da nota.",
+    );
+    if (uri) setNotaFotoUri(uri);
   }
 
   async function pickNotaFotoFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto da nota.");
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setNotaFotoUri(asset.uri);
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto da nota.",
+    );
+    if (uri) setNotaFotoUri(uri);
   }
 
   async function pickLacreTanqueFotoFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do lacre do tanque.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setLacreTanqueFotoUri(asset.uri);
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto do lacre do tanque.",
+    );
+    if (uri) setLacreTanqueFotoUri(uri);
   }
 
   async function pickLacreTanqueFotoFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do lacre do tanque.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setLacreTanqueFotoUri(asset.uri);
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto do lacre do tanque.",
+    );
+    if (uri) setLacreTanqueFotoUri(uri);
   }
 
   async function pickLacreMelosaFotoFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do lacre da melosa.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setLacreMelosaFotoUri(asset.uri);
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto do lacre da melosa.",
+    );
+    if (uri) setLacreMelosaFotoUri(uri);
   }
 
   async function pickLacreMelosaFotoFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do lacre da melosa.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setLacreMelosaFotoUri(asset.uri);
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto do lacre da melosa.",
+    );
+    if (uri) setLacreMelosaFotoUri(uri);
   }
 
   async function pickTanqueQuantidadeAbastecidaFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do medidor de abastecimento.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setTanqueQuantidadeAbastecidaFotoUri(asset.uri);
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto do medidor de abastecimento.",
+    );
+    if (uri) setTanqueQuantidadeAbastecidaFotoUri(uri);
   }
 
   async function pickTanqueQuantidadeAbastecidaFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do medidor de abastecimento.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setTanqueQuantidadeAbastecidaFotoUri(asset.uri);
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto do medidor de abastecimento.",
+    );
+    if (uri) setTanqueQuantidadeAbastecidaFotoUri(uri);
   }
 
   async function pickMelosaComprovanteFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do comprovante.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaComprovanteFotoUri(asset.uri);
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto do comprovante.",
+    );
+    if (uri) setMelosaComprovanteFotoUri(uri);
   }
 
   async function pickMelosaComprovanteFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do comprovante.");
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaComprovanteFotoUri(asset.uri);
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto do comprovante.",
+    );
+    if (uri) setMelosaComprovanteFotoUri(uri);
   }
 
   async function pickMelosaQuantidadeAbastecidaFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto da quantidade abastecida.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaQuantidadeAbastecidaFotoUri(asset.uri);
+    await persistMelosaFlowCheckpoint("quantidade_abastecida");
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto da quantidade abastecida.",
+    );
+    if (uri) setMelosaQuantidadeAbastecidaFotoUri(uri);
   }
 
   async function pickMelosaHorimetroEquipamentoFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do horímetro do equipamento abastecido.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaHorimetroEquipamentoFotoUri(asset.uri);
+    await persistMelosaFlowCheckpoint("horimetro");
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto do horímetro do equipamento abastecido.",
+    );
+    if (uri) setMelosaHorimetroEquipamentoFotoUri(uri);
   }
 
   async function pickMelosaHorimetroEquipamentoFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do horímetro do equipamento abastecido.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaHorimetroEquipamentoFotoUri(asset.uri);
+    await persistMelosaFlowCheckpoint("horimetro");
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto do horímetro do equipamento abastecido.",
+    );
+    if (uri) setMelosaHorimetroEquipamentoFotoUri(uri);
   }
 
   async function pickMelosaEquipamentoOperadorFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do equipamento com o operador/motorista.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaEquipamentoOperadorFotoUri(asset.uri);
+    await persistMelosaFlowCheckpoint("horimetro");
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto do equipamento com o operador/motorista.",
+    );
+    if (uri) setMelosaEquipamentoOperadorFotoUri(uri);
   }
 
   async function pickMelosaEquipamentoOperadorFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do equipamento com o operador/motorista.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaEquipamentoOperadorFotoUri(asset.uri);
+    await persistMelosaFlowCheckpoint("horimetro");
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto do equipamento com o operador/motorista.",
+    );
+    if (uri) setMelosaEquipamentoOperadorFotoUri(uri);
   }
 
   async function pickMelosaQuantidadeAbastecidaFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto da quantidade abastecida.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaQuantidadeAbastecidaFotoUri(asset.uri);
+    await persistMelosaFlowCheckpoint("quantidade_abastecida");
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto da quantidade abastecida.",
+    );
+    if (uri) setMelosaQuantidadeAbastecidaFotoUri(uri);
   }
 
   async function pickMelosaTanqueFromLibrary() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à galeria para enviar a foto do tanque.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaTanqueFotoUri(asset.uri);
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto do tanque.",
+    );
+    if (uri) setMelosaTanqueFotoUri(uri);
   }
 
   async function pickMelosaTanqueFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão negada", "Habilite o acesso à câmera para tirar a foto do tanque.");
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      allowsEditing: false,
-      quality: 0.85,
-    });
-
-    if (result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.uri) return;
-    setMelosaTanqueFotoUri(asset.uri);
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto do tanque.",
+    );
+    if (uri) setMelosaTanqueFotoUri(uri);
   }
 
   async function onRegister() {
@@ -2084,11 +2005,13 @@ export default function App() {
   async function onLogout() {
     setBusy(true);
     try {
+      logoutIntentionalRef.current = true;
       try {
         await supabase.auth.signOut();
       } catch (e: any) {
         Alert.alert("Sair", String(e?.message ?? e));
       }
+      await clearMelosaFlowCheckpoint();
       setSession(null);
       setScreen({ name: "login" });
       setLoginPasswordVisible(false);
@@ -2836,6 +2759,7 @@ export default function App() {
         });
     }
 
+    void clearMelosaFlowCheckpoint();
     resetMelosaFlow();
     setScreen({ name: "home" });
     } catch (e: any) {
@@ -2959,6 +2883,17 @@ export default function App() {
       onPositionChange={handleThemeTogglePositionChange}
     />
   );
+
+  if (!authReady) {
+    return (
+      <View style={[styles.authRoot, !isDarkMode ? styles.authRootLight : null, { justifyContent: "center", alignItems: "center" }]}>
+        <StatusBar style={barStyle} />
+        <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>
+          Restaurando sessão…
+        </Text>
+      </View>
+    );
+  }
 
   if (screen.name === "login") {
     return (

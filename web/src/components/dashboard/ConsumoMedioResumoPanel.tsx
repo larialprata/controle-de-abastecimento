@@ -143,14 +143,14 @@ export default function ConsumoMedioResumoPanel({
             tone="orange"
           />
           <ConsumoMedioKpiCard
-            label="Combustível no mês"
+            label="Combustível no mês / atual"
             value={`${fmtLitrosDashboard(resumo.totalLitros)} L`}
             hint={`${resumo.abastecimentos} abastecimento(s) em equipamentos`}
             icon={Droplets}
             tone="sky"
           />
           <ConsumoMedioKpiCard
-            label="Consumo médio / mês"
+            label="Consumo médio / mês previsto"
             value={`${fmtLitrosDashboard(resumo.mediaMes)} L`}
             hint={`Projeção (${fmtLitrosDashboard(resumo.mediaDia)} L/dia × ${resumo.diasMes} dias)`}
             icon={CalendarRange}
