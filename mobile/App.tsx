@@ -56,6 +56,15 @@ import {
 import { normalizeAtivoPatrimonio } from "./src/lib/equipamentoAtivo";
 import { base64ToArrayBuffer, parseBase64DataUrl } from "./src/lib/signatureImage";
 import { extFromUri, stageImageFromDataUrl, stageImageFromUri } from "./src/sync/offlineMedia";
+import { APP_VERSION } from "./src/lib/appVersion";
+
+type SaveAckResult = {
+  titulo: string;
+  ativo: string;
+  litros: string;
+  status: "synced" | "pending" | "error";
+  erro?: string;
+};
 
 type TanqueCadastrado = {
   ativo: string;
@@ -827,6 +836,7 @@ export default function App() {
 
   const [isOnline, setIsOnline] = useState<boolean>(false);
   const [pending, setPending] = useState(0);
+  const [saveAck, setSaveAck] = useState<SaveAckResult | null>(null);
 
   const [obraCodigo, setObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
   const [tanqueTexto, setTanqueTexto] = useState("");
@@ -1622,6 +1632,49 @@ export default function App() {
       if (refreshErr || !refreshed.session?.access_token) throw e;
       setSession(refreshed.session);
       return syncOutbox(refreshed.session.access_token);
+    }
+  }
+
+  /** Salva na fila, tenta sync se online e devolve o resultado para o modal de confirmação. */
+  async function finalizeSaveWithAck(params: {
+    titulo: string;
+    ativo: string;
+    litros: string | number;
+  }): Promise<SaveAckResult> {
+    const litrosLabel =
+      typeof params.litros === "number"
+        ? String(params.litros)
+        : String(params.litros ?? "").trim() || "—";
+    const base = {
+      titulo: params.titulo,
+      ativo: params.ativo.trim() || "—",
+      litros: litrosLabel,
+    };
+
+    if (!isOnline) {
+      return {
+        ...base,
+        status: "pending",
+      };
+    }
+
+    try {
+      const r = await syncOutboxWithTokenRetry();
+      setPending(outboxCount());
+      if (r.synced > 0) {
+        return { ...base, status: "synced" };
+      }
+      return {
+        ...base,
+        status: "pending",
+      };
+    } catch (e: unknown) {
+      setPending(outboxCount());
+      return {
+        ...base,
+        status: "error",
+        erro: e instanceof Error ? e.message : String(e),
+      };
     }
   }
 
@@ -2543,28 +2596,31 @@ export default function App() {
 
     enqueueOutbox(operationId, payload);
     setPending(outboxCount());
-    setMessage(
-      isOnline
-        ? "Registro salvo. Sincronizando..."
-        : "Registro e fotos salvos no celular. Serão enviados quando houver internet.",
-    );
 
-    if (isOnline) {
-      // Não bloqueia a UI no clique de salvar.
-      void syncOutboxWithTokenRetry()
-        .then((r) => {
-          if (r.synced > 0) setMessage(`Sincronizado: ${r.synced} registro(s).`);
-        })
-        .catch((e: any) => {
-          setMessage(`Registro salvo no celular. Falha ao sincronizar: ${String(e?.message ?? e)}`);
-        })
-        .finally(() => {
-          setPending(outboxCount());
-        });
-    }
+    const ativoAck = isRetiradaTanque
+      ? placaTexto.trim()
+      : isEntradaTanqueObra
+        ? `Tanque ${tanqueNumero ?? "—"}`
+        : placaTexto.trim() || fornecedorTexto.trim();
+    const litrosAck = isRetiradaTanque
+      ? tanqueQuantidadeAbastecidaTexto.trim()
+      : isEntradaTanqueObra
+        ? litrosText.trim() || String(litros)
+        : String(litros);
 
-      resetForm();
-      setScreen({ name: "home" });
+    const ack = await finalizeSaveWithAck({
+      titulo: isEntradaTanqueObra
+        ? "Entrada no tanque"
+        : isRetiradaTanque
+          ? "Retirada do tanque"
+          : "Registro",
+      ativo: ativoAck,
+      litros: litrosAck,
+    });
+
+    resetForm();
+    setSaveAck(ack);
+    setScreen({ name: "home" });
     } catch (e: any) {
       Alert.alert("Salvar falhou", String(e?.message ?? e));
     } finally {
@@ -2744,27 +2800,16 @@ export default function App() {
 
     enqueueOutbox(operationId, payload);
     setPending(outboxCount());
-    setMessage(
-      isOnline
-        ? "Registro salvo. Sincronizando..."
-        : "Registro e fotos salvos no celular. Serão enviados quando houver internet.",
-    );
 
-    if (isOnline) {
-      void syncOutboxWithTokenRetry()
-        .then((r) => {
-          if (r.synced > 0) setMessage(`Sincronizado: ${r.synced} registro(s).`);
-        })
-        .catch((e: any) => {
-          setMessage(`Registro salvo no celular. Falha ao sincronizar: ${String(e?.message ?? e)}`);
-        })
-        .finally(() => {
-          setPending(outboxCount());
-        });
-    }
+    const ack = await finalizeSaveWithAck({
+      titulo: "Retirada da melosa",
+      ativo: melosaFornecedorTexto.trim() || melosaPlacaTexto.trim(),
+      litros: melosaQuantidadeAbastecidaTexto.trim() || litrosMelosa,
+    });
 
     void clearMelosaFlowCheckpoint();
     resetMelosaFlow();
+    setSaveAck(ack);
     setScreen({ name: "home" });
     } catch (e: any) {
       Alert.alert("Salvar falhou", String(e?.message ?? e));
@@ -3214,7 +3259,7 @@ export default function App() {
                 numberOfLines={1}
                 minimumFontScale={0.75}
               >
-                Status: {isOnline ? "Online" : "Offline"} | Pendentes: {pending}
+                Status: {isOnline ? "Online" : "Offline"} | Pendentes: {pending} | v{APP_VERSION}
               </Text>
 
               <View style={{ height: 14 }} />
@@ -3346,6 +3391,54 @@ export default function App() {
             </CardMeasuredWrap>
           </CenteredScrollView>
         </View>
+
+        <Modal
+          visible={Boolean(saveAck)}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSaveAck(null)}
+        >
+          <View style={styles.saveAckOverlay}>
+            <View style={[styles.saveAckCard, !isDarkMode ? styles.saveAckCardLight : null]}>
+              <Text style={[styles.saveAckTitle, !isDarkMode ? styles.saveAckTitleLight : null]}>
+                {saveAck?.titulo ?? "Registro"}
+              </Text>
+              <Text style={[styles.saveAckLine, !isDarkMode ? styles.saveAckLineLight : null]}>
+                Ativo: {saveAck?.ativo ?? "—"}
+              </Text>
+              <Text style={[styles.saveAckLine, !isDarkMode ? styles.saveAckLineLight : null]}>
+                Litros: {saveAck?.litros ?? "—"}
+              </Text>
+              <Text
+                style={[
+                  styles.saveAckStatus,
+                  saveAck?.status === "synced"
+                    ? styles.saveAckStatusOk
+                    : saveAck?.status === "error"
+                      ? styles.saveAckStatusError
+                      : styles.saveAckStatusPending,
+                ]}
+              >
+                {saveAck?.status === "synced"
+                  ? "Enviado com sucesso para o servidor."
+                  : saveAck?.status === "error"
+                    ? "Salvo no celular, mas não enviou para o servidor."
+                    : "Salvo no celular. Será enviado quando houver internet."}
+              </Text>
+              {saveAck?.status === "error" && saveAck.erro ? (
+                <Text style={[styles.saveAckErrorDetail, !isDarkMode ? styles.saveAckErrorDetailLight : null]}>
+                  Erro: {saveAck.erro}
+                </Text>
+              ) : null}
+              <TouchableOpacity
+                style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, { marginTop: 18 }]}
+                onPress={() => setSaveAck(null)}
+              >
+                <Text style={styles.primaryButtonText}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     );
   }
@@ -5879,6 +5972,71 @@ const styles = StyleSheet.create({
   },
   homeMessageLight: {
     color: lightTheme.textMuted,
+  },
+  saveAckOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  saveAckCard: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 18,
+    padding: 22,
+    backgroundColor: "rgba(20,28,40,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  saveAckCardLight: {
+    backgroundColor: "#fff",
+    borderColor: lightTheme.border,
+  },
+  saveAckTitle: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  saveAckTitleLight: {
+    color: lightTheme.textPrimary,
+  },
+  saveAckLine: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 15,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  saveAckLineLight: {
+    color: lightTheme.textPrimary,
+  },
+  saveAckStatus: {
+    marginTop: 14,
+    fontSize: 14,
+    fontWeight: "800",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  saveAckStatusOk: {
+    color: "#22c55e",
+  },
+  saveAckStatusPending: {
+    color: "#f59e0b",
+  },
+  saveAckStatusError: {
+    color: "#ef4444",
+  },
+  saveAckErrorDetail: {
+    marginTop: 10,
+    color: "rgba(255,180,180,0.95)",
+    fontSize: 13,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  saveAckErrorDetailLight: {
+    color: "#b91c1c",
   },
   homeFooterLogoWrap: {
     marginTop: 18,
