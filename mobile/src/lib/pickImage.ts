@@ -1,5 +1,6 @@
 import { Alert, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { persistCapturedPhoto } from "../sync/offlineMedia";
 
 const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
   mediaTypes: ["images"],
@@ -31,9 +32,24 @@ async function ensureLibraryPermission(deniedMessage: string): Promise<boolean> 
   return false;
 }
 
+async function hardenPickedUri(uri: string | null | undefined): Promise<string | null> {
+  if (!uri) return null;
+  try {
+    return await persistCapturedPhoto(uri);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    Alert.alert(
+      "Foto",
+      `A foto foi tirada, mas não deu para guardar no celular. Tente de novo.\n\n${msg}`,
+    );
+    return null;
+  }
+}
+
 /**
  * Abre a câmera com opções mais leves e tratamento de erro.
  * Em alguns Androids a permissão “já concedida” trava; um pequeno delay ajuda.
+ * A foto é copiada para o armazenamento interno do app (funciona offline).
  */
 export async function pickImageFromCamera(deniedMessage: string): Promise<string | null> {
   try {
@@ -46,7 +62,7 @@ export async function pickImageFromCamera(deniedMessage: string): Promise<string
 
     const result = await ImagePicker.launchCameraAsync(PICKER_OPTIONS);
     if (result.canceled) return null;
-    return result.assets?.[0]?.uri ?? null;
+    return hardenPickedUri(result.assets?.[0]?.uri);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     Alert.alert(
@@ -64,7 +80,7 @@ export async function pickImageFromLibrary(deniedMessage: string): Promise<strin
 
     const result = await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
     if (result.canceled) return null;
-    return result.assets?.[0]?.uri ?? null;
+    return hardenPickedUri(result.assets?.[0]?.uri);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     Alert.alert("Galeria", `Não foi possível abrir a galeria.\n\n${msg}`);

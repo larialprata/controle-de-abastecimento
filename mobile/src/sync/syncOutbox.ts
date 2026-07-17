@@ -115,6 +115,10 @@ export async function syncOutbox(token: string) {
     }
 
     try {
+      // Sempre sobe com a data/hora gravada no celular no momento do save offline.
+      if (!payload.data_hora) {
+        payload.data_hora = new Date().toISOString();
+      }
       await uploadPendingMediaForOperation(row.operation_id);
       const resp = await apiPost<{
         medidor_continuidade?: {

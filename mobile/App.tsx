@@ -2422,6 +2422,8 @@ export default function App() {
     }
 
     const operationId = uuidv4();
+    // Data/hora do momento em que o operador salvou no celular (não a da sincronização).
+    const dataHoraSalvaLocal = new Date().toISOString();
 
     let notaStoragePath: string | null = null;
     let lacreTanqueStoragePath: string | null = null;
@@ -2506,7 +2508,7 @@ export default function App() {
       operation_id: operationId,
       tipo: tipoAtual,
       obra_codigo: isTanqueObra ? (tanqueSelecionado?.obra_codigo ?? obraCodigo) : obraCodigo,
-      data_hora: new Date().toISOString(),
+      data_hora: dataHoraSalvaLocal,
       litros,
       tanque_texto: isRetiradaTanque
         ? retiradaMotoristaMelosaTexto.trim() || null
@@ -2544,7 +2546,7 @@ export default function App() {
     setMessage(
       isOnline
         ? "Registro salvo. Sincronizando..."
-        : "Registro salvo no celular. Será enviado quando houver internet.",
+        : "Registro e fotos salvos no celular. Serão enviados quando houver internet.",
     );
 
     if (isOnline) {
@@ -2639,6 +2641,8 @@ export default function App() {
     setBusy(true);
     try {
     const operationId = uuidv4();
+    // Data/hora do momento em que o operador salvou no celular (não a da sincronização).
+    const dataHoraSalvaLocal = new Date().toISOString();
     const userId = session?.user?.id;
     if (!userId) throw new Error("Usuário não encontrado para salvar as fotos.");
 
@@ -2696,7 +2700,7 @@ export default function App() {
       operation_id: operationId,
       tipo: "RETIRADA_MELOSA",
       obra_codigo: melosaObraCodigo,
-      data_hora: new Date().toISOString(),
+      data_hora: dataHoraSalvaLocal,
       litros: litrosMelosa,
       placa_texto: melosaPlacaTexto.trim(),
       fornecedor_texto: melosaFornecedorTexto.trim(),
@@ -2743,7 +2747,7 @@ export default function App() {
     setMessage(
       isOnline
         ? "Registro salvo. Sincronizando..."
-        : "Registro salvo no celular. Será enviado quando houver internet.",
+        : "Registro e fotos salvos no celular. Serão enviados quando houver internet.",
     );
 
     if (isOnline) {
@@ -4021,7 +4025,7 @@ export default function App() {
 
               {(isHorimetro || isResumo) && !isOnline ? (
                 <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 10 }]}>
-                  Offline: o registro será salvo no celular e enviado quando houver internet.
+                  Offline: fotos e dados ficam no celular e sobem com a data/hora deste registro quando houver internet.
                 </Text>
               ) : null}
 
@@ -4752,7 +4756,7 @@ export default function App() {
 
               {isEntradaDetalhes && !isOnline ? (
                 <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>
-                  Offline: o registro será salvo no celular e enviado quando houver internet.
+                  Offline: fotos e dados ficam no celular e sobem com a data/hora deste registro quando houver internet.
                 </Text>
               ) : null}
 
