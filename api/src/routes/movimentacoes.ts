@@ -450,7 +450,7 @@ router.get("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     );
 
     const { data: profilesData, error: profilesError } = userIds.length
-      ? await service.from("profiles").select("user_id, full_name").in("user_id", userIds)
+      ? await service.from("profiles").select("user_id, full_name, email").in("user_id", userIds)
       : { data: [], error: null };
 
     if (profilesError) throw profilesError;
@@ -459,10 +459,52 @@ router.get("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       (profilesData ?? []).map((p: { user_id: string; full_name: string }) => [p.user_id, p.full_name]),
     );
 
+    const looksLikeEmail = (v: unknown): v is string =>
+      typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+
+    const operadorEmails = Array.from(
+      new Set(
+        paginated
+          .map((m) => (looksLikeEmail(m.melosa_operador_nome) ? String(m.melosa_operador_nome).trim().toLowerCase() : null))
+          .filter((e): e is string => Boolean(e)),
+      ),
+    );
+
+    const { data: profilesByEmail, error: profilesByEmailError } = operadorEmails.length
+      ? await service.from("profiles").select("email, full_name").in("email", operadorEmails)
+      : { data: [], error: null };
+
+    if (profilesByEmailError) throw profilesByEmailError;
+
+    const fullNameByEmail = new Map(
+      (profilesByEmail ?? [])
+        .filter((p: { email?: string | null; full_name?: string | null }) => p.email && p.full_name)
+        .map((p: { email: string; full_name: string }) => [String(p.email).trim().toLowerCase(), String(p.full_name).trim()]),
+    );
+
+    const resolveOperadorNome = (m: {
+      melosa_operador_nome?: string | null;
+      usuario_id?: string | null;
+    }): string | null => {
+      const raw = typeof m.melosa_operador_nome === "string" ? m.melosa_operador_nome.trim() : "";
+      const usuarioNome =
+        typeof m.usuario_id === "string" ? (fullNameByUserId.get(m.usuario_id)?.trim() || null) : null;
+
+      if (raw && !looksLikeEmail(raw)) return raw;
+      if (raw && looksLikeEmail(raw)) {
+        const byEmail = fullNameByEmail.get(raw.toLowerCase());
+        if (byEmail) return byEmail;
+        if (usuarioNome) return usuarioNome;
+        return raw;
+      }
+      return usuarioNome;
+    };
+
     const movimentacoes = paginated.map((m) => ({
       ...m,
       obra_nome: obraByCodigo.get(m.obra_codigo) ?? null,
       usuario_full_name: typeof m.usuario_id === "string" ? (fullNameByUserId.get(m.usuario_id) ?? null) : null,
+      melosa_operador_nome: resolveOperadorNome(m),
     }));
 
     return res.json({ movimentacoes });

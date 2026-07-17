@@ -12,6 +12,7 @@ import melosaMedidorRouter from "./routes/melosaMedidor";
 import mobileErrorsRouter from "./routes/mobileErrors";
 import estoqueDashboardRouter from "./routes/estoqueDashboard";
 import equipamentoConsumoRouter from "./routes/equipamentoConsumo";
+import empresasRouter from "./routes/empresas";
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use("/v1", obrasRouter);
 app.use("/v1", authRouter);
 app.use("/v1", movimentacoesRouter);
 app.use("/v1", equipamentosRouter);
+app.use("/v1", empresasRouter);
 app.use("/v1", ticketsRouter);
 app.use("/v1", melosaCiclosRouter);
 app.use("/v1", melosaMedidorRouter);

@@ -97,12 +97,19 @@ function empresaEquipamentoParaResumo(m: LinhaMelosa): string {
 
 function toMelosaBiResumoRow(m: LinhaMelosa): MelosaBiResumoRow {
   const obraCodigo = typeof m.obra_codigo === "number" ? m.obra_codigo : undefined;
-  const responsavelMelosa =
-    typeof m.melosa_operador_nome === "string" && m.melosa_operador_nome.trim()
-      ? m.melosa_operador_nome.trim()
-      : typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
+  const responsavelMelosa = (() => {
+    const raw =
+      typeof m.melosa_operador_nome === "string" && m.melosa_operador_nome.trim()
+        ? m.melosa_operador_nome.trim()
+        : "";
+    const usuario =
+      typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
         ? m.usuario_full_name.trim()
-        : null;
+        : "";
+    if (raw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return raw;
+    if (usuario) return usuario;
+    return raw || null;
+  })();
   const motorista = m.melosa_motorista_equipamento_abastecido;
   return {
     empresa: empresaEquipamentoParaResumo(m),
@@ -210,9 +217,17 @@ function fmtUsuarioMelosa(m: LinhaMelosa): string {
   return typeof nome === "string" && nome.trim() ? nome.trim() : "—";
 }
 
+function looksLikeEmail(value: unknown): boolean {
+  return typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function fmtOperadorMelosa(m: LinhaMelosa): string {
-  const nome = m.melosa_operador_nome;
-  return typeof nome === "string" && nome.trim() ? nome.trim() : "—";
+  const raw = typeof m.melosa_operador_nome === "string" ? m.melosa_operador_nome.trim() : "";
+  const usuario = typeof m.usuario_full_name === "string" ? m.usuario_full_name.trim() : "";
+  if (raw && !looksLikeEmail(raw)) return raw;
+  if (usuario) return usuario;
+  if (raw) return raw;
+  return "—";
 }
 
 function fmtMotoristaMelosa(m: LinhaMelosa): string {
@@ -236,12 +251,7 @@ function fmtInsumoTicket(m: LinhaMelosa): string {
 }
 
 function buildMelosaTicketRow(m: LinhaMelosa): MelosaTicketRow {
-  const responsavel =
-    typeof m.melosa_operador_nome === "string" && m.melosa_operador_nome.trim()
-      ? m.melosa_operador_nome.trim()
-      : typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
-        ? m.usuario_full_name.trim()
-        : "—";
+  const responsavel = fmtOperadorMelosa(m);
   const assinaturaMotoristaPath =
     typeof m.melosa_assinatura_motorista_storage_path === "string"
       ? m.melosa_assinatura_motorista_storage_path
@@ -329,10 +339,19 @@ function fmtTimeOnly(v: unknown): string {
 
 function fmtLocal(m: LinhaMelosa): string {
   if (m.local_address != null && String(m.local_address).trim()) return fmt(m.local_address);
-  if ([m.local_latitude, m.local_longitude].every((x) => x != null)) {
-    return `${fmt(m.local_latitude)}, ${fmt(m.local_longitude)}`;
+  const lat = parseCoord(m.local_latitude);
+  const lng = parseCoord(m.local_longitude);
+  if (lat != null && lng != null) {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   }
   return "—";
+}
+
+function mapsUrlLocal(m: LinhaMelosa): string | null {
+  const lat = parseCoord(m.local_latitude);
+  const lng = parseCoord(m.local_longitude);
+  if (lat == null || lng == null) return null;
+  return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
 function storagePath(m: LinhaMelosa, key: string): string | undefined {
@@ -1166,7 +1185,22 @@ export default function MelosaBIPage() {
                         {photo(storagePath(m, "melosa_equipamento_operador_storage_path"), "Operador")}
                       </td>
                       <td className={`${tdCls} max-w-[220px] truncate`} title={fmtLocal(m)}>
-                        {fmtLocal(m)}
+                        {(() => {
+                          const label = fmtLocal(m);
+                          const href = mapsUrlLocal(m);
+                          if (label === "—" || !href) return label;
+                          return (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-accent underline-offset-2 hover:underline"
+                              title={label}
+                            >
+                              {label}
+                            </a>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );

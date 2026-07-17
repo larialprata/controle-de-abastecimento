@@ -10,7 +10,6 @@ import {
   labelEquipamentoEmpresa,
   normalizeEquipamentoEmpresa,
 } from "../../lib/equipamentoEmpresa";
-import { EMPRESA_LABEL } from "../../lib/obrasEmpresa";
 import {
   chunkImportRows,
   downloadEquipamentosImportTemplate,
@@ -25,6 +24,12 @@ import EquipamentoQrModal from "./EquipamentoQrModal";
 
 export type CadastroAtivoTipo = "MELOSA" | "EQUIPAMENTO";
 export type EquipamentoMobilidade = "ESTACIONARIO" | "MOVEL";
+
+type EmpresaCadastro = {
+  id: string;
+  nome: string;
+  ativo: boolean;
+};
 
 type EquipamentoRow = {
   ativo: string;
@@ -104,6 +109,11 @@ export default function CadastroAtivosPage({
   const [formEmpresa, setFormEmpresa] = useState("");
   const [formPlaca, setFormPlaca] = useState("");
   const [empresaCustomMode, setEmpresaCustomMode] = useState(false);
+  const [empresasCadastro, setEmpresasCadastro] = useState<EmpresaCadastro[]>([]);
+  const [empresasManageOpen, setEmpresasManageOpen] = useState(false);
+  const [novaEmpresaNome, setNovaEmpresaNome] = useState("");
+  const [empresasManageSaving, setEmpresasManageSaving] = useState(false);
+  const [empresasManageError, setEmpresasManageError] = useState<string | null>(null);
   const [filtroMobilidade, setFiltroMobilidade] = useState<"" | EquipamentoMobilidade>("");
   const [filtroEmpresa, setFiltroEmpresa] = useState("");
   const [filtroObraCodigo, setFiltroObraCodigo] = useState("");
@@ -137,18 +147,53 @@ export default function CadastroAtivosPage({
     setLoading(true);
     setError(null);
     try {
-      const [equipJson, obrasJson] = await Promise.all([
+      const [equipJson, obrasJson, empresasJson] = await Promise.all([
         apiGet<{ equipamentos: EquipamentoRow[] }>(`/v1/equipamentos?tipo=${fixedTipo}`, token),
         showObra ? apiGet<{ obras: ObraRow[] }>("/v1/obras", token) : Promise.resolve({ obras: [] }),
+        showEmpresa
+          ? apiGet<{ empresas: EmpresaCadastro[] }>("/v1/empresas", token)
+          : Promise.resolve({ empresas: [] as EmpresaCadastro[] }),
       ]);
       setEquipamentos(equipJson?.equipamentos ?? []);
       setObras(obrasJson?.obras ?? []);
+      setEmpresasCadastro(empresasJson?.empresas ?? []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : `Erro ao carregar ${title.toLowerCase()}`);
     } finally {
       setLoading(false);
     }
-  }, [fixedTipo, showObra, title, token]);
+  }, [fixedTipo, showEmpresa, showObra, title, token]);
+
+  const ensureEmpresaCadastrada = useCallback(
+    async (nomeRaw: string | null | undefined) => {
+      if (!token || !showEmpresa) return;
+      const nome = normalizeEquipamentoEmpresa(nomeRaw);
+      if (!nome) return;
+      const jaExiste = empresasCadastro.some(
+        (e) => normalizeEquipamentoEmpresa(e.nome)?.toLowerCase() === nome.toLowerCase(),
+      );
+      if (jaExiste) return;
+      try {
+        const { empresa } = await apiPost<{ empresa: EmpresaCadastro }>("/v1/empresas", token, {
+          nome,
+          ativo: true,
+        });
+        if (empresa) {
+          setEmpresasCadastro((prev) =>
+            [...prev, empresa].sort((a, b) =>
+              a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" }),
+            ),
+          );
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/já existe/i.test(msg)) {
+          console.warn("Falha ao cadastrar empresa:", msg);
+        }
+      }
+    },
+    [token, showEmpresa, empresasCadastro],
+  );
 
   useEffect(() => {
     load();
@@ -162,18 +207,91 @@ export default function CadastroAtivosPage({
     });
   }, [equipamentos]);
 
-  const empresasCadastradas = useMemo(
-    () => collectEmpresasFromRows(equipamentos),
-    [equipamentos],
-  );
+  const empresasCadastradas = useMemo(() => {
+    const fromTable = empresasCadastro
+      .filter((e) => e.ativo)
+      .map((e) => normalizeEquipamentoEmpresa(e.nome))
+      .filter((n): n is string => Boolean(n));
+    const fromEquip = collectEmpresasFromRows(equipamentos);
+    return [...new Set([...fromTable, ...fromEquip])].sort((a, b) =>
+      a.localeCompare(b, "pt-BR", { sensitivity: "base" }),
+    );
+  }, [empresasCadastro, equipamentos]);
 
   const empresasOpcoes = useMemo(() => {
     const set = new Set<string>(empresasCadastradas);
-    Object.values(EMPRESA_LABEL).forEach((label) => set.add(label));
     const atual = normalizeEquipamentoEmpresa(formEmpresa);
     if (atual) set.add(atual);
     return [...set].sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
   }, [empresasCadastradas, formEmpresa]);
+
+  async function addEmpresaManual() {
+    if (!token) return;
+    const nome = normalizeEquipamentoEmpresa(novaEmpresaNome);
+    if (!nome) {
+      setEmpresasManageError("Informe o nome da empresa.");
+      return;
+    }
+    setEmpresasManageSaving(true);
+    setEmpresasManageError(null);
+    try {
+      const { empresa } = await apiPost<{ empresa: EmpresaCadastro }>("/v1/empresas", token, {
+        nome,
+        ativo: true,
+      });
+      if (empresa) {
+        setEmpresasCadastro((prev) =>
+          [...prev, empresa].sort((a, b) =>
+            a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" }),
+          ),
+        );
+      }
+      setNovaEmpresaNome("");
+    } catch (err: unknown) {
+      setEmpresasManageError(err instanceof Error ? err.message : "Erro ao cadastrar empresa.");
+    } finally {
+      setEmpresasManageSaving(false);
+    }
+  }
+
+  async function toggleEmpresaAtiva(empresa: EmpresaCadastro) {
+    if (!token) return;
+    setEmpresasManageSaving(true);
+    setEmpresasManageError(null);
+    try {
+      const { empresa: updated } = await apiPatch<{ empresa: EmpresaCadastro }>(
+        `/v1/empresas/${empresa.id}`,
+        token,
+        { ativo: !empresa.ativo },
+      );
+      if (updated) {
+        setEmpresasCadastro((prev) =>
+          prev
+            .map((e) => (e.id === updated.id ? updated : e))
+            .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" })),
+        );
+      }
+    } catch (err: unknown) {
+      setEmpresasManageError(err instanceof Error ? err.message : "Erro ao atualizar empresa.");
+    } finally {
+      setEmpresasManageSaving(false);
+    }
+  }
+
+  async function deleteEmpresa(empresa: EmpresaCadastro) {
+    if (!token) return;
+    if (!window.confirm(`Excluir a empresa "${empresa.nome}"?`)) return;
+    setEmpresasManageSaving(true);
+    setEmpresasManageError(null);
+    try {
+      await apiDelete(`/v1/empresas/${empresa.id}`, token);
+      setEmpresasCadastro((prev) => prev.filter((e) => e.id !== empresa.id));
+    } catch (err: unknown) {
+      setEmpresasManageError(err instanceof Error ? err.message : "Erro ao excluir empresa.");
+    } finally {
+      setEmpresasManageSaving(false);
+    }
+  }
 
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase();
@@ -414,6 +532,9 @@ export default function CadastroAtivosPage({
     setFormSaving(true);
     setFormError(null);
     try {
+      if (showEmpresa && payload.empresa) {
+        await ensureEmpresaCadastrada(String(payload.empresa));
+      }
       if (isEditing && editingAtivoOriginal) {
         await apiPatch(`/v1/equipamentos/${encodeURIComponent(editingAtivoOriginal)}`, token, payload);
       } else {
@@ -653,6 +774,25 @@ export default function CadastroAtivosPage({
             >
               <Plus className="h-4 w-4" aria-hidden />
               {addLabel}
+            </button>
+          </div>
+        ) : null}
+
+        {showEmpresa && canWrite ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Empresas
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setEmpresasManageError(null);
+                setNovaEmpresaNome("");
+                setEmpresasManageOpen(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+            >
+              Gerenciar empresas
             </button>
           </div>
         ) : null}
@@ -1156,6 +1296,7 @@ export default function CadastroAtivosPage({
                   )}
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                     Selecione a empresa proprietária ou escolha <strong>Nova empresa</strong> para cadastrar outra.
+                    Use <strong>Gerenciar empresas</strong> para manter a lista no sistema.
                   </p>
                 </div>
               ) : null}
@@ -1419,6 +1560,113 @@ export default function CadastroAtivosPage({
                 {deleteSaving ? "A excluir…" : "Excluir"}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {empresasManageOpen ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="empresas-manage-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !empresasManageSaving) setEmpresasManageOpen(false);
+          }}
+        >
+          <div className={`max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl p-6 shadow-xl ${glassPanel}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="empresas-manage-title" className="text-lg font-bold text-slate-900 dark:text-white">
+                  Empresas dos equipamentos
+                </h2>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                  Cadastre as empresas proprietárias usadas no filtro e no formulário.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEmpresasManageOpen(false)}
+                disabled={empresasManageSaving}
+                className="rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 dark:hover:bg-white/10"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <input
+                type="text"
+                className={glassField}
+                placeholder="Ex.: Construtora Alfa"
+                value={novaEmpresaNome}
+                onChange={(e) => setNovaEmpresaNome(e.target.value)}
+                disabled={empresasManageSaving}
+                maxLength={100}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void addEmpresaManual();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void addEmpresaManual()}
+                disabled={empresasManageSaving}
+                className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {empresasManageSaving ? "…" : "Adicionar"}
+              </button>
+            </div>
+
+            {empresasManageError ? (
+              <p className="mt-3 text-sm font-semibold text-red-700 dark:text-red-300">{empresasManageError}</p>
+            ) : null}
+
+            <ul className="mt-4 divide-y divide-slate-200 dark:divide-white/10">
+              {empresasCadastro.length === 0 ? (
+                <li className="py-4 text-sm text-slate-500">Nenhuma empresa cadastrada ainda.</li>
+              ) : (
+                empresasCadastro.map((empresa) => (
+                  <li key={empresa.id} className="flex items-center justify-between gap-3 py-3">
+                    <div>
+                      <p
+                        className={`text-sm font-semibold ${
+                          empresa.ativo
+                            ? "text-slate-900 dark:text-white"
+                            : "text-slate-400 line-through dark:text-slate-500"
+                        }`}
+                      >
+                        {empresa.nome}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {empresa.ativo ? "Ativa" : "Inativa (não aparece nas opções)"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void toggleEmpresaAtiva(empresa)}
+                        disabled={empresasManageSaving}
+                        className="rounded-lg border border-slate-300 bg-white/80 px-2.5 py-1.5 text-xs font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+                      >
+                        {empresa.ativo ? "Desativar" : "Ativar"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteEmpresa(empresa)}
+                        disabled={empresasManageSaving}
+                        className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
           </div>
         </div>
       ) : null}

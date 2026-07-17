@@ -57,6 +57,7 @@ import { normalizeAtivoPatrimonio } from "./src/lib/equipamentoAtivo";
 import { base64ToArrayBuffer, parseBase64DataUrl } from "./src/lib/signatureImage";
 import { extFromUri, stageImageFromDataUrl, stageImageFromUri } from "./src/sync/offlineMedia";
 import { APP_VERSION } from "./src/lib/appVersion";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 type SaveAckResult = {
   titulo: string;
@@ -65,6 +66,23 @@ type SaveAckResult = {
   status: "synced" | "pending" | "error";
   erro?: string;
 };
+
+function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+/** Nome do operador: nunca usa e-mail. */
+function pickOperadorNome(...candidates: Array<string | null | undefined>): string {
+  for (const raw of candidates) {
+    const t = String(raw ?? "").trim().replace(/\s+/g, " ");
+    if (!t) continue;
+    if (looksLikeEmail(t)) continue;
+    return t;
+  }
+  return "";
+}
+
+const operadorNomeCacheKey = (userId: string) => `operador_nome_v1:${userId}`;
 
 type TanqueCadastrado = {
   ativo: string;
@@ -1025,14 +1043,24 @@ export default function App() {
     if (!session?.access_token) return;
     (async () => {
       try {
-        // Offline: usa dados já na sessão sem chamar a rede.
+        // Offline: usa dados já na sessão / cache local.
         const uid = session.user?.id ?? null;
         setAuthUserId(uid);
         const email = session.user?.email ?? "";
-        let fullName = "";
+
         const meta = session.user?.user_metadata as Record<string, unknown> | undefined;
-        if (typeof meta?.full_name === "string" && meta.full_name.trim()) {
-          fullName = meta.full_name.trim();
+        let fullName = pickOperadorNome(
+          typeof meta?.full_name === "string" ? meta.full_name : null,
+          typeof meta?.name === "string" ? meta.name : null,
+        );
+
+        if (uid) {
+          try {
+            const cached = await AsyncStorage.getItem(operadorNomeCacheKey(uid));
+            fullName = pickOperadorNome(fullName, cached);
+          } catch {
+            // ignore cache
+          }
         }
 
         const net = await NetInfo.fetch();
@@ -1043,11 +1071,19 @@ export default function App() {
             .select("full_name, is_melosa")
             .eq("user_id", uid)
             .maybeSingle();
-          if (prof?.full_name && String(prof.full_name).trim()) fullName = String(prof.full_name).trim();
+          fullName = pickOperadorNome(prof?.full_name, fullName);
           setIsMelosaUser(Boolean((prof as { is_melosa?: boolean } | null)?.is_melosa));
+          if (fullName) {
+            try {
+              await AsyncStorage.setItem(operadorNomeCacheKey(uid), fullName);
+            } catch {
+              // ignore
+            }
+          }
         }
 
-        setDriverFullName(fullName || email);
+        // Prefere o nome; se não achar, usa o e-mail.
+        setDriverFullName(fullName || email.trim());
       } catch {
         // Mantém o que já houver — não derruba o login offline.
       }
@@ -1141,10 +1177,9 @@ export default function App() {
 
     const ativo = melosaFornecedorTexto.trim();
     if (!ativo) {
-      if (!melosaEquipamentoPlacaTexto.trim()) {
-        setMelosaEquipamentoNomeTexto("");
-        setMelosaEquipamentoEmpresa("");
-      }
+      setMelosaEquipamentoNomeTexto("");
+      setMelosaEquipamentoEmpresa("");
+      setMelosaEquipamentoPlacaTexto("");
       setMelosaEquipamentoAtivoLookupLoading(false);
       return;
     }
@@ -1187,52 +1222,6 @@ export default function App() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [melosaFornecedorTexto, melosaObraCodigo, session?.access_token, isOnline, screen]);
-
-  useEffect(() => {
-    if (screen.name !== "melosa" || screen.step !== "register") return;
-
-    const placa = melosaEquipamentoPlacaTexto.trim();
-    if (!placa) {
-      setMelosaEquipamentoAtivoLookupLoading(false);
-      return;
-    }
-
-    if (skipMelosaPlacaLookupRef.current) {
-      skipMelosaPlacaLookupRef.current = false;
-      return;
-    }
-
-    if (!session?.access_token || !isOnline) return;
-
-    const seq = ++melosaAtivoLookupSeqRef.current;
-    const timer = setTimeout(() => {
-      setMelosaEquipamentoAtivoLookupLoading(true);
-      void fetchMelosaEquipamentoByAtivo(placa)
-        .then((equipamento) => {
-          if (seq !== melosaAtivoLookupSeqRef.current) return;
-          if (equipamento) {
-            applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
-          } else {
-            setMelosaEquipamentoNomeTexto("");
-            setMelosaEquipamentoEmpresa("");
-          }
-        })
-        .catch(() => {
-          if (seq === melosaAtivoLookupSeqRef.current) {
-            setMelosaEquipamentoNomeTexto("");
-            setMelosaEquipamentoEmpresa("");
-          }
-        })
-        .finally(() => {
-          if (seq === melosaAtivoLookupSeqRef.current) {
-            setMelosaEquipamentoAtivoLookupLoading(false);
-          }
-        });
-    }, 500);
-
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [melosaEquipamentoPlacaTexto, melosaObraCodigo, session?.access_token, isOnline, screen]);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -1414,31 +1403,6 @@ export default function App() {
       }
     } catch {
       // Patrimônio não cadastrado (404) ou erro de rede: não bloqueia o registro.
-      if (seq === melosaAtivoLookupSeqRef.current) {
-        setMelosaEquipamentoNomeTexto("");
-        setMelosaEquipamentoEmpresa("");
-      }
-    } finally {
-      if (seq === melosaAtivoLookupSeqRef.current) {
-        setMelosaEquipamentoAtivoLookupLoading(false);
-      }
-    }
-  }
-
-  async function lookupMelosaEquipamentoPorPlaca(placa: string) {
-    if (!session?.access_token || !isOnline || !placa.trim()) return;
-    const seq = ++melosaAtivoLookupSeqRef.current;
-    setMelosaEquipamentoAtivoLookupLoading(true);
-    try {
-      const equipamento = await fetchMelosaEquipamentoByAtivo(placa.trim());
-      if (seq !== melosaAtivoLookupSeqRef.current) return;
-      if (equipamento) {
-        applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
-      } else {
-        setMelosaEquipamentoNomeTexto("");
-        setMelosaEquipamentoEmpresa("");
-      }
-    } catch {
       if (seq === melosaAtivoLookupSeqRef.current) {
         setMelosaEquipamentoNomeTexto("");
         setMelosaEquipamentoEmpresa("");
@@ -2583,7 +2547,7 @@ export default function App() {
       lacre_melosa_storage_path: isRetiradaTanque ? lacreMelosaStoragePath : null,
       tanque_quantidade_abastecida: isRetiradaTanque ? tanqueQuantidadeAbastecidaTexto.trim() : null,
       tanque_quantidade_abastecida_storage_path: isRetiradaTanque ? tanqueQuantidadeAbastecidaStoragePath : null,
-      tanque_operador_nome: isTanqueObra ? driverFullName.trim() || null : null,
+      tanque_operador_nome: isTanqueObra ? pickOperadorNome(driverFullName) || null : null,
       tanque_assinatura_operador_storage_path: isTanqueObra ? tanqueAssinaturaOperadorStoragePath : null,
       tanque_assinatura_melosa_storage_path: isTanqueObra ? tanqueAssinaturaMelosaStoragePath : null,
       retirada_horimetro_foto_storage_path: null,
@@ -2639,7 +2603,7 @@ export default function App() {
       return;
     }
     if (!melosaFornecedorTexto.trim()) {
-      Alert.alert("Ativo do Equipamento obrigatório", "Informe o Ativo do Equipamento.");
+      Alert.alert("Patrimônio Equipamento obrigatório", "Informe o Patrimônio Equipamento.");
       return;
     }
     if (!melosaWdrCombustivelTipo.trim()) {
@@ -2825,44 +2789,13 @@ export default function App() {
     }
 
     const ativo = melosaFornecedorTexto.trim();
-    const placa = melosaEquipamentoPlacaTexto.trim();
-    if (!ativo && !placa) {
-      Alert.alert("Equipamento obrigatório", "Informe o Ativo ou a Placa do Equipamento.");
+    if (!ativo) {
+      Alert.alert("Patrimônio Equipamento obrigatório", "Informe o Patrimônio Equipamento.");
       return;
     }
 
     if (isOnline && session?.access_token) {
-      if (ativo) {
-        void lookupMelosaEquipamentoPatrimonio(ativo);
-      } else if (placa) {
-        setMelosaEquipamentoAtivoLookupLoading(true);
-        try {
-          const equipamento = await fetchMelosaEquipamentoByAtivo(placa);
-          if (equipamento?.ativo?.trim()) {
-            applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
-          } else {
-            Alert.alert(
-              "Equipamento não encontrado",
-              "Não encontramos um ativo para essa placa. Informe o Ativo do Equipamento.",
-            );
-            return;
-          }
-        } catch {
-          Alert.alert(
-            "Equipamento não encontrado",
-            "Não encontramos um ativo para essa placa. Informe o Ativo do Equipamento.",
-          );
-          return;
-        } finally {
-          setMelosaEquipamentoAtivoLookupLoading(false);
-        }
-      }
-    } else if (!ativo) {
-      Alert.alert(
-        "Ativo do Equipamento obrigatório",
-        "Sem internet, informe o Ativo do Equipamento (não apenas a placa).",
-      );
-      return;
+      void lookupMelosaEquipamentoPatrimonio(ativo);
     }
 
     setMessage(null);
@@ -3461,8 +3394,7 @@ export default function App() {
       : melosaHorimetroEquipamentoNumero.trim() || "—";
     const quantidadeResumoValor = melosaQuantidadeAbastecidaTexto.trim() || "—";
     const insumoResumoLabel = melosaWdrCombustivelTipo === "GASOLINA" ? "Gasolina" : "Diesel";
-    const patrimonioPreenchido =
-      melosaFornecedorTexto.trim().length > 0 || melosaEquipamentoPlacaTexto.trim().length > 0;
+    const patrimonioPreenchido = melosaFornecedorTexto.trim().length > 0;
     const equipamentoDadosVisiveis =
       isRegister &&
       patrimonioPreenchido &&
@@ -3605,7 +3537,7 @@ export default function App() {
                   )}
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
-                    Ativo do Equipamento
+                    Patrimônio Equipamento
                   </Text>
                   <TouchableOpacity
                     style={[
@@ -3630,20 +3562,8 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     autoCapitalize="characters"
                   />
-                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
-                    Placa do Equipamento
-                  </Text>
-                  <TextInput
-                    value={melosaEquipamentoPlacaTexto}
-                    onChangeText={setMelosaEquipamentoPlacaTexto}
-                    onEndEditing={() => void lookupMelosaEquipamentoPorPlaca(melosaEquipamentoPlacaTexto)}
-                    style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
-                    placeholder="Ex.: KVW2O9X"
-                    placeholderTextColor={inputPlaceholderColor}
-                    autoCapitalize="characters"
-                  />
                   <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
-                    Digite o ativo ou a placa — o outro campo é preenchido automaticamente.
+                    Informe o patrimônio do equipamento ou use o QR code.
                   </Text>
                   {melosaEquipamentoQrLoading || melosaEquipamentoAtivoLookupLoading ? (
                     <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
@@ -3664,9 +3584,9 @@ export default function App() {
                   isOnline &&
                   !melosaEquipamentoNomeTexto.trim() &&
                   !melosaEquipamentoEmpresa.trim() &&
-                  (melosaFornecedorTexto.trim() || melosaEquipamentoPlacaTexto.trim()) ? (
+                  melosaFornecedorTexto.trim() ? (
                     <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
-                      Equipamento não encontrado no cadastro. Confira o ativo/placa ou use o QR code.
+                      Equipamento não encontrado no cadastro. Confira o patrimônio ou use o QR code.
                     </Text>
                   ) : null}
                   {equipamentoDadosVisiveis && !isOnline ? (
@@ -4026,18 +3946,10 @@ export default function App() {
                     </View>
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
-                        Ativo Equipamento
+                        Patrimônio Equipamento
                       </Text>
                       <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
                         {melosaFornecedorTexto.trim() || "—"}
-                      </Text>
-                    </View>
-                    <View style={styles.melosaResumoRow}>
-                      <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
-                        Placa Equipamento
-                      </Text>
-                      <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
-                        {melosaEquipamentoPlacaTexto.trim() || "—"}
                       </Text>
                     </View>
                     <View style={styles.melosaResumoRow}>
@@ -4114,12 +4026,6 @@ export default function App() {
                   />
                   </View>
                 </>
-              ) : null}
-
-              {(isHorimetro || isResumo) && !isOnline ? (
-                <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 10 }]}>
-                  Offline: fotos e dados ficam no celular e sobem com a data/hora deste registro quando houver internet.
-                </Text>
               ) : null}
 
               {message ? <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>{message}</Text> : null}
@@ -4409,7 +4315,7 @@ export default function App() {
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>Motorista (usuário)</Text>
                   <TextInput
-                    value={driverFullName || "—"}
+                    value={pickOperadorNome(driverFullName) || "—"}
                     editable={false}
                     style={[styles.authInput, !isDarkMode ? styles.authInputLight : null, { opacity: 0.88 }]}
                   />
@@ -4737,7 +4643,7 @@ export default function App() {
 
                   <View style={styles.melosaResumoSignatures} collapsable={false}>
                     <MelosaSignaturePad
-                      label={`Operador do tanque (${driverFullName.trim() || "—"})`}
+                      label={`Operador do tanque (${pickOperadorNome(driverFullName) || "—"})`}
                       isDarkMode={isDarkMode}
                       onSigned={setTanqueAssinaturaOperadorDataUrl}
                       onClear={() => setTanqueAssinaturaOperadorDataUrl(null)}
@@ -4847,12 +4753,6 @@ export default function App() {
                 </>
               ) : null}
 
-              {isEntradaDetalhes && !isOnline ? (
-                <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null]}>
-                  Offline: fotos e dados ficam no celular e sobem com a data/hora deste registro quando houver internet.
-                </Text>
-              ) : null}
-
               {isEntradaResumo ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
@@ -4949,7 +4849,7 @@ export default function App() {
                           Motorista (operador)
                         </Text>
                         <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
-                          {driverFullName.trim() || "—"}
+                          {pickOperadorNome(driverFullName) || "—"}
                         </Text>
                       </View>
                       <View style={styles.melosaResumoRow}>
@@ -4983,7 +4883,7 @@ export default function App() {
 
                   <View style={styles.melosaResumoSignatures} collapsable={false}>
                     <MelosaSignaturePad
-                      label={`Operador do tanque (${driverFullName.trim() || "—"})`}
+                      label={`Operador do tanque (${pickOperadorNome(driverFullName) || "—"})`}
                       isDarkMode={isDarkMode}
                       onSigned={setTanqueAssinaturaOperadorDataUrl}
                       onClear={() => setTanqueAssinaturaOperadorDataUrl(null)}
