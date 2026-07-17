@@ -18,7 +18,7 @@ function formatApiError(json: unknown, status: number): string {
   return `HTTP ${status}`;
 }
 
-export async function apiPost(path: string, token: string, body?: unknown) {
+export async function apiPost<T = unknown>(path: string, token: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
     headers: {
@@ -29,7 +29,7 @@ export async function apiPost(path: string, token: string, body?: unknown) {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(formatApiError(json, res.status));
-  return json;
+  return json as T;
 }
 
 export async function apiGet<T>(path: string, token: string): Promise<T> {
@@ -42,7 +42,7 @@ export async function apiGet<T>(path: string, token: string): Promise<T> {
   return json as T;
 }
 
-export async function apiPatch(path: string, token: string, body?: unknown) {
+export async function apiPatch<T = unknown>(path: string, token: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     method: "PATCH",
     headers: {
@@ -53,7 +53,7 @@ export async function apiPatch(path: string, token: string, body?: unknown) {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-  return json;
+  return json as T;
 }
 
 export async function apiPut<T = unknown>(path: string, token: string, body?: unknown): Promise<T> {
