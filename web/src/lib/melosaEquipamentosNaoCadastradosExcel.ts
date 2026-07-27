@@ -135,11 +135,14 @@ export function aggregateEquipamentosNaoCadastrados(
         obra.codigo != null ? String(obra.codigo) === obraMaisFrequente : String(obra.nome ?? "").trim() === obraMaisFrequente,
       );
 
+      const obraCodigo: MelosaEquipamentoNaoCadastradoRow["obraCodigo"] =
+        typeof obraRef?.codigo === "number" && Number.isFinite(obraRef.codigo) ? obraRef.codigo : "";
+
       return {
         ativo: state.ativo,
         descricao: pickMostFrequent(state.descricoes),
         placa: "",
-        obraCodigo: obraRef?.codigo ?? "",
+        obraCodigo,
         obraNome: obraRef?.nome?.trim() || "",
         mobilidade: "",
         empresa: pickMostFrequent(state.empresas),

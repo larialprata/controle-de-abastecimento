@@ -13,6 +13,12 @@ import {
   type WebWritePageKey,
 } from "../lib/webPermissions";
 
+type DailyReportRunResponse = {
+  sent?: number;
+  day?: string;
+  failures?: Array<{ email?: string; error?: string }>;
+};
+
 type AccessPlatform = "app" | "web" | "both";
 
 type AdminUserRow = {
@@ -149,7 +155,11 @@ export default function UsersPage() {
     setError(null);
     setOkMsg(null);
     try {
-      const json = await apiPost("/v1/admin/report-email/run-daily", token, { offsetDays: 0 });
+      const json = await apiPost<DailyReportRunResponse>(
+        "/v1/admin/report-email/run-daily",
+        token,
+        { offsetDays: 0 },
+      );
       const falhas = Array.isArray(json?.failures) ? json.failures : [];
       if (falhas.length > 0) {
         const detalhe = falhas
