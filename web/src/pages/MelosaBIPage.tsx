@@ -4,6 +4,7 @@ import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import MelosaMovimentacaoFormModal, {
   type MelosaMovimentacaoFormRow,
 } from "../components/bi/MelosaMovimentacaoFormModal";
+import MelosaFotosModal, { type MelosaFotosRow } from "../components/bi/MelosaFotosModal";
 import MelosaTicketModal, { type MelosaTicketRow } from "../components/bi/MelosaTicketModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
@@ -11,6 +12,10 @@ import { useAuth } from "../state/AuthContext";
 import { apiGet, apiPost } from "../lib/api";
 import { fmtTicketNumero, ticketNumeroParaFiltro } from "../lib/ticketNumero";
 import { downloadMelosaDescarbonizeExcel, type MelosaExcelRowInput } from "../lib/melosaDescarbonizeExcel";
+import {
+  aggregateEquipamentosNaoCadastrados,
+  downloadMelosaEquipamentosNaoCadastradosExcel,
+} from "../lib/melosaEquipamentosNaoCadastradosExcel";
 import {
   downloadMelosaBiResumoExcel,
   type MelosaBiResumoRow,
@@ -74,11 +79,16 @@ type LinhaMelosa = Record<string, unknown> & {
   obs?: string | null;
 };
 
-function toMelosaExcelInput(m: LinhaMelosa): MelosaExcelRowInput {
+function toMelosaExcelInput(
+  m: LinhaMelosa,
+  mobilidadeByAtivo?: Map<string, string>,
+): MelosaExcelRowInput {
+  const ativoKey = normalizeAtivoKey(ativoEquipamentoRaw(m));
   return {
     obraCodigo: typeof m.obra_codigo === "number" ? m.obra_codigo : undefined,
     obraNome: m.obra_nome,
     melosaCategoria: m.melosa_categoria,
+    equipamentoMobilidade: ativoKey ? mobilidadeByAtivo?.get(ativoKey) ?? null : null,
     dataHora: m.data_hora,
     insumoRetirada: m.melosa_combustivel_tipo_retirada,
     insumoRegistro: m.melosa_combustivel_tipo_registro,
@@ -93,6 +103,21 @@ function empresaEquipamentoParaResumo(m: LinhaMelosa): string {
     typeof m.ativo_equipamento_empresa === "string" ? m.ativo_equipamento_empresa : null;
   const label = labelEquipamentoEmpresa(raw);
   return label === "—" ? "Sem empresa" : label;
+}
+
+function toNaoCadastradoInput(m: LinhaMelosa) {
+  const empresaRaw =
+    typeof m.ativo_equipamento_empresa === "string" ? m.ativo_equipamento_empresa : null;
+  const empresa = labelEquipamentoEmpresa(empresaRaw);
+  return {
+    ativoEquipamento: ativoEquipamentoRaw(m),
+    descricao: typeof m.ativo_equipamento_nome === "string" ? m.ativo_equipamento_nome : null,
+    obraCodigo: typeof m.obra_codigo === "number" ? m.obra_codigo : undefined,
+    obraNome: m.obra_nome,
+    empresa: empresa === "—" ? null : empresa,
+    dataHora: m.data_hora,
+    quantidadeLitros: calcQuantidadeLitros(m),
+  };
 }
 
 function toMelosaBiResumoRow(m: LinhaMelosa): MelosaBiResumoRow {
@@ -292,7 +317,7 @@ function normalizeAtivoKey(value: unknown): string {
   return String(value ?? "")
     .trim()
     .toUpperCase()
-    .replace(/\s+/g, "");
+    .replace(/[\s\-]/g, "");
 }
 
 function ativoEquipamentoRaw(m: LinhaMelosa): string {
@@ -373,7 +398,7 @@ function municipioFromAddress(v: unknown): string {
 }
 
 const PAGE_SIZE = 500;
-const TABLE_COL_COUNT = 18;
+const TABLE_COL_COUNT = 17;
 const TABLE_SCROLL_MAX_HEIGHT = "min(28.5rem, 52vh)";
 
 const labelCls =
@@ -414,9 +439,12 @@ export default function MelosaBIPage() {
   const [patrimonioFiltro, setPatrimonioFiltro] = useState("");
   const [melosasCadastradas, setMelosasCadastradas] = useState<string[]>([]);
   const [equipamentosCadastrados, setEquipamentosCadastrados] = useState<Set<string>>(new Set());
+  const [mobilidadeByAtivo, setMobilidadeByAtivo] = useState<Map<string, string>>(new Map());
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"add" | "edit">("add");
   const [formRow, setFormRow] = useState<MelosaMovimentacaoFormRow | null>(null);
+  const [fotosOpen, setFotosOpen] = useState(false);
+  const [fotosRow, setFotosRow] = useState<MelosaFotosRow | null>(null);
   const [highlightOp, setHighlightOp] = useState(opUrl);
   const mapSectionRef = useRef<HTMLDivElement | null>(null);
 
@@ -470,23 +498,37 @@ export default function MelosaBIPage() {
       // Considera qualquer ativo cadastrado (EQUIPAMENTO, MELOSA ou TANQUE) como "existente",
       // pois uma melosa pode abastecer a si mesma e já está cadastrada.
       let equipamentosAtivos = new Set<string>();
+      let mobilidadeMap = new Map<string, string>();
       try {
-        const eqJson = await apiGet<{ equipamentos?: { ativo?: string }[] }>(
+        const eqJson = await apiGet<{ equipamentos?: { ativo?: string; placa?: string | null; mobilidade?: string | null }[] }>(
           "/v1/equipamentos",
           token,
         );
-        equipamentosAtivos = new Set(
-          (eqJson?.equipamentos ?? [])
-            .map((e) => normalizeAtivoKey(e.ativo))
-            .filter(Boolean),
-        );
+        for (const e of eqJson?.equipamentos ?? []) {
+          const ativo = normalizeAtivoKey(e.ativo);
+          const placa = normalizeAtivoKey(e.placa);
+          const mobilidade =
+            typeof e.mobilidade === "string" && e.mobilidade.trim()
+              ? e.mobilidade.trim().toUpperCase()
+              : null;
+          if (ativo) {
+            equipamentosAtivos.add(ativo);
+            if (mobilidade) mobilidadeMap.set(ativo, mobilidade);
+          }
+          if (placa) {
+            equipamentosAtivos.add(placa);
+            if (mobilidade) mobilidadeMap.set(placa, mobilidade);
+          }
+        }
       } catch {
         equipamentosAtivos = new Set();
+        mobilidadeMap = new Map();
       }
       setRaw(rows);
       setObras(obrasJson?.obras ?? []);
       setMelosasCadastradas(melosasAtivos);
       setEquipamentosCadastrados(equipamentosAtivos);
+      setMobilidadeByAtivo(mobilidadeMap);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erro ao carregar");
     } finally {
@@ -571,6 +613,20 @@ export default function MelosaBIPage() {
     }
     return rows;
   }, [raw, busca, filtros, obraCodigosEmpresa, patrimonioFiltro, ticketFiltro]);
+
+  const naoCadastradosFiltrados = useMemo(
+    () => filtradas.filter(isEquipamentoNaoCadastrado),
+    [filtradas, isEquipamentoNaoCadastrado],
+  );
+
+  const naoCadastradosUnicos = useMemo(() => {
+    const keys = new Set<string>();
+    for (const m of naoCadastradosFiltrados) {
+      const key = normalizeAtivoKey(ativoEquipamentoRaw(m));
+      if (key) keys.add(key);
+    }
+    return keys.size;
+  }, [naoCadastradosFiltrados]);
 
   const filtroTextoAtivo = Boolean(
     busca.trim() || contratoFiltro || empresaFiltro || ticketFiltro.trim() || patrimonioFiltro,
@@ -718,6 +774,7 @@ export default function MelosaBIPage() {
         operationId: typeof m.operation_id === "string" ? m.operation_id : undefined,
         dataHora: `${fmtDateOnly(m.data_hora)} ${fmtTimeOnly(m.data_hora)}`,
         usuario: fmtAtivoPlaca(m),
+        registradoPor: fmtUsuarioMelosa(m),
         equipamento: fmtAtivoEquipamento(m),
         obra: fmtObra(m),
         litros: fmtQuantidade(m),
@@ -777,8 +834,49 @@ export default function MelosaBIPage() {
     setFormOpen(true);
   }, [selectedRows]);
 
+  const openFotosForm = useCallback(
+    (row?: LinhaMelosa) => {
+      const target = row ?? (selectedRows.length === 1 ? selectedRows[0] : null);
+      if (!target) return;
+      const operationId = typeof target.operation_id === "string" ? target.operation_id : "";
+      if (!operationId) return;
+      setFotosRow({
+        operation_id: operationId,
+        obra_codigo: typeof target.obra_codigo === "number" ? target.obra_codigo : null,
+        data_hora: target.data_hora,
+        ativo_equipamento_texto: target.ativo_equipamento_texto ?? target.fornecedor_texto ?? null,
+        melosa_quantidade_abastecida_storage_path: storagePath(
+          target,
+          "melosa_quantidade_abastecida_storage_path",
+        ),
+        melosa_horimetro_equipamento_abastecido_storage_path: storagePath(
+          target,
+          "melosa_horimetro_equipamento_abastecido_storage_path",
+        ),
+        melosa_equipamento_operador_storage_path: storagePath(
+          target,
+          "melosa_equipamento_operador_storage_path",
+        ),
+        melosa_assinatura_operador_storage_path: storagePath(
+          target,
+          "melosa_assinatura_operador_storage_path",
+        ),
+        melosa_assinatura_motorista_storage_path: storagePath(
+          target,
+          "melosa_assinatura_motorista_storage_path",
+        ),
+      });
+      setFotosOpen(true);
+    },
+    [selectedRows],
+  );
+
   const handleFormSaved = useCallback(() => {
     setSelectedKeys([]);
+    void load();
+  }, [load]);
+
+  const handleFotosSaved = useCallback(() => {
     void load();
   }, [load]);
 
@@ -842,13 +940,32 @@ export default function MelosaBIPage() {
     }
     try {
       await downloadMelosaDescarbonizeExcel(
-        filtradas.map((m) => toMelosaExcelInput(m)),
+        filtradas.map((m) => toMelosaExcelInput(m, mobilidadeByAtivo)),
         "bi-melosa",
       );
     } catch (err: unknown) {
       window.alert(err instanceof Error ? err.message : "Erro ao exportar Excel");
     }
-  }, [filtradas]);
+  }, [filtradas, mobilidadeByAtivo]);
+
+  const handleExportNaoCadastrados = useCallback(async () => {
+    if (naoCadastradosFiltrados.length === 0) {
+      window.alert("Não há equipamentos não cadastrados nos registros filtrados.");
+      return;
+    }
+    try {
+      const rows = aggregateEquipamentosNaoCadastrados(
+        naoCadastradosFiltrados.map((m) => toNaoCadastradoInput(m)),
+      );
+      await downloadMelosaEquipamentosNaoCadastradosExcel(rows, {
+        periodoDe: dataDe,
+        periodoAte: dataAte,
+        filenamePrefix: "bi-melosa-nao-cadastrados",
+      });
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : "Erro ao exportar equipamentos não cadastrados");
+    }
+  }, [dataAte, dataDe, naoCadastradosFiltrados]);
 
   const authToken = token ?? "";
 
@@ -901,6 +1018,15 @@ export default function MelosaBIPage() {
               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700"
             >
               Exportar Excel Descarbonize
+            </button>
+            <button
+              type="button"
+              onClick={handleExportNaoCadastrados}
+              disabled={naoCadastradosUnicos === 0}
+              className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-amber-600/20 transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Exportar não cadastrados
+              {naoCadastradosUnicos > 0 ? ` (${naoCadastradosUnicos})` : ""}
             </button>
           </div>
         </div>
@@ -1005,6 +1131,14 @@ export default function MelosaBIPage() {
           </button>
           <button
             type="button"
+            onClick={() => openFotosForm()}
+            disabled={loading || selectedRows.length !== 1}
+            className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Adicionar / fotos
+          </button>
+          <button
+            type="button"
             onClick={() => void openTicket()}
             disabled={loading || selectedRows.length === 0}
             className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1062,6 +1196,7 @@ export default function MelosaBIPage() {
                     />
                   </th>
                   <th className={`${thCls} min-w-[150px]`}>Obra</th>
+                  <th className={`${thCls} min-w-[120px]`}>Usuário</th>
                   <th className={`${thCls} min-w-[96px]`}>Data início</th>
                   <th className={`${thCls} min-w-[96px]`}>Data fim</th>
                   <th className={`${thCls} min-w-[72px]`}>Horário</th>
@@ -1073,8 +1208,6 @@ export default function MelosaBIPage() {
                   <th className={`${thCls} min-w-[88px]`}>Horímetro</th>
                   <th className={`${thCls} min-w-[100px]`}>Foto horímetro</th>
                   <th className={`${thCls} min-w-[88px]`}>Lubrificado</th>
-                  <th className={`${thCls} min-w-[120px]`}>Usuário</th>
-                  <th className={`${thCls} min-w-[120px]`}>Operador</th>
                   <th className={`${thCls} min-w-[120px]`}>Motorista</th>
                   <th className={`${thCls} min-w-[100px]`}>Foto operador</th>
                   <th className={`${thCls} min-w-[180px]`}>Local</th>
@@ -1096,6 +1229,7 @@ export default function MelosaBIPage() {
                       onOpen={setLightboxSrc}
                       api="melosa"
                       shortLabel={label}
+                      onAddClick={() => openFotosForm(m)}
                     />
                   );
 
@@ -1124,6 +1258,9 @@ export default function MelosaBIPage() {
                       </td>
                       <td className={`${tdCls} max-w-[200px] truncate`} title={fmtObra(m)}>
                         {fmtObra(m)}
+                      </td>
+                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtUsuarioMelosa(m)}>
+                        {fmtUsuarioMelosa(m)}
                       </td>
                       <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
                       <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
@@ -1171,12 +1308,6 @@ export default function MelosaBIPage() {
                         }`}
                       >
                         {fmtLubrificado(m)}
-                      </td>
-                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtUsuarioMelosa(m)}>
-                        {fmtUsuarioMelosa(m)}
-                      </td>
-                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtOperadorMelosa(m)}>
-                        {fmtOperadorMelosa(m)}
                       </td>
                       <td className={`${tdCls} max-w-[140px] truncate`} title={fmtMotoristaMelosa(m)}>
                         {fmtMotoristaMelosa(m)}
@@ -1284,6 +1415,18 @@ export default function MelosaBIPage() {
           token={authToken}
           onClose={() => setFormOpen(false)}
           onSaved={handleFormSaved}
+        />
+      ) : null}
+
+      {fotosOpen ? (
+        <MelosaFotosModal
+          open={fotosOpen}
+          row={fotosRow}
+          apiBase={apiBase}
+          token={authToken}
+          onClose={() => setFotosOpen(false)}
+          onSaved={handleFotosSaved}
+          onOpenPhoto={setLightboxSrc}
         />
       ) : null}
 

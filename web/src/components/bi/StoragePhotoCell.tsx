@@ -9,6 +9,8 @@ type Props = {
   /** Rota da API: tanque (movimentações) ou melosa */
   api?: "tanque" | "melosa";
   shortLabel?: string;
+  /** Quando não há foto, exibe botão para completar */
+  onAddClick?: () => void;
 };
 
 export default function StoragePhotoCell({
@@ -17,11 +19,24 @@ export default function StoragePhotoCell({
   onOpen,
   api = "tanque",
   shortLabel = "Abrir foto",
+  onAddClick,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!storagePath || !String(storagePath).trim()) {
+    if (onAddClick) {
+      return (
+        <button
+          type="button"
+          onClick={onAddClick}
+          className="mx-auto block text-xs font-semibold text-violet-600 hover:underline dark:text-violet-400"
+          title="Adicionar foto"
+        >
+          Adicionar
+        </button>
+      );
+    }
     return <span className="block w-full text-center text-slate-400">—</span>;
   }
 

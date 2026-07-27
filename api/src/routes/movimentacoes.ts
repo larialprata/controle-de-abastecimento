@@ -8,6 +8,7 @@ import { envValidated } from "../config";
 import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
+import { logMovimentacaoAudit } from "../lib/movimentacaoAudit";
 
 const router = Router();
 
@@ -216,6 +217,10 @@ const melosaUpdateSchema = z
     melosa_quantidade_abastecida: z.string().optional().nullable(),
     melosa_quantidade_abastecida_storage_path: z.string().optional().nullable(),
     melosa_horimetro_equipamento_abastecido_numero: z.string().optional().nullable(),
+    melosa_horimetro_equipamento_abastecido_storage_path: z.string().optional().nullable(),
+    melosa_equipamento_operador_storage_path: z.string().optional().nullable(),
+    melosa_assinatura_operador_storage_path: z.string().optional().nullable(),
+    melosa_assinatura_motorista_storage_path: z.string().optional().nullable(),
     melosa_motorista_equipamento_abastecido: z.string().optional().nullable(),
     melosa_categoria: z.enum(["ESTACIONARIA", "MOVEL"]).optional().nullable(),
     melosa_operador_nome: z.string().optional().nullable(),
@@ -238,12 +243,149 @@ const melosaUpdateSchema = z
     confirmacao_abastecimento_foto_storage_path: z.string().optional().nullable(),
     tanque_quantidade_abastecida: z.string().optional().nullable(),
     tanque_quantidade_abastecida_storage_path: z.string().optional().nullable(),
-  retirada_horimetro_foto_storage_path: z.string().optional().nullable(),
+    retirada_horimetro_foto_storage_path: z.string().optional().nullable(),
     obs: z.string().optional().nullable(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "Informe ao menos um campo para editar",
   });
+
+const MELOSA_PHOTO_KINDS = {
+  quantidade: {
+    column: "melosa_quantidade_abastecida_storage_path",
+    bucket: () => envValidated.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+    pathSuffix: (operationId: string, ext: string) =>
+      `melosa/quantidade-abastecida/${operationId}.${ext}`,
+  },
+  horimetro: {
+    column: "melosa_horimetro_equipamento_abastecido_storage_path",
+    bucket: () => envValidated.MELOSA_HORIMETRO_EQUIPAMENTO_ABASTECIDO_BUCKET,
+    pathSuffix: (operationId: string, ext: string) => `melosa/horimetro/${operationId}.${ext}`,
+  },
+  operador: {
+    column: "melosa_equipamento_operador_storage_path",
+    bucket: () => envValidated.MELOSA_EQUIPAMENTO_OPERADOR_BUCKET,
+    pathSuffix: (operationId: string, ext: string) =>
+      `melosa/equipamento-operador/${operationId}.${ext}`,
+  },
+  assinatura_operador: {
+    column: "melosa_assinatura_operador_storage_path",
+    bucket: () => envValidated.MELOSA_ASSINATURAS_BUCKET,
+    pathSuffix: (operationId: string, ext: string) =>
+      `melosa/assinaturas/operador/${operationId}.${ext}`,
+  },
+  assinatura_motorista: {
+    column: "melosa_assinatura_motorista_storage_path",
+    bucket: () => envValidated.MELOSA_ASSINATURAS_BUCKET,
+    pathSuffix: (operationId: string, ext: string) =>
+      `melosa/assinaturas/motorista/${operationId}.${ext}`,
+  },
+} as const;
+
+type MelosaPhotoKind = keyof typeof MELOSA_PHOTO_KINDS;
+
+const melosaPhotoUploadSchema = z.object({
+  kind: z.enum([
+    "quantidade",
+    "horimetro",
+    "operador",
+    "assinatura_operador",
+    "assinatura_motorista",
+  ]),
+  /** data URL (data:image/...;base64,...) ou base64 puro */
+  data_base64: z.string().min(32),
+  content_type: z.string().optional(),
+  filename: z.string().optional(),
+});
+
+const TANQUE_PHOTO_KINDS = {
+  nota: {
+    column: "nota_storage_path",
+    bucket: () => envValidated.NOTAS_BUCKET,
+    pathSuffix: (operationId: string, ext: string) => `notas/${operationId}.${ext}`,
+    tipos: ["ENTRADA_TANQUE_OBRA"] as const,
+  },
+  quantidade: {
+    column: "tanque_quantidade_abastecida_storage_path",
+    bucket: () => envValidated.FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
+    pathSuffix: (operationId: string, ext: string) => `tanque/quantidade/${operationId}.${ext}`,
+    tipos: ["RETIRADA_TANQUE"] as const,
+  },
+  lacre_tanque: {
+    column: "lacre_tanque_storage_path",
+    bucket: () => envValidated.LACRE_TANQUE_BUCKET,
+    pathSuffix: (operationId: string, ext: string) => `lacres/tanque/${operationId}.${ext}`,
+    tipos: ["RETIRADA_TANQUE"] as const,
+  },
+  lacre_melosa: {
+    column: "lacre_melosa_storage_path",
+    bucket: () => envValidated.LACRE_MELOSA_BUCKET,
+    pathSuffix: (operationId: string, ext: string) => `lacres/melosa/${operationId}.${ext}`,
+    tipos: ["RETIRADA_TANQUE"] as const,
+  },
+  assinatura_operador: {
+    column: "tanque_assinatura_operador_storage_path",
+    bucket: () => envValidated.MELOSA_ASSINATURAS_BUCKET,
+    pathSuffix: (operationId: string, ext: string) => `tanque/assinaturas/operador/${operationId}.${ext}`,
+    tipos: ["ENTRADA_TANQUE_OBRA", "RETIRADA_TANQUE"] as const,
+  },
+  assinatura_melosa: {
+    column: "tanque_assinatura_melosa_storage_path",
+    bucket: () => envValidated.MELOSA_ASSINATURAS_BUCKET,
+    pathSuffix: (operationId: string, ext: string) => `tanque/assinaturas/melosa/${operationId}.${ext}`,
+    tipos: ["ENTRADA_TANQUE_OBRA", "RETIRADA_TANQUE"] as const,
+  },
+  horimetro: {
+    column: "retirada_horimetro_foto_storage_path",
+    bucket: () => envValidated.RETIRADA_HORIMETRO_BUCKET,
+    pathSuffix: (operationId: string, ext: string) => `tanque/horimetro/${operationId}.${ext}`,
+    tipos: ["RETIRADA_TANQUE"] as const,
+  },
+} as const;
+
+type TanquePhotoKind = keyof typeof TANQUE_PHOTO_KINDS;
+
+const tanquePhotoUploadSchema = z.object({
+  kind: z.enum([
+    "nota",
+    "quantidade",
+    "lacre_tanque",
+    "lacre_melosa",
+    "assinatura_operador",
+    "assinatura_melosa",
+    "horimetro",
+  ]),
+  data_base64: z.string().min(32),
+  content_type: z.string().optional(),
+  filename: z.string().optional(),
+});
+
+function parseImageBase64Payload(raw: string, contentTypeHint?: string): {
+  bytes: Buffer;
+  contentType: string;
+  ext: string;
+} {
+  let contentType = (contentTypeHint ?? "").trim().toLowerCase();
+  let b64 = raw.trim();
+  const dataUrlMatch = /^data:([^;]+);base64,(.+)$/is.exec(b64);
+  if (dataUrlMatch) {
+    contentType = dataUrlMatch[1].trim().toLowerCase();
+    b64 = dataUrlMatch[2];
+  }
+  if (!contentType.startsWith("image/")) contentType = "image/jpeg";
+  const ext =
+    contentType.includes("png")
+      ? "png"
+      : contentType.includes("webp")
+        ? "webp"
+        : contentType.includes("gif")
+          ? "gif"
+          : "jpg";
+  const bytes = Buffer.from(b64.replace(/\s/g, ""), "base64");
+  if (!bytes.length) throw new Error("Imagem inválida");
+  if (bytes.length > 10 * 1024 * 1024) throw new Error("Imagem muito grande (máx. 10 MB)");
+  return { bytes, contentType, ext };
+}
 
 const tanqueUpdateSchema = z
   .object({
@@ -268,6 +410,19 @@ const tanqueRetiradaEquipamentoWebSchema = z.object({
   ativo_equipamento_texto: z.string().min(1),
   quantidade_litros: z.number().positive(),
   combustivel_tipo: z.string().optional().nullable(),
+  obs: z.string().optional().nullable(),
+});
+
+const tanqueEntradaCombustivelWebSchema = z.object({
+  obra_codigo: z.number().int(),
+  data_hora: z.string().datetime(),
+  tanque_numero: tanqueNumeroSchema,
+  litros: z.number().positive(),
+  combustivel_tipo: z.string().trim().min(1),
+  nota_numero: z.string().trim().optional().nullable(),
+  valor_unitario: z.number().nonnegative().optional().nullable(),
+  placa_texto: z.string().trim().optional().nullable(),
+  fornecedor_texto: z.string().trim().optional().nullable(),
   obs: z.string().optional().nullable(),
 });
 
@@ -634,6 +789,16 @@ router.post("/melosa/movimentacoes", requireAuth, async (req: AuthedRequest, res
 
     if (error) return res.status(400).json({ error: error.message });
 
+    await logMovimentacaoAudit(service, {
+      entity: "melosa",
+      action: "insert",
+      operationId,
+      obraCodigo: payload.obra_codigo,
+      actorUserId: req.userId,
+      before: null,
+      after: insertRowMelosa as Record<string, unknown>,
+    });
+
     try {
       await vincularAbastecimentoAoCicloAberto(service, {
         operationId,
@@ -650,6 +815,25 @@ router.post("/melosa/movimentacoes", requireAuth, async (req: AuthedRequest, res
   }
 });
 
+async function assertCanEditMelosaMov(
+  service: ReturnType<typeof createSupabaseServiceRole>,
+  userId: string,
+  current: { usuario_id: string; obra_codigo?: number | null },
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const admin = await isAdmin(service, userId);
+  if (admin || current.usuario_id === userId) return { ok: true };
+  if (current.obra_codigo != null) {
+    try {
+      await assertUserObraAccess(service, userId, Number(current.obra_codigo));
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof ObraAccessError) return { ok: false, status: e.status, error: e.message };
+      throw e;
+    }
+  }
+  return { ok: false, status: 403, error: "Sem permissão para editar esta movimentação" };
+}
+
 router.patch("/melosa/movimentacoes/:operationId", requireAuth, async (req: AuthedRequest, res) => {
   try {
     if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
@@ -663,17 +847,15 @@ router.patch("/melosa/movimentacoes/:operationId", requireAuth, async (req: Auth
     const service = createSupabaseServiceRole();
     const { data: current, error: currentError } = await service
       .from("melosa_movimentacoes")
-      .select("operation_id, usuario_id")
+      .select("*")
       .eq("operation_id", operationId)
       .maybeSingle();
 
     if (currentError) return res.status(400).json({ error: currentError.message });
     if (!current) return res.status(404).json({ error: "Movimentação não encontrada" });
 
-    const admin = await isAdmin(service, req.userId);
-    if (!admin && current.usuario_id !== req.userId) {
-      return res.status(403).json({ error: "Sem permissão para editar esta movimentação" });
-    }
+    const canEdit = await assertCanEditMelosaMov(service, req.userId, current);
+    if (!canEdit.ok) return res.status(canEdit.status).json({ error: canEdit.error });
 
     const updatePayload: Record<string, unknown> = { ...parsedBody.data };
     if (updatePayload.obra_codigo != null) {
@@ -694,13 +876,91 @@ router.patch("/melosa/movimentacoes/:operationId", requireAuth, async (req: Auth
       updatePayload.melosa_quantidade_abastecida = String(updatePayload.litros);
     }
 
-    const { error: updateError } = await service
+    const { data: updated, error: updateError } = await service
       .from("melosa_movimentacoes")
       .update(sanitizeMelosaRowForDb(updatePayload))
+      .eq("operation_id", operationId)
+      .select("*")
+      .maybeSingle();
+
+    if (updateError) return res.status(400).json({ error: updateError.message });
+
+    await logMovimentacaoAudit(service, {
+      entity: "melosa",
+      action: "update",
+      operationId,
+      obraCodigo: (updated?.obra_codigo as number | null) ?? (current.obra_codigo as number | null),
+      actorUserId: req.userId,
+      before: current as Record<string, unknown>,
+      after: (updated as Record<string, unknown>) ?? null,
+    });
+
+    return res.json({ ok: true, operation_id: operationId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+/** Completa fotos em branco (ou substitui) de um abastecimento Melosa pela web. */
+router.post("/melosa/movimentacoes/:operationId/photos", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+    const operationId = String(req.params.operationId ?? "");
+    const parsedId = z.string().uuid().safeParse(operationId);
+    if (!parsedId.success) return res.status(400).json({ error: "operationId inválido" });
+
+    const parsedBody = melosaPhotoUploadSchema.safeParse(req.body);
+    if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const { data: current, error: currentError } = await service
+      .from("melosa_movimentacoes")
+      .select(
+        "operation_id, usuario_id, obra_codigo, melosa_quantidade_abastecida_storage_path, melosa_horimetro_equipamento_abastecido_storage_path, melosa_equipamento_operador_storage_path, melosa_assinatura_operador_storage_path, melosa_assinatura_motorista_storage_path",
+      )
+      .eq("operation_id", operationId)
+      .maybeSingle();
+
+    if (currentError) return res.status(400).json({ error: currentError.message });
+    if (!current) return res.status(404).json({ error: "Movimentação não encontrada" });
+
+    const canEdit = await assertCanEditMelosaMov(service, req.userId, current);
+    if (!canEdit.ok) return res.status(canEdit.status).json({ error: canEdit.error });
+
+    const kind = parsedBody.data.kind as MelosaPhotoKind;
+    const meta = MELOSA_PHOTO_KINDS[kind];
+    let parsedImage: { bytes: Buffer; contentType: string; ext: string };
+    try {
+      parsedImage = parseImageBase64Payload(parsedBody.data.data_base64, parsedBody.data.content_type);
+    } catch (e: unknown) {
+      return res.status(400).json({ error: e instanceof Error ? e.message : "Imagem inválida" });
+    }
+
+    const ownerId = String(current.usuario_id || req.userId);
+    const storagePath = `${ownerId}/${meta.pathSuffix(operationId, parsedImage.ext)}`;
+    const bucket = meta.bucket();
+
+    const { error: uploadError } = await service.storage.from(bucket).upload(storagePath, parsedImage.bytes, {
+      contentType: parsedImage.contentType,
+      upsert: true,
+    });
+    if (uploadError) return res.status(400).json({ error: `Falha no upload: ${uploadError.message}` });
+
+    const { error: updateError } = await service
+      .from("melosa_movimentacoes")
+      .update(sanitizeMelosaRowForDb({ [meta.column]: storagePath }))
       .eq("operation_id", operationId);
 
     if (updateError) return res.status(400).json({ error: updateError.message });
-    return res.json({ ok: true, operation_id: operationId });
+
+    return res.json({
+      ok: true,
+      operation_id: operationId,
+      kind,
+      column: meta.column,
+      storage_path: storagePath,
+      bucket,
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
@@ -716,7 +976,7 @@ router.delete("/melosa/movimentacoes/:operationId", requireAuth, async (req: Aut
     const service = createSupabaseServiceRole();
     const { data: current, error: currentError } = await service
       .from("melosa_movimentacoes")
-      .select("operation_id, usuario_id")
+      .select("*")
       .eq("operation_id", operationId)
       .maybeSingle();
 
@@ -730,6 +990,17 @@ router.delete("/melosa/movimentacoes/:operationId", requireAuth, async (req: Aut
 
     const { error: deleteError } = await service.from("melosa_movimentacoes").delete().eq("operation_id", operationId);
     if (deleteError) return res.status(400).json({ error: deleteError.message });
+
+    await logMovimentacaoAudit(service, {
+      entity: "melosa",
+      action: "delete",
+      operationId,
+      obraCodigo: (current.obra_codigo as number | null) ?? null,
+      actorUserId: req.userId,
+      before: current as Record<string, unknown>,
+      after: null,
+    });
+
     return res.json({ ok: true, operation_id: operationId });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
@@ -749,7 +1020,7 @@ router.patch("/tanque/movimentacoes/:operationId", requireAuth, async (req: Auth
     const service = createSupabaseServiceRole();
     const { data: current, error: currentError } = await service
       .from("movimentacoes")
-      .select("operation_id, usuario_id, tipo")
+      .select("*")
       .eq("operation_id", operationId)
       .maybeSingle();
 
@@ -765,13 +1036,100 @@ router.patch("/tanque/movimentacoes/:operationId", requireAuth, async (req: Auth
       return res.status(400).json({ error: "Esta rota edita apenas movimentações de tanque" });
     }
 
-    const { error: updateError } = await service
+    const { data: updated, error: updateError } = await service
       .from("movimentacoes")
       .update(parsedBody.data as any)
+      .eq("operation_id", operationId)
+      .select("*")
+      .maybeSingle();
+
+    if (updateError) return res.status(400).json({ error: updateError.message });
+
+    await logMovimentacaoAudit(service, {
+      entity: "tanque",
+      action: "update",
+      operationId,
+      obraCodigo: (updated?.obra_codigo as number | null) ?? (current.obra_codigo as number | null),
+      actorUserId: req.userId,
+      before: current as Record<string, unknown>,
+      after: (updated as Record<string, unknown>) ?? null,
+    });
+
+    return res.json({ ok: true, operation_id: operationId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+/** Completa fotos em branco (ou substitui) de movimentação de tanque pela web. */
+router.post("/tanque/movimentacoes/:operationId/photos", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+    const operationId = String(req.params.operationId ?? "");
+    const parsedId = z.string().uuid().safeParse(operationId);
+    if (!parsedId.success) return res.status(400).json({ error: "operationId inválido" });
+
+    const parsedBody = tanquePhotoUploadSchema.safeParse(req.body);
+    if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const { data: current, error: currentError } = await service
+      .from("movimentacoes")
+      .select("operation_id, usuario_id, obra_codigo, tipo")
+      .eq("operation_id", operationId)
+      .maybeSingle();
+
+    if (currentError) return res.status(400).json({ error: currentError.message });
+    if (!current) return res.status(404).json({ error: "Movimentação não encontrada" });
+
+    const tipo = String(current.tipo ?? "");
+    if (tipo !== "ENTRADA_TANQUE_OBRA" && tipo !== "RETIRADA_TANQUE") {
+      return res.status(400).json({ error: "Esta rota é apenas para movimentações de tanque" });
+    }
+
+    const canEdit = await assertCanEditMelosaMov(service, req.userId, current);
+    if (!canEdit.ok) return res.status(canEdit.status).json({ error: canEdit.error });
+
+    const kind = parsedBody.data.kind as TanquePhotoKind;
+    const meta = TANQUE_PHOTO_KINDS[kind];
+    if (!(meta.tipos as readonly string[]).includes(tipo)) {
+      return res.status(400).json({ error: `Foto "${kind}" não se aplica a ${tipo}` });
+    }
+
+    let parsedImage: { bytes: Buffer; contentType: string; ext: string };
+    try {
+      parsedImage = parseImageBase64Payload(parsedBody.data.data_base64, parsedBody.data.content_type);
+    } catch (e: unknown) {
+      return res.status(400).json({ error: e instanceof Error ? e.message : "Imagem inválida" });
+    }
+
+    const ownerId = String(current.usuario_id || req.userId);
+    const storagePathUpload = `${ownerId}/${meta.pathSuffix(operationId, parsedImage.ext)}`;
+    const bucket = meta.bucket();
+
+    const { error: uploadError } = await service.storage
+      .from(bucket)
+      .upload(storagePathUpload, parsedImage.bytes, {
+        contentType: parsedImage.contentType,
+        upsert: true,
+      });
+    if (uploadError) return res.status(400).json({ error: `Falha no upload: ${uploadError.message}` });
+
+    const { error: updateError } = await service
+      .from("movimentacoes")
+      .update({ [meta.column]: storagePathUpload })
       .eq("operation_id", operationId);
 
     if (updateError) return res.status(400).json({ error: updateError.message });
-    return res.json({ ok: true, operation_id: operationId });
+
+    return res.json({
+      ok: true,
+      operation_id: operationId,
+      kind,
+      column: meta.column,
+      storage_path: storagePathUpload,
+      bucket,
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
@@ -787,7 +1145,7 @@ router.delete("/tanque/movimentacoes/:operationId", requireAuth, async (req: Aut
     const service = createSupabaseServiceRole();
     const { data: current, error: currentError } = await service
       .from("movimentacoes")
-      .select("operation_id, usuario_id, tipo")
+      .select("*")
       .eq("operation_id", operationId)
       .maybeSingle();
 
@@ -805,6 +1163,93 @@ router.delete("/tanque/movimentacoes/:operationId", requireAuth, async (req: Aut
 
     const { error: deleteError } = await service.from("movimentacoes").delete().eq("operation_id", operationId);
     if (deleteError) return res.status(400).json({ error: deleteError.message });
+
+    await logMovimentacaoAudit(service, {
+      entity: "tanque",
+      action: "delete",
+      operationId,
+      obraCodigo: (current.obra_codigo as number | null) ?? null,
+      actorUserId: req.userId,
+      before: current as Record<string, unknown>,
+      after: null,
+    });
+
+    return res.json({ ok: true, operation_id: operationId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+// Entrada de combustível no tanque (registro manual pela web).
+// Credita o saldo do tanque. Foto/assinaturas não são obrigatórias neste fluxo.
+router.post("/tanque/movimentacoes/entrada", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const parsedBody = tanqueEntradaCombustivelWebSchema.safeParse(req.body);
+    if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const payload = parsedBody.data;
+
+    try {
+      await assertUserObraAccess(service, req.userId, payload.obra_codigo);
+    } catch (e) {
+      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+
+    const { data: tanqueCadastrado } = await service
+      .from("equipamentos")
+      .select("ativo")
+      .eq("tipo", "TANQUE")
+      .eq("obra_codigo", payload.obra_codigo)
+      .eq("tanque_numero", payload.tanque_numero)
+      .maybeSingle();
+    if (!tanqueCadastrado) {
+      return res.status(400).json({
+        error: `Tanque ${payload.tanque_numero} não cadastrado para a obra ${payload.obra_codigo}.`,
+      });
+    }
+
+    const placa = payload.placa_texto?.trim().toUpperCase() || null;
+    const fornecedor = payload.fornecedor_texto?.trim() || null;
+    const operationId = randomUUID();
+
+    const entradaRow = {
+      operation_id: operationId,
+      usuario_id: req.userId,
+      tipo: "ENTRADA_TANQUE_OBRA",
+      obra_codigo: payload.obra_codigo,
+      data_hora: new Date(payload.data_hora).toISOString(),
+      litros: payload.litros,
+      combustivel_tipo: payload.combustivel_tipo.trim(),
+      tanque_numero: payload.tanque_numero,
+      nota_numero: payload.nota_numero?.trim() || null,
+      valor_unitario: payload.valor_unitario ?? null,
+      placa_texto: placa,
+      placa_caminhao: placa,
+      fornecedor_texto: fornecedor,
+      nota_storage_path: null,
+      tanque_assinatura_operador_storage_path: null,
+      tanque_assinatura_melosa_storage_path: null,
+      obs: payload.obs?.trim() || null,
+    };
+
+    const { error } = await service.from("movimentacoes").insert(entradaRow);
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    await logMovimentacaoAudit(service, {
+      entity: "tanque",
+      action: "insert",
+      operationId,
+      obraCodigo: payload.obra_codigo,
+      actorUserId: req.userId,
+      before: null,
+      after: entradaRow as Record<string, unknown>,
+    });
+
     return res.json({ ok: true, operation_id: operationId });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
@@ -849,7 +1294,7 @@ router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res
     const operationId = randomUUID();
     const quantidadeStr = String(payload.quantidade_litros);
 
-    const { error } = await service.from("movimentacoes").insert({
+    const retiradaRow = {
       operation_id: operationId,
       usuario_id: req.userId,
       tipo: "RETIRADA_TANQUE",
@@ -862,9 +1307,21 @@ router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res
       placa_texto: patrimonio,
       fornecedor_texto: patrimonio,
       obs: payload.obs?.trim() || null,
-    });
+    };
+
+    const { error } = await service.from("movimentacoes").insert(retiradaRow);
 
     if (error) return res.status(400).json({ error: error.message });
+
+    await logMovimentacaoAudit(service, {
+      entity: "tanque",
+      action: "insert",
+      operationId,
+      obraCodigo: payload.obra_codigo,
+      actorUserId: req.userId,
+      before: null,
+      after: retiradaRow as Record<string, unknown>,
+    });
 
     return res.json({ ok: true, operation_id: operationId });
   } catch (err: any) {
@@ -1207,6 +1664,16 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
 
       if (error) return res.status(400).json({ error: error.message });
 
+      await logMovimentacaoAudit(service, {
+        entity: "melosa",
+        action: "insert",
+        operationId: payload.operation_id,
+        obraCodigo: payload.obra_codigo,
+        actorUserId: req.userId,
+        before: null,
+        after: insertRowMelosa as Record<string, unknown>,
+      });
+
       try {
         await vincularAbastecimentoAoCicloAberto(service, {
           operationId: payload.operation_id,
@@ -1276,6 +1743,16 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       .upsert(insertRow as any, { onConflict: "operation_id" });
 
     if (error) return res.status(400).json({ error: error.message });
+
+    await logMovimentacaoAudit(service, {
+      entity: "tanque",
+      action: "insert",
+      operationId: payload.operation_id,
+      obraCodigo: payload.obra_codigo,
+      actorUserId: req.userId,
+      before: null,
+      after: insertRow as Record<string, unknown>,
+    });
 
     if (payload.tipo === "RETIRADA_TANQUE" && placaNorm) {
       const dataHoraIso = insertRow.data_hora as string;

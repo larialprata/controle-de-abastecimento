@@ -27,6 +27,21 @@ export const env = {
   EQUIPAMENTOS_DB_URL: process.env.EQUIPAMENTOS_DB_URL as string | undefined,
   EQUIPAMENTOS_QR_PUBLIC_BASE_URL: process.env.EQUIPAMENTOS_QR_PUBLIC_BASE_URL as string | undefined,
   PORT: Number(process.env.PORT ?? 3001),
+  // Relatório diário por e-mail
+  SMTP_HOST: process.env.SMTP_HOST as string | undefined,
+  SMTP_PORT: Number(process.env.SMTP_PORT ?? 587),
+  SMTP_SECURE: String(process.env.SMTP_SECURE ?? "false").toLowerCase() === "true",
+  SMTP_USER: process.env.SMTP_USER as string | undefined,
+  SMTP_PASS: process.env.SMTP_PASS as string | undefined,
+  SMTP_FROM: process.env.SMTP_FROM as string | undefined,
+  /** API key Resend — se definido, tem prioridade sobre SMTP */
+  RESEND_API_KEY: process.env.RESEND_API_KEY as string | undefined,
+  RESEND_FROM: process.env.RESEND_FROM as string | undefined,
+  CRON_SECRET: process.env.CRON_SECRET as string | undefined,
+  /** Hora local América/São Paulo (0–23) para disparo automático; vazio = desligado */
+  DAILY_REPORT_HOUR: process.env.DAILY_REPORT_HOUR
+    ? Number(process.env.DAILY_REPORT_HOUR)
+    : undefined,
 };
 
 function assertEnv() {
@@ -61,5 +76,15 @@ export const envValidated = {
   MELOSA_LACRE_BUCKET: env.MELOSA_LACRE_BUCKET,
   MELOSA_ASSINATURAS_BUCKET: env.MELOSA_ASSINATURAS_BUCKET,
   PORT: env.PORT,
+  SMTP_HOST: env.SMTP_HOST,
+  SMTP_PORT: env.SMTP_PORT,
+  SMTP_SECURE: env.SMTP_SECURE,
+  SMTP_USER: env.SMTP_USER,
+  SMTP_PASS: env.SMTP_PASS,
+  SMTP_FROM: env.SMTP_FROM,
+  RESEND_API_KEY: env.RESEND_API_KEY,
+  RESEND_FROM: env.RESEND_FROM,
+  CRON_SECRET: env.CRON_SECRET,
+  DAILY_REPORT_HOUR: env.DAILY_REPORT_HOUR,
 };
 

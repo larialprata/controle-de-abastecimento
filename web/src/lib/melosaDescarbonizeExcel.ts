@@ -19,6 +19,8 @@ export type MelosaExcelRowInput = {
   obraCodigo?: number;
   obraNome?: string | null;
   melosaCategoria?: string | null;
+  /** Mobilidade do equipamento abastecido (cadastro): ESTACIONARIO | MOVEL */
+  equipamentoMobilidade?: string | null;
   dataHora?: string;
   insumoRetirada?: string | null;
   insumoRegistro?: string | null;
@@ -26,6 +28,18 @@ export type MelosaExcelRowInput = {
   placaTexto?: string | null;
   ativoEquipamento?: string | null;
 };
+
+function resolveCategoriaDados(row: MelosaExcelRowInput): string {
+  const mobilidade = String(row.equipamentoMobilidade ?? "").trim().toUpperCase();
+  if (mobilidade === "ESTACIONARIO") return "ESTACIONARIA";
+  if (mobilidade === "MOVEL") return "MOVEL";
+
+  const categoria = String(row.melosaCategoria ?? "").trim().toUpperCase();
+  if (categoria === "ESTACIONARIA") return "ESTACIONARIA";
+  if (categoria === "MOVEL") return "MOVEL";
+
+  return "MOVEL";
+}
 
 function toDescarbonizeRow(row: MelosaExcelRowInput): DescarbonizeExcelRowInput {
   const insumo =
@@ -36,8 +50,7 @@ function toDescarbonizeRow(row: MelosaExcelRowInput): DescarbonizeExcelRowInput 
   return {
     obraCodigo: row.obraCodigo,
     obraNome: row.obraNome,
-    // Abastecimento de equipamento é sempre fonte móvel.
-    categoriaDados: "MOVEL",
+    categoriaDados: resolveCategoriaDados(row),
     dataHora: row.dataHora,
     insumo,
     medidorInicial: row.quantidadeAbastecida,

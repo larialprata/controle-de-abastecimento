@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { Monitor, Plus, Shield, Smartphone, X } from "lucide-react";
+import { Loader2, Mail, Monitor, Plus, Shield, Smartphone, X } from "lucide-react";
 import { useAuth } from "../state/AuthContext";
 import { apiGet, apiPost } from "../lib/api";
 import { glassField, glassPanel } from "../lib/glass";
@@ -26,6 +26,7 @@ type AdminUserRow = {
   web_permissions: WebPageKey[];
   web_write_permissions: WebWritePageKey[];
   obra_codigos: number[];
+  recebe_relatorio_email: boolean;
   created_at: string | null;
 };
 
@@ -71,6 +72,8 @@ export default function UsersPage() {
   const [obraDraft, setObraDraft] = useState<number[]>([]);
   const [obraSaving, setObraSaving] = useState(false);
   const [obraError, setObraError] = useState<string | null>(null);
+  const [sendingReport, setSendingReport] = useState(false);
+  const [okMsg, setOkMsg] = useState<string | null>(null);
 
   async function load() {
     if (!token) return;
@@ -121,6 +124,51 @@ export default function UsersPage() {
     setError(null);
     await apiPost(`/v1/admin/users/${userId}/melosa`, token, { is_melosa });
     await load();
+  }
+
+  async function setRecebeRelatorioEmail(userId: string, recebe_relatorio_email: boolean) {
+    if (!token) return;
+    setError(null);
+    setOkMsg(null);
+    try {
+      await apiPost(`/v1/admin/users/${userId}/recebe-relatorio-email`, token, {
+        recebe_relatorio_email,
+      });
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, recebe_relatorio_email } : u)),
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erro ao atualizar aviso por e-mail");
+      await load();
+    }
+  }
+
+  async function enviarRelatorioEmail() {
+    if (!token) return;
+    setSendingReport(true);
+    setError(null);
+    setOkMsg(null);
+    try {
+      const json = await apiPost("/v1/admin/report-email/run-daily", token, { offsetDays: 0 });
+      const falhas = Array.isArray(json?.failures) ? json.failures : [];
+      if (falhas.length > 0) {
+        const detalhe = falhas
+          .map((f: { email?: string; error?: string }) => `${f.email ?? "?"}: ${f.error ?? "erro"}`)
+          .join(" · ");
+        setError(`Falha no envio (${falhas.length}): ${detalhe}`);
+        setOkMsg(
+          `Relatório: ${json.sent ?? 0} enviado(s) · dia ${json.day ?? "—"} · ${falhas.length} falha(s)`,
+        );
+      } else {
+        setOkMsg(
+          `Relatório enviado: ${json.sent ?? 0} e-mail(s) · dia ${json.day ?? "—"}`,
+        );
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erro ao enviar relatório");
+    } finally {
+      setSendingReport(false);
+    }
   }
 
   async function setAccessPlatform(userId: string, access_platform: "app" | "web") {
@@ -314,12 +362,19 @@ export default function UsersPage() {
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">Usuários</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
           Utilizador Web: defina quais páginas e obras cada um pode ver, e em quais pode adicionar/editar.
+          Marque o e-mail diário para quem deve receber o resumo das obras vinculadas.
         </p>
       </header>
 
       {error ? (
         <div className="mb-4 rounded-lg border border-red-300/80 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
           {error}
+        </div>
+      ) : null}
+
+      {okMsg ? (
+        <div className="mb-4 rounded-lg border border-emerald-300/80 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-200">
+          {okMsg}
         </div>
       ) : null}
 
@@ -335,6 +390,25 @@ export default function UsersPage() {
             className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
           >
             {loading ? "A carregar…" : "Recarregar"}
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Relatório
+          </span>
+          <button
+            type="button"
+            onClick={() => void enviarRelatorioEmail()}
+            disabled={sendingReport || loading}
+            className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-600/20 transition hover:bg-violet-700 disabled:opacity-50"
+          >
+            {sendingReport ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <Mail className="h-4 w-4" aria-hidden />
+            )}
+            {sendingReport ? "A enviar…" : "Enviar relatório email"}
           </button>
         </div>
 
@@ -375,6 +449,9 @@ export default function UsersPage() {
                   </th>
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Obras
+                  </th>
+                  <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-center text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
+                    E-mail diário
                   </th>
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Motorista
@@ -452,6 +529,23 @@ export default function UsersPage() {
                             {formatObraLabel(u.obra_codigos ?? [])}
                           </button>
                         )}
+                      </td>
+                      <td className="border-b border-slate-100 px-4 py-3 text-center align-middle dark:border-white/5">
+                        <input
+                          type="checkbox"
+                          checked={u.recebe_relatorio_email === true}
+                          disabled={!u.email || !u.active}
+                          title={
+                            !u.email
+                              ? "Utilizador sem e-mail"
+                              : !u.active
+                                ? "Ative o utilizador para receber e-mail"
+                                : "Receber relatório diário das obras vinculadas"
+                          }
+                          onChange={(e) => void setRecebeRelatorioEmail(u.id, e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:opacity-40"
+                          aria-label={`Receber e-mail diário — ${u.email ?? u.id}`}
+                        />
                       </td>
                       <td className="border-b border-slate-100 px-4 py-3 align-middle dark:border-white/5">
                         <span

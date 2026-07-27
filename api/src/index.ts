@@ -13,11 +13,13 @@ import mobileErrorsRouter from "./routes/mobileErrors";
 import estoqueDashboardRouter from "./routes/estoqueDashboard";
 import equipamentoConsumoRouter from "./routes/equipamentoConsumo";
 import empresasRouter from "./routes/empresas";
+import reportEmailRouter, { startDailyReportScheduler } from "./routes/reportEmail";
+import alertasRouter from "./routes/alertas";
 
 const app = express();
 
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "12mb" }));
 
 // Log básico de requests para facilitar debug no terminal.
 app.use((req, res, next) => {
@@ -38,6 +40,7 @@ app.get("/health", (_req, res) =>
 );
 
 app.use("/v1/admin", adminRouter);
+app.use("/v1/admin", reportEmailRouter);
 app.use("/v1", obrasRouter);
 app.use("/v1", authRouter);
 app.use("/v1", movimentacoesRouter);
@@ -48,6 +51,7 @@ app.use("/v1", melosaCiclosRouter);
 app.use("/v1", melosaMedidorRouter);
 app.use("/v1", estoqueDashboardRouter);
 app.use("/v1", equipamentoConsumoRouter);
+app.use("/v1", alertasRouter);
 app.use("/v1", mobileErrorsRouter);
 
 // Tratador global de erros (caso algum erro escape de try/catch).
@@ -60,5 +64,6 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 app.listen(envValidated.PORT, "0.0.0.0", () => {
   // eslint-disable-next-line no-console
   console.log(`API running on 0.0.0.0:${envValidated.PORT}`);
+  startDailyReportScheduler();
 });
 

@@ -13,6 +13,7 @@ import {
   normalizeAtivoPlacaExterno,
 } from "../lib/equipamentosExternos";
 import { lookupEquipamentoFromQr } from "../lib/equipamentoQrLookup";
+import { assertEmpresaCadastradaAtiva } from "../lib/empresasCadastro";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
 import {
@@ -507,6 +508,13 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
 
   const nome = parsed.data.nome?.trim() || ativo;
 
+  let empresaNormalizada: string | null = null;
+  if (tipo === "EQUIPAMENTO") {
+    const empresaCheck = await assertEmpresaCadastradaAtiva(service, empresa);
+    if (!empresaCheck.ok) return res.status(400).json({ error: empresaCheck.error });
+    empresaNormalizada = empresaCheck.nome;
+  }
+
   if (tipo === "MELOSA" && capacidade_litros != null && capacidade_litros <= 0) {
     return res.status(400).json({ error: "Capacidade da melosa deve ser maior que zero." });
   }
@@ -565,7 +573,7 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
         tipo === "TANQUE" && saldo_inicial_litros != null ? new Date().toISOString() : null,
       mobilidade:
         tipo === "EQUIPAMENTO" ? resolveMobilidadeEquipamento(nome, mobilidade) : null,
-      empresa: tipo === "EQUIPAMENTO" ? normalizeEquipamentoEmpresa(empresa) : null,
+      empresa: empresaNormalizada,
       placa: tipo === "EQUIPAMENTO" ? normalizeEquipamentoPlaca(placa) : null,
     })
     .select(EQUIPAMENTO_SELECT)
@@ -701,9 +709,16 @@ router.post("/equipamentos/import", requireAuth, async (req: AuthedRequest, res)
       obra_codigo,
       capacidade_litros: null,
       mobilidade: resolveMobilidadeEquipamento(nome, item.mobilidade),
-      empresa: normalizeEquipamentoEmpresa(item.empresa),
+      empresa: null as string | null,
       placa: normalizeEquipamentoPlaca(item.placa),
     };
+
+    const empresaCheck = await assertEmpresaCadastradaAtiva(service, item.empresa);
+    if (!empresaCheck.ok) {
+      erros.push({ linha, ativo, mensagem: empresaCheck.error });
+      continue;
+    }
+    payload.empresa = empresaCheck.nome;
 
     if (existing) {
       const { error } = await service.from("equipamentos").update(payload).eq("ativo", existing.ativo);
@@ -867,6 +882,12 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
     empresa = normalizeEquipamentoEmpresa(parsed.data.empresa);
   } else {
     empresa = normalizeEquipamentoEmpresa(existing.empresa);
+  }
+
+  if (tipo === "EQUIPAMENTO" && parsed.data.empresa !== undefined && empresa) {
+    const empresaCheck = await assertEmpresaCadastradaAtiva(service, empresa);
+    if (!empresaCheck.ok) return res.status(400).json({ error: empresaCheck.error });
+    empresa = empresaCheck.nome;
   }
 
   let placa: string | null;

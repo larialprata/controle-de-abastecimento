@@ -48,6 +48,7 @@ export type PeriodoAnteriorResumo = {
 export type EquipamentoConsumoResposta = {
   periodo: { de: string | null; ate: string | null };
   equipamentos: ConsumoEquipamento[];
+  motoristas?: ConsumoMotorista[];
   /** Litros abastecidos em equipamentos no período (exclui tanque/melosa). */
   total_litros_equipamentos?: number;
   abastecimentos_equipamentos?: number;
@@ -57,6 +58,11 @@ export type EquipamentoConsumoResposta = {
   metas: ConsumoMeta[];
   metas_equipamento: Record<string, MetaEquipamento>;
   periodo_anterior: PeriodoAnteriorResumo | null;
+};
+
+export type ConsumoMotorista = ConsumoEquipamento & {
+  motorista_key: string;
+  equipamentos_distintos: number;
 };
 
 export type ConsumoMesPoint = {

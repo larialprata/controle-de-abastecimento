@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetState
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import TanqueTicketModal, { type TanqueTicketRow } from "../components/bi/TanqueTicketModal";
 import TanqueRetiradaEquipamentoModal from "../components/bi/TanqueRetiradaEquipamentoModal";
+import TanqueEntradaCombustivelModal from "../components/bi/TanqueEntradaCombustivelModal";
+import TanqueFotosModal, { type TanqueFotosRow } from "../components/bi/TanqueFotosModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
 import { useAuth } from "../state/AuthContext";
@@ -285,6 +287,7 @@ type TanqueTableProps = {
   setSelectedKeys: Dispatch<SetStateAction<string[]>>;
   rowKey: (m: LinhaTanque) => string;
   onOpenPhoto: (src: string) => void;
+  onAddFotos: (row: LinhaTanque) => void;
 };
 
 function TanqueBiScrollTable({
@@ -299,6 +302,7 @@ function TanqueBiScrollTable({
   setSelectedKeys,
   rowKey,
   onOpenPhoto,
+  onAddFotos,
 }: TanqueTableProps) {
   const isRetiradaTable = variant === "retirada";
   const isEntradaTable = variant === "entrada";
@@ -377,6 +381,7 @@ function TanqueBiScrollTable({
                   token={authToken}
                   onOpen={onOpenPhoto}
                   shortLabel={label}
+                  onAddClick={() => onAddFotos(m)}
                 />
               );
 
@@ -477,6 +482,9 @@ export default function TanqueBIPage() {
   const [ticketOpen, setTicketOpen] = useState(false);
   const [ticketRows, setTicketRows] = useState<TanqueTicketRow[]>([]);
   const [retiradaEquipOpen, setRetiradaEquipOpen] = useState(false);
+  const [entradaCombustivelOpen, setEntradaCombustivelOpen] = useState(false);
+  const [fotosOpen, setFotosOpen] = useState(false);
+  const [fotosRow, setFotosRow] = useState<TanqueFotosRow | null>(null);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
 
@@ -584,6 +592,46 @@ export default function TanqueBIPage() {
     });
     return Array.from(set);
   }, [selectedRows]);
+
+  const openFotosForm = useCallback(
+    (row?: LinhaTanque) => {
+      const target = row ?? (selectedRows.length === 1 ? selectedRows[0] : null);
+      if (!target) return;
+      const operationId = typeof target.operation_id === "string" ? target.operation_id : "";
+      if (!operationId) return;
+      setFotosRow({
+        operation_id: operationId,
+        tipo: target.tipo != null ? String(target.tipo) : null,
+        obra_codigo: typeof target.obra_codigo === "number" ? target.obra_codigo : null,
+        data_hora: target.data_hora,
+        nota_storage_path: storagePath(target, "nota_storage_path"),
+        tanque_quantidade_abastecida_storage_path: storagePath(
+          target,
+          "tanque_quantidade_abastecida_storage_path",
+        ),
+        lacre_tanque_storage_path: storagePath(target, "lacre_tanque_storage_path"),
+        lacre_melosa_storage_path: storagePath(target, "lacre_melosa_storage_path"),
+        retirada_horimetro_foto_storage_path: storagePath(
+          target,
+          "retirada_horimetro_foto_storage_path",
+        ),
+        tanque_assinatura_operador_storage_path: storagePath(
+          target,
+          "tanque_assinatura_operador_storage_path",
+        ),
+        tanque_assinatura_melosa_storage_path: storagePath(
+          target,
+          "tanque_assinatura_melosa_storage_path",
+        ),
+      });
+      setFotosOpen(true);
+    },
+    [selectedRows],
+  );
+
+  const handleFotosSaved = useCallback(() => {
+    void load();
+  }, [load]);
 
   const ticketVariant = useMemo((): ObraEmpresa => {
     const set = empresasDasLinhas(
@@ -957,9 +1005,17 @@ export default function TanqueBIPage() {
       <div className={`mb-4 flex flex-wrap items-center justify-end gap-2 ${glassPanel} px-4 py-3`}>
         <button
           type="button"
+          onClick={() => setEntradaCombustivelOpen(true)}
+          disabled={loading}
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Adicionar combustível
+        </button>
+        <button
+          type="button"
           onClick={() => setRetiradaEquipOpen(true)}
           disabled={loading}
-          className="mr-auto rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mr-auto rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Retirar para equipamento
         </button>
@@ -978,6 +1034,14 @@ export default function TanqueBIPage() {
           className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Editar selecionada
+        </button>
+        <button
+          type="button"
+          onClick={() => openFotosForm()}
+          disabled={loading || selectedRows.length !== 1}
+          className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Adicionar / fotos
         </button>
         <button
           type="button"
@@ -1006,6 +1070,7 @@ export default function TanqueBIPage() {
             setSelectedKeys={setSelectedKeys}
             rowKey={rowKey}
             onOpenPhoto={setLightboxSrc}
+            onAddFotos={openFotosForm}
           />
           <TanqueBiScrollTable
             title="Entrada"
@@ -1019,6 +1084,7 @@ export default function TanqueBIPage() {
             setSelectedKeys={setSelectedKeys}
             rowKey={rowKey}
             onOpenPhoto={setLightboxSrc}
+            onAddFotos={openFotosForm}
           />
         </div>
 
@@ -1096,6 +1162,27 @@ export default function TanqueBIPage() {
         onClose={() => setRetiradaEquipOpen(false)}
         onSaved={() => void load()}
       />
+
+      <TanqueEntradaCombustivelModal
+        open={entradaCombustivelOpen}
+        obras={obras}
+        apiBase={apiBase}
+        token={authToken}
+        onClose={() => setEntradaCombustivelOpen(false)}
+        onSaved={() => void load()}
+      />
+
+      {fotosOpen ? (
+        <TanqueFotosModal
+          open={fotosOpen}
+          row={fotosRow}
+          apiBase={apiBase}
+          token={authToken}
+          onClose={() => setFotosOpen(false)}
+          onSaved={handleFotosSaved}
+          onOpenPhoto={setLightboxSrc}
+        />
+      ) : null}
     </div>
   );
 }

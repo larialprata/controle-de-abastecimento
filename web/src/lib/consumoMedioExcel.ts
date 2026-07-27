@@ -1,5 +1,10 @@
 import ExcelJS from "exceljs";
-import type { ConsumoAlerta, ConsumoEquipamento, EquipamentoConsumoResposta } from "./consumoMedioAnalise";
+import type {
+  ConsumoAlerta,
+  ConsumoEquipamento,
+  ConsumoMotorista,
+  EquipamentoConsumoResposta,
+} from "./consumoMedioAnalise";
 
 function styleHeaderRow(row: ExcelJS.Row) {
   row.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -31,12 +36,13 @@ export async function downloadConsumoMedioExcel(
   equipamentos: ConsumoEquipamento[],
   alertas: ConsumoAlerta[],
   filenamePrefix = "consumo-medio",
+  motoristas?: ConsumoMotorista[],
 ) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Controle Abast";
   workbook.created = new Date();
 
-  const wsResumo = workbook.addWorksheet("Resumo", { views: [{ state: "frozen", ySplit: 1 }] });
+  const wsResumo = workbook.addWorksheet("Por equipamento", { views: [{ state: "frozen", ySplit: 1 }] });
   wsResumo.columns = [
     { header: "Equipamento", key: "ativo", width: 16 },
     { header: "Nome", key: "nome", width: 24 },
@@ -65,6 +71,34 @@ export async function downloadConsumoMedioExcel(
       ultimo: fmtDataExcel(eq.ultimo_abastecimento),
     });
   });
+
+  const motoristasList = motoristas ?? data.motoristas ?? [];
+  if (motoristasList.length > 0) {
+    const wsMot = workbook.addWorksheet("Por motorista", { views: [{ state: "frozen", ySplit: 1 }] });
+    wsMot.columns = [
+      { header: "Motorista", key: "motorista", width: 28 },
+      { header: "Equipamentos", key: "eqs", width: 14 },
+      { header: "Média", key: "media", width: 12 },
+      { header: "Litros (trechos)", key: "litros", width: 14 },
+      { header: "Horas/km", key: "unidade_total", width: 12 },
+      { header: "Trechos", key: "trechos", width: 10 },
+      { header: "Abastecimentos", key: "abast", width: 14 },
+      { header: "Último abastecimento", key: "ultimo", width: 18 },
+    ];
+    styleHeaderRow(wsMot.getRow(1));
+    motoristasList.forEach((m) => {
+      wsMot.addRow({
+        motorista: m.ativo,
+        eqs: m.equipamentos_distintos,
+        media: fmtMediaExcel(m.media_litros_por_unidade, m.unidade),
+        litros: m.total_litros_periodo,
+        unidade_total: m.total_unidade,
+        trechos: m.trechos_count,
+        abast: m.abastecimentos_count,
+        ultimo: fmtDataExcel(m.ultimo_abastecimento),
+      });
+    });
+  }
 
   const wsTrechos = workbook.addWorksheet("Trechos", { views: [{ state: "frozen", ySplit: 1 }] });
   wsTrechos.columns = [

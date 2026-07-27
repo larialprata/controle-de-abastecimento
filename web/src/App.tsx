@@ -168,6 +168,7 @@ function AppRoutes() {
           }
         />
         <Route path="users" element={<Navigate to="/usuarios" replace />} />
+        <Route path="avisos-email" element={<Navigate to="/usuarios" replace />} />
       </Route>
     </Routes>
   );

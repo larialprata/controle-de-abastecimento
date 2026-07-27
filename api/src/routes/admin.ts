@@ -23,7 +23,7 @@ router.get("/users", requireAdmin, async (req: AuthedRequest, res) => {
     const profs = userIds.length
       ? await service
           .from("profiles")
-          .select("user_id, role, active, is_melosa, cnh_storage_path, access_platform, web_permissions, web_write_permissions")
+          .select("user_id, role, active, is_melosa, cnh_storage_path, access_platform, web_permissions, web_write_permissions, recebe_relatorio_email, full_name, email")
           .in("user_id", userIds)
       : { data: [], error: null };
 
@@ -34,7 +34,7 @@ router.get("/users", requireAdmin, async (req: AuthedRequest, res) => {
 
     const payload = users.map((u) => ({
       id: u.id,
-      email: u.email ?? null,
+      email: u.email ?? profById.get(u.id)?.email ?? null,
       role: profById.get(u.id)?.role ?? "user",
       active: profById.get(u.id)?.active ?? false,
       is_melosa: profById.get(u.id)?.is_melosa ?? false,
@@ -46,6 +46,7 @@ router.get("/users", requireAdmin, async (req: AuthedRequest, res) => {
         profById.get(u.id)?.web_write_permissions,
       ),
       obra_codigos: obrasByUser.get(u.id) ?? [],
+      recebe_relatorio_email: profById.get(u.id)?.recebe_relatorio_email === true,
       created_at: u.created_at,
     }));
 
@@ -67,6 +68,10 @@ const updateActiveSchema = z.object({
 
 const updateMelosaSchema = z.object({
   is_melosa: z.boolean(),
+});
+
+const updateRecebeRelatorioEmailSchema = z.object({
+  recebe_relatorio_email: z.boolean(),
 });
 
 const createUserSchema = z.object({
@@ -305,6 +310,36 @@ router.post("/users/:userId/melosa", requireAdmin, async (req: AuthedRequest, re
   } catch (err: any) {
     // eslint-disable-next-line no-console
     console.error("[API] /v1/admin/users/:userId/melosa error:", err);
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+router.post("/users/:userId/recebe-relatorio-email", requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const parsed = updateRecebeRelatorioEmailSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    const { userId } = req.params;
+    const { recebe_relatorio_email } = parsed.data;
+
+    const service = createSupabaseServiceRole();
+    const { data: existing, error: exErr } = await service
+      .from("profiles")
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (exErr) return res.status(500).json({ error: exErr.message });
+    if (!existing) return res.status(404).json({ error: "Perfil não encontrado para este usuário" });
+
+    const { error } = await service
+      .from("profiles")
+      .update({ recebe_relatorio_email })
+      .eq("user_id", userId);
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ ok: true });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error("[API] /v1/admin/users/:userId/recebe-relatorio-email error:", err);
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
 });

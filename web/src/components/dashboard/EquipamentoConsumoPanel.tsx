@@ -38,6 +38,7 @@ import {
   mediaFrotaPorUnidade,
   nivelCorClasses,
   ordenarEquipamentos,
+  type ConsumoEquipamento,
   type ConsumoMeta,
   type EquipamentoConsumoResposta,
   type MetaEquipamento,
@@ -54,6 +55,7 @@ type Props = {
 };
 
 type TabId = "visao" | "equipamentos" | "qualidade";
+type AgruparPor = "equipamento" | "motorista";
 
 function VariacaoBadge({ pct }: { pct: number | null }) {
   if (pct == null || !Number.isFinite(pct)) return <span className="text-slate-400">—</span>;
@@ -100,6 +102,7 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
   const [compararPeriodo, setCompararPeriodo] = useState(true);
   const [ordenacao, setOrdenacao] = useState<OrdenacaoConsumo>("media_desc");
   const [tab, setTab] = useState<TabId>("visao");
+  const [agruparPor, setAgruparPor] = useState<AgruparPor>("equipamento");
   const [data, setData] = useState<EquipamentoConsumoResposta | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -170,28 +173,50 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
     void load();
   }, [load]);
 
-  const mediaFrotaH = useMemo(() => mediaFrotaPorUnidade(data?.equipamentos ?? [], "h"), [data?.equipamentos]);
-  const mediaFrotaKm = useMemo(() => mediaFrotaPorUnidade(data?.equipamentos ?? [], "km"), [data?.equipamentos]);
+  const listaBase = useMemo((): ConsumoEquipamento[] => {
+    if (agruparPor === "motorista") return data?.motoristas ?? [];
+    return data?.equipamentos ?? [];
+  }, [agruparPor, data?.equipamentos, data?.motoristas]);
 
   const analises = useMemo(() => {
     const map = new Map<string, ReturnType<typeof analisarEquipamento>>();
     if (!data) return map;
-    data.equipamentos.forEach((eq) => {
+    listaBase.forEach((eq) => {
       map.set(
         eq.ativo,
         analisarEquipamento(eq, {
-          metas: metasLocal,
-          metasEquipamento,
-          mediaFrotaH,
-          mediaFrotaKm,
-          periodoAnterior: data.periodo_anterior,
+          metas: agruparPor === "equipamento" ? metasLocal : [],
+          metasEquipamento: agruparPor === "equipamento" ? metasEquipamento : {},
+          mediaFrotaH: mediaFrotaPorUnidade(listaBase, "h"),
+          mediaFrotaKm: mediaFrotaPorUnidade(listaBase, "km"),
+          periodoAnterior: agruparPor === "equipamento" ? data.periodo_anterior : null,
         }),
       );
     });
     return map;
-  }, [data, mediaFrotaH, mediaFrotaKm, metasEquipamento, metasLocal]);
+  }, [agruparPor, data, listaBase, metasEquipamento, metasLocal]);
 
-  const alertas = useMemo(() => (data ? buildAlertas(data, analises) : []), [analises, data]);
+  const alertas = useMemo(() => {
+    if (!data || agruparPor === "motorista") {
+      // Alertas de frota/meta são por equipamento; em modo motorista só horímetro regressivo local
+      if (!data || agruparPor !== "motorista") return [];
+      const out: ReturnType<typeof buildAlertas> = [];
+      (data.motoristas ?? []).forEach((m) => {
+        if (m.horimetro_regressivo_count > 0) {
+          out.push({
+            id: `reg-${m.motorista_key}`,
+            tipo: "horimetro_regressivo",
+            severidade: "warning",
+            ativo: m.ativo,
+            titulo: "Horímetro regressivo",
+            descricao: `${m.horimetro_regressivo_count} leitura(s) com regressão nos trechos deste motorista.`,
+          });
+        }
+      });
+      return out;
+    }
+    return buildAlertas(data, analises);
+  }, [agruparPor, analises, data]);
 
   const empresasUnicas = useMemo(
     () =>
@@ -200,12 +225,14 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
   );
 
   const equipamentosFiltrados = useMemo(() => {
-    let list = [...(data?.equipamentos ?? [])];
-    if (filtroEmpresa) list = list.filter((e) => e.empresa === filtroEmpresa);
+    let list = [...listaBase];
+    if (agruparPor === "equipamento" && filtroEmpresa) {
+      list = list.filter((e) => e.empresa === filtroEmpresa);
+    }
     if (filtroUnidade) list = list.filter((e) => e.unidade === filtroUnidade);
     if (somenteAlertas) list = list.filter((e) => analises.get(e.ativo)?.temAlerta);
     return ordenarEquipamentos(list, ordenacao);
-  }, [analises, data?.equipamentos, filtroEmpresa, filtroUnidade, ordenacao, somenteAlertas]);
+  }, [agruparPor, analises, filtroEmpresa, filtroUnidade, listaBase, ordenacao, somenteAlertas]);
 
   const saude = useMemo(() => (data ? calcSaudeDados(data) : null), [data]);
 
@@ -233,13 +260,30 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
     if (!data) return;
     setExporting(true);
     try {
-      await downloadConsumoMedioExcel(data, equipamentosFiltrados, alertas);
+      await downloadConsumoMedioExcel(
+        data,
+        data.equipamentos,
+        alertas,
+        "consumo-medio",
+        data.motoristas ?? [],
+      );
     } catch (err: unknown) {
       window.alert(err instanceof Error ? err.message : "Erro ao exportar Excel.");
     } finally {
       setExporting(false);
     }
-  }, [alertas, data, equipamentosFiltrados]);
+  }, [alertas, data]);
+
+  const handleSelectRow = useCallback(
+    (ativo: string) => {
+      if (agruparPor === "motorista") {
+        setSelectedAtivo(ativo);
+        return;
+      }
+      setSelectedAtivo(ativo);
+    },
+    [agruparPor],
+  );
 
   const alertasRelevantes = alertas.filter((a) => a.severidade !== "info").length;
 
@@ -272,7 +316,7 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <ConsumoMedioKpiCard
-              label="Com média calculada"
+              label={agruparPor === "motorista" ? "Com média (motoristas)" : "Com média calculada"}
               value={resumo.comMedia}
               hint={`${equipamentosFiltrados.length} no filtro atual`}
               icon={Truck}
@@ -324,6 +368,42 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
             equipamentosCount={equipamentosFiltrados.length}
           />
 
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Agrupar por
+            </span>
+            <div className="inline-flex rounded-xl border border-slate-200/80 bg-white/60 p-0.5 dark:border-white/10 dark:bg-black/20">
+              <button
+                type="button"
+                onClick={() => {
+                  setAgruparPor("equipamento");
+                  setSelectedAtivo(null);
+                }}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                  agruparPor === "equipamento"
+                    ? "bg-orange-600 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
+                }`}
+              >
+                Equipamento
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAgruparPor("motorista");
+                  setSelectedAtivo(null);
+                }}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                  agruparPor === "motorista"
+                    ? "bg-orange-600 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
+                }`}
+              >
+                Motorista
+              </button>
+            </div>
+          </div>
+
           {error ? (
             <p className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
               {error}
@@ -354,7 +434,7 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
             <ConsumoMedioRankingPanel
               equipamentos={equipamentosFiltrados}
               analises={analises}
-              onSelect={setSelectedAtivo}
+              onSelect={handleSelectRow}
             />
           </section>
         </div>
@@ -364,22 +444,28 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
         <section className={`${glassPanel} p-4 sm:p-5`}>
           <ConsumoMedioSectionTitle
             icon={BarChart3}
-            title="Frota no período"
-            description="Clique em uma linha para abrir o detalhe com gráfico mensal, meta e trechos."
+            title={agruparPor === "motorista" ? "Motoristas no período" : "Frota no período"}
+            description={
+              agruparPor === "motorista"
+                ? "Média L/h ou L/km agregada pelo motorista informado no abastecimento."
+                : "Clique em uma linha para abrir o detalhe com gráfico mensal, meta e trechos."
+            }
           />
 
           <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200/60 bg-slate-50/50 p-3 dark:border-white/10 dark:bg-black/15">
-            <label className="filter-field-md">
-              <span className={labelCls}>Empresa</span>
-              <select className={glassSelect} value={filtroEmpresa} onChange={(e) => setFiltroEmpresa(e.target.value)}>
-                <option value="">Todas</option>
-                {empresasUnicas.map((emp) => (
-                  <option key={emp} value={emp}>
-                    {emp}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {agruparPor === "equipamento" ? (
+              <label className="filter-field-md">
+                <span className={labelCls}>Empresa</span>
+                <select className={glassSelect} value={filtroEmpresa} onChange={(e) => setFiltroEmpresa(e.target.value)}>
+                  <option value="">Todas</option>
+                  {empresasUnicas.map((emp) => (
+                    <option key={emp} value={emp}>
+                      {emp}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="filter-field">
               <span className={labelCls}>Unidade</span>
               <select className={glassSelect} value={filtroUnidade} onChange={(e) => setFiltroUnidade(e.target.value as "" | "h" | "km")}>
@@ -414,10 +500,11 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
           <ConsumoMedioEquipamentosTable
             equipamentos={equipamentosFiltrados}
             analises={analises}
-            compararPeriodo={compararPeriodo}
+            compararPeriodo={compararPeriodo && agruparPor === "equipamento"}
             selectedAtivo={selectedAtivo}
             loading={loading}
-            onSelect={setSelectedAtivo}
+            onSelect={handleSelectRow}
+            entityLabel={agruparPor === "motorista" ? "Motorista" : "Equipamento"}
           />
         </section>
       ) : null}
@@ -616,7 +703,7 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
         </section>
       ) : null}
 
-      {token && selectedAtivo ? (
+      {token && selectedAtivo && agruparPor === "equipamento" ? (
         <ConsumoEquipamentoDetalhe
           ativo={selectedAtivo}
           equipamentoResumo={equipamentoSelecionado}
@@ -632,6 +719,64 @@ export default function EquipamentoConsumoPanel({ token, variant = "embedded" }:
             if (data) setData({ ...data, metas_equipamento: { ...data.metas_equipamento, [meta.ativo]: meta } });
           }}
         />
+      ) : null}
+
+      {selectedAtivo && agruparPor === "motorista" && equipamentoSelecionado ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+          <div className={`${glassPanel} max-h-[85vh] w-full max-w-2xl overflow-auto p-5`}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">{equipamentoSelecionado.ativo}</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Média {fmtMedia(equipamentoSelecionado.media_litros_por_unidade, equipamentoSelecionado.unidade)}
+                  {" · "}
+                  {equipamentoSelecionado.trechos_count} trecho(s)
+                  {"equipamentos_distintos" in equipamentoSelecionado
+                    ? ` · ${(equipamentoSelecionado as { equipamentos_distintos: number }).equipamentos_distintos} equipamento(s)`
+                    : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold dark:border-white/20"
+                onClick={() => setSelectedAtivo(null)}
+              >
+                Fechar
+              </button>
+            </div>
+            <div className="table-scroll overflow-auto rounded-xl border border-white/30 dark:border-white/10">
+              <table className="w-full min-w-[520px] border-collapse text-sm">
+                <thead>
+                  <tr>
+                    <th className={thCls}>Início</th>
+                    <th className={thCls}>Fim</th>
+                    <th className={thCls}>Δ</th>
+                    <th className={thCls}>Litros</th>
+                    <th className={thCls}>Média</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {equipamentoSelecionado.trechos.map((t, i) => (
+                    <tr key={`${t.data_hora_fim}-${i}`}>
+                      <td className={tdCls}>{fmtDataBr(t.data_hora_inicio)}</td>
+                      <td className={tdCls}>{fmtDataBr(t.data_hora_fim)}</td>
+                      <td className={tdCls}>{fmtUnidade(t.delta_unidade, equipamentoSelecionado.unidade)}</td>
+                      <td className={tdCls}>{fmtLitrosDashboard(t.litros)} L</td>
+                      <td className={tdCls}>{fmtMedia(t.litros_por_unidade, equipamentoSelecionado.unidade)}</td>
+                    </tr>
+                  ))}
+                  {equipamentoSelecionado.trechos.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                        Sem trechos calculados.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {token && isPage ? (

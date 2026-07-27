@@ -43,6 +43,7 @@ type Props = {
   selectedAtivo: string | null;
   loading: boolean;
   onSelect: (ativo: string) => void;
+  entityLabel?: string;
 };
 
 export default function ConsumoMedioEquipamentosTable({
@@ -52,13 +53,14 @@ export default function ConsumoMedioEquipamentosTable({
   selectedAtivo,
   loading,
   onSelect,
+  entityLabel = "Equipamento",
 }: Props) {
   return (
     <div className="table-scroll overflow-hidden rounded-2xl border border-slate-200/80 bg-white/40 dark:border-white/10 dark:bg-black/20">
       <table className="w-full min-w-[920px] border-collapse">
         <thead>
           <tr>
-            <th className={thCls}>Equipamento</th>
+            <th className={thCls}>{entityLabel}</th>
             <th className={thCls}>Status</th>
             <th className={`${thCls} min-w-[200px]`}>Consumo vs meta</th>
             {compararPeriodo ? <th className={thCls}>vs anterior</th> : null}

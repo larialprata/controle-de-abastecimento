@@ -9,7 +9,7 @@ export const DESCARBONIZE_SUBCATEGORIA_DADOS = "Transporte rodoviário – por t
 export const DESCARBONIZE_CATEGORIA_MOVEL =
   "Emissões diretas de fontes móveis com motor de combustão interna";
 export const DESCARBONIZE_CATEGORIA_ESTACIONARIA =
-  "Emissões diretas de fontes estácionarias com motor de combustão interna";
+  "Emissões diretas de fontes estacionária com motor de combustão interna";
 export const DESCARBONIZE_EVIDENCIA = "Sim, tenho evidência";
 export const DESCARBONIZE_RECEITA_DIFERENTE = "Não";
 
@@ -163,7 +163,7 @@ export function fmtCategoriaDados(categoria: unknown): string {
   if (!raw) return DESCARBONIZE_CATEGORIA_ESTACIONARIA;
   const upper = raw.toUpperCase();
   if (upper === "MOVEL") return DESCARBONIZE_CATEGORIA_MOVEL;
-  if (upper === "ESTACIONARIA") return DESCARBONIZE_CATEGORIA_ESTACIONARIA;
+  if (upper === "ESTACIONARIA" || upper === "ESTACIONARIO") return DESCARBONIZE_CATEGORIA_ESTACIONARIA;
   if (raw.includes("móveis") || raw.includes("moveis")) return DESCARBONIZE_CATEGORIA_MOVEL;
   if (raw.includes("estácion") || raw.includes("estacion")) return DESCARBONIZE_CATEGORIA_ESTACIONARIA;
   return raw;

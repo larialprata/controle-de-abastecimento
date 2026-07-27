@@ -19,6 +19,7 @@ export type MelosaAbastecimentoRow = {
   ativo_equipamento_empresa?: string | null;
   melosa_horimetro_equipamento_abastecido_numero?: string | null;
   melosa_quantidade_abastecida?: string | null;
+  melosa_motorista_equipamento_abastecido?: string | null;
   litros?: number | null;
   obra_codigo?: number | null;
 };
@@ -51,6 +52,12 @@ export type ConsumoEquipamento = {
   trechos: ConsumoTrecho[];
 };
 
+/** Agregação de consumo por motorista (texto livre do app). `ativo` = nome exibido. */
+export type ConsumoMotorista = ConsumoEquipamento & {
+  motorista_key: string;
+  equipamentos_distintos: number;
+};
+
 export type SemHorimetroRow = {
   operation_id: string | null;
   data_hora: string;
@@ -69,6 +76,7 @@ export type PeriodoAnteriorResumo = {
 export type EquipamentoConsumoResposta = {
   periodo: { de: string | null; ate: string | null };
   equipamentos: ConsumoEquipamento[];
+  motoristas: ConsumoMotorista[];
   /** Litros abastecidos em equipamentos no período (exclui tanque/melosa). */
   total_litros_equipamentos: number;
   abastecimentos_equipamentos: number;
@@ -109,6 +117,16 @@ function normAtivo(v: unknown): string {
   return String(v ?? "")
     .trim()
     .toUpperCase();
+}
+
+const SEM_MOTORISTA_LABEL = "Sem motorista";
+
+export function normalizeMotoristaKey(v: unknown): { key: string; label: string } {
+  const label = String(v ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!label) return { key: "__SEM_MOTORISTA__", label: SEM_MOTORISTA_LABEL };
+  return { key: label.toUpperCase(), label };
 }
 
 function parseDataHora(v: unknown): Date | null {
@@ -154,6 +172,9 @@ type LeituraInterna = {
   horimetro_raw: string;
   parsed: { valor: number; unidade: string };
   litros: number;
+  motorista_key: string;
+  motorista_label: string;
+  ativo_equipamento: string;
 };
 
 type BuildConsumoResult = {
@@ -220,11 +241,15 @@ export function buildConsumoPorEquipamento(
       const parsed = parseHorimetroNumero(horRaw);
       const litros = litrosFromRow(r);
       if (!parsed || litros <= 0) return;
+      const mot = normalizeMotoristaKey(r.melosa_motorista_equipamento_abastecido);
       leituras.push({
         data_hora: String(r.data_hora ?? ""),
         horimetro_raw: horRaw,
         parsed,
         litros,
+        motorista_key: mot.key,
+        motorista_label: mot.label,
+        ativo_equipamento: ativo,
       });
     });
 
@@ -297,6 +322,178 @@ export function buildConsumoPorEquipamento(
     sem_horimetro_rows: semHorimetroRows,
     horimetro_regressivo_total: horimetroRegressivoTotal,
   };
+}
+
+type TrechoComMotorista = ConsumoTrecho & {
+  motorista_key: string;
+  motorista_label: string;
+  ativo_equipamento: string;
+};
+
+/** Calcula trechos por equipamento e agrega por motorista do abastecimento atual. */
+export function buildConsumoPorMotorista(
+  rows: MelosaAbastecimentoRow[],
+): ConsumoMotorista[] {
+  const porAtivo = new Map<string, MelosaAbastecimentoRow[]>();
+  rows.forEach((row) => {
+    const ativo = normAtivo(row.ativo_equipamento_texto);
+    if (!ativo) return;
+    if (litrosFromRow(row) <= 0) return;
+    const list = porAtivo.get(ativo) ?? [];
+    list.push(row);
+    porAtivo.set(ativo, list);
+  });
+
+  const trechosPorMotorista = new Map<string, TrechoComMotorista[]>();
+  const abastCount = new Map<string, number>();
+  const leiturasCount = new Map<string, number>();
+  const labels = new Map<string, string>();
+  const ativosPorMotorista = new Map<string, Set<string>>();
+  const ultimoAbast = new Map<string, string>();
+  const ultimoHorimetro = new Map<string, string>();
+  const regressivo = new Map<string, number>();
+
+  porAtivo.forEach((abastecimentos, ativo) => {
+    const sorted = [...abastecimentos].sort((a, b) => {
+      const ta = parseDataHora(a.data_hora)?.getTime() ?? 0;
+      const tb = parseDataHora(b.data_hora)?.getTime() ?? 0;
+      return ta - tb;
+    });
+
+    const leituras: LeituraInterna[] = [];
+    sorted.forEach((r) => {
+      const horRaw = String(r.melosa_horimetro_equipamento_abastecido_numero ?? "").trim();
+      const parsed = parseHorimetroNumero(horRaw);
+      const litros = litrosFromRow(r);
+      if (!parsed || litros <= 0) return;
+      const mot = normalizeMotoristaKey(r.melosa_motorista_equipamento_abastecido);
+      labels.set(mot.key, mot.label);
+      leiturasCount.set(mot.key, (leiturasCount.get(mot.key) ?? 0) + 1);
+      abastCount.set(mot.key, (abastCount.get(mot.key) ?? 0) + 1);
+      const setAtivos = ativosPorMotorista.get(mot.key) ?? new Set<string>();
+      setAtivos.add(ativo);
+      ativosPorMotorista.set(mot.key, setAtivos);
+      const dh = String(r.data_hora ?? "");
+      const prevDh = ultimoAbast.get(mot.key);
+      if (!prevDh || (parseDataHora(dh)?.getTime() ?? 0) >= (parseDataHora(prevDh)?.getTime() ?? 0)) {
+        ultimoAbast.set(mot.key, dh);
+        ultimoHorimetro.set(mot.key, horRaw);
+      }
+      leituras.push({
+        data_hora: dh,
+        horimetro_raw: horRaw,
+        parsed,
+        litros,
+        motorista_key: mot.key,
+        motorista_label: mot.label,
+        ativo_equipamento: ativo,
+      });
+    });
+
+    // Contar abastecimentos totais por motorista neste ativo (incluindo sem horímetro válido no loop acima só conta válidos)
+    sorted.forEach((r) => {
+      if (litrosFromRow(r) <= 0) return;
+      const mot = normalizeMotoristaKey(r.melosa_motorista_equipamento_abastecido);
+      // abast já contado só em leituras válidas; reforça total com todos os abast do motorista neste ativo
+      // (já incrementamos em leituras; para abast sem horímetro também contam):
+      const horRaw = String(r.melosa_horimetro_equipamento_abastecido_numero ?? "").trim();
+      if (!parseHorimetroNumero(horRaw)) {
+        labels.set(mot.key, mot.label);
+        abastCount.set(mot.key, (abastCount.get(mot.key) ?? 0) + 1);
+        const setAtivos = ativosPorMotorista.get(mot.key) ?? new Set<string>();
+        setAtivos.add(ativo);
+        ativosPorMotorista.set(mot.key, setAtivos);
+      }
+    });
+
+    for (let i = 1; i < leituras.length; i += 1) {
+      const prev = leituras[i - 1];
+      const cur = leituras[i];
+      if (prev.parsed.unidade !== cur.parsed.unidade) {
+        regressivo.set(cur.motorista_key, (regressivo.get(cur.motorista_key) ?? 0) + 1);
+        continue;
+      }
+      const delta = cur.parsed.valor - prev.parsed.valor;
+      if (delta <= 0) {
+        regressivo.set(cur.motorista_key, (regressivo.get(cur.motorista_key) ?? 0) + 1);
+        continue;
+      }
+      const trecho: TrechoComMotorista = {
+        data_hora_inicio: prev.data_hora,
+        data_hora_fim: cur.data_hora,
+        horimetro_inicio: prev.horimetro_raw,
+        horimetro_fim: cur.horimetro_raw,
+        delta_unidade: delta,
+        litros: cur.litros,
+        litros_por_unidade: cur.litros / delta,
+        motorista_key: cur.motorista_key,
+        motorista_label: cur.motorista_label,
+        ativo_equipamento: ativo,
+      };
+      const list = trechosPorMotorista.get(cur.motorista_key) ?? [];
+      list.push(trecho);
+      trechosPorMotorista.set(cur.motorista_key, list);
+    }
+  });
+
+  const motoristas: ConsumoMotorista[] = [];
+  const keys = new Set([...trechosPorMotorista.keys(), ...abastCount.keys()]);
+  keys.forEach((key) => {
+    const trechosRaw = trechosPorMotorista.get(key) ?? [];
+    if (trechosRaw.length === 0 && (leiturasCount.get(key) ?? 0) < 2) return;
+
+    let totalLitros = 0;
+    let totalUnidade = 0;
+    let unidade = "h";
+    const trechos: ConsumoTrecho[] = trechosRaw.map((t) => {
+      totalLitros += t.litros;
+      totalUnidade += t.delta_unidade;
+      return {
+        data_hora_inicio: t.data_hora_inicio,
+        data_hora_fim: t.data_hora_fim,
+        horimetro_inicio: t.horimetro_inicio,
+        horimetro_fim: t.horimetro_fim,
+        delta_unidade: t.delta_unidade,
+        litros: t.litros,
+        litros_por_unidade: t.litros_por_unidade,
+      };
+    });
+    if (trechosRaw.length > 0) {
+      const last = trechosRaw[trechosRaw.length - 1];
+      const u = parseHorimetroNumero(last.horimetro_fim);
+      if (u) unidade = u.unidade;
+    }
+
+    const label = labels.get(key) ?? SEM_MOTORISTA_LABEL;
+    motoristas.push({
+      ativo: label,
+      nome: null,
+      empresa: null,
+      mobilidade: null,
+      unidade,
+      abastecimentos_count: abastCount.get(key) ?? 0,
+      leituras_com_horimetro: leiturasCount.get(key) ?? 0,
+      trechos_count: trechos.length,
+      total_litros_periodo: totalLitros,
+      total_unidade: totalUnidade,
+      media_litros_por_unidade: totalUnidade > 0 ? totalLitros / totalUnidade : null,
+      ultimo_horimetro: ultimoHorimetro.get(key) ?? null,
+      ultimo_abastecimento: ultimoAbast.get(key) ?? null,
+      horimetro_regressivo_count: regressivo.get(key) ?? 0,
+      trechos,
+      motorista_key: key,
+      equipamentos_distintos: ativosPorMotorista.get(key)?.size ?? 0,
+    });
+  });
+
+  return motoristas
+    .filter((m) => m.trechos_count >= 1 || m.leituras_com_horimetro >= 2)
+    .sort((a, b) => {
+      const ma = a.media_litros_por_unidade ?? -1;
+      const mb = b.media_litros_por_unidade ?? -1;
+      if (mb !== ma) return mb - ma;
+      return a.ativo.localeCompare(b.ativo, "pt-BR");
+    });
 }
 
 function isAtivoTanquePattern(ativo: string): boolean {
@@ -372,7 +569,7 @@ async function fetchMovimentacoes(
   let query = service
     .from("melosa_movimentacoes")
     .select(
-      "operation_id, data_hora, ativo_melosa_texto, ativo_equipamento_texto, ativo_equipamento_nome, ativo_equipamento_empresa, melosa_horimetro_equipamento_abastecido_numero, melosa_quantidade_abastecida, litros, obra_codigo",
+      "operation_id, data_hora, ativo_melosa_texto, ativo_equipamento_texto, ativo_equipamento_nome, ativo_equipamento_empresa, melosa_horimetro_equipamento_abastecido_numero, melosa_quantidade_abastecida, melosa_motorista_equipamento_abastecido, litros, obra_codigo",
     )
     .not("ativo_equipamento_texto", "is", null)
     .order("data_hora", { ascending: true });
@@ -516,6 +713,7 @@ export async function buildEquipamentoConsumoDashboard(
 
   const built = buildConsumoPorEquipamento(rows, mobilidadePorAtivo);
   const equipamentos = built.equipamentos.filter((e) => e.leituras_com_horimetro >= 2);
+  const motoristas = buildConsumoPorMotorista(rows).filter((m) => m.leituras_com_horimetro >= 2);
 
   let totalLitrosEquipamentos = 0;
   let abastecimentosEquipamentos = 0;
@@ -557,6 +755,7 @@ export async function buildEquipamentoConsumoDashboard(
   return {
     periodo: { de: filtros.de ?? null, ate: filtros.ate ?? null },
     equipamentos,
+    motoristas,
     total_litros_equipamentos: totalLitrosEquipamentos,
     abastecimentos_equipamentos: abastecimentosEquipamentos,
     sem_dados_horimetro: built.sem_dados_horimetro,

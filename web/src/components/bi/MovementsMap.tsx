@@ -8,6 +8,8 @@ export type MapPoint = {
   operationId?: string;
   dataHora?: string;
   usuario?: string;
+  /** Nome do usuário do app que registrou o movimento */
+  registradoPor?: string;
   equipamento?: string;
   obra?: string;
   litros?: string;
@@ -207,6 +209,7 @@ function MovementsMapInner({ points, apiKey, focusKey }: InnerProps) {
               </div>
               <div><strong>Litros:</strong> {activePoint.litros ?? "—"}</div>
               <div><strong>Município:</strong> {activePoint.municipio ?? "—"}</div>
+              <div><strong>Usuário:</strong> {activePoint.registradoPor ?? "—"}</div>
             </div>
           </InfoWindow>
         ) : null}

@@ -6,7 +6,6 @@ import type { WebWritePageKey } from "../../lib/webPermissions";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../lib/api";
 import { resolveMobilidadeEquipamento } from "../../lib/equipamentoMobilidade";
 import {
-  collectEmpresasFromRows,
   labelEquipamentoEmpresa,
   normalizeEquipamentoEmpresa,
 } from "../../lib/equipamentoEmpresa";
@@ -207,23 +206,27 @@ export default function CadastroAtivosPage({
     });
   }, [equipamentos]);
 
-  const empresasCadastradas = useMemo(() => {
-    const fromTable = empresasCadastro
+  const empresasAtivas = useMemo(() => {
+    return empresasCadastro
       .filter((e) => e.ativo)
       .map((e) => normalizeEquipamentoEmpresa(e.nome))
-      .filter((n): n is string => Boolean(n));
-    const fromEquip = collectEmpresasFromRows(equipamentos);
-    return [...new Set([...fromTable, ...fromEquip])].sort((a, b) =>
-      a.localeCompare(b, "pt-BR", { sensitivity: "base" }),
-    );
-  }, [empresasCadastro, equipamentos]);
+      .filter((n): n is string => Boolean(n))
+      .sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  }, [empresasCadastro]);
+
+  const empresasFiltroOpcoes = useMemo(() => {
+    return empresasCadastro
+      .map((e) => normalizeEquipamentoEmpresa(e.nome))
+      .filter((n): n is string => Boolean(n))
+      .sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  }, [empresasCadastro]);
 
   const empresasOpcoes = useMemo(() => {
-    const set = new Set<string>(empresasCadastradas);
+    const set = new Set<string>(empresasAtivas);
     const atual = normalizeEquipamentoEmpresa(formEmpresa);
     if (atual) set.add(atual);
     return [...set].sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
-  }, [empresasCadastradas, formEmpresa]);
+  }, [empresasAtivas, formEmpresa]);
 
   async function addEmpresaManual() {
     if (!token) return;
@@ -872,7 +875,7 @@ export default function CadastroAtivosPage({
               onChange={(e) => setFiltroEmpresa(e.target.value)}
             >
               <option value="">Todas</option>
-              {empresasCadastradas.map((empresa) => (
+              {empresasFiltroOpcoes.map((empresa) => (
                 <option key={empresa} value={empresa}>
                   {labelEquipamentoEmpresa(empresa)}
                 </option>
@@ -1295,8 +1298,8 @@ export default function CadastroAtivosPage({
                     </select>
                   )}
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Selecione a empresa proprietária ou escolha <strong>Nova empresa</strong> para cadastrar outra.
-                    Use <strong>Gerenciar empresas</strong> para manter a lista no sistema.
+                    Selecione a empresa cadastrada no sistema ou escolha <strong>Nova empresa</strong> para
+                    incluir outra na tabela. Use <strong>Gerenciar empresas</strong> para manter a lista.
                   </p>
                 </div>
               ) : null}
