@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowDown, ArrowUp } from "lucide-react";
 import { fmtLitrosDashboard } from "../../lib/combustivelControle";
 
@@ -24,6 +24,43 @@ function fmtPct(v: number): string {
   }).format(v);
 }
 
+function easeOutCubic(t: number): number {
+  return 1 - (1 - t) ** 3;
+}
+
+function useAnimatedNumber(alvo: number, durationMs = 1200): number {
+  const [valor, setValor] = useState(0);
+  const valorRef = useRef(0);
+  const rafRef = useRef(0);
+  const preferReduced =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  useEffect(() => {
+    if (preferReduced) {
+      valorRef.current = alvo;
+      setValor(alvo);
+      return;
+    }
+
+    const from = valorRef.current;
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const next = from + (alvo - from) * easeOutCubic(t);
+      valorRef.current = next;
+      setValor(next);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [alvo, durationMs, preferReduced]);
+
+  return valor;
+}
+
 /** Cartão de tanque com tamanho fixo — todos iguais na grade. */
 export default function TanqueGrandeVisual({
   titulo,
@@ -37,6 +74,7 @@ export default function TanqueGrandeVisual({
   onClick,
 }: Props) {
   const alvoPct = Math.min(100, Math.max(0, ocupacaoPct));
+  const litrosAnimados = useAnimatedNumber(saldoLitros, 1300);
 
   const [nivelPct, setNivelPct] = useState(0);
   useEffect(() => {
@@ -53,6 +91,8 @@ export default function TanqueGrandeVisual({
   const interacao = clicavel
     ? "cursor-pointer transition hover:-translate-y-0.5 hover:shadow-lg hover:ring-2 hover:ring-sky-400/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
     : "";
+
+  const showLiquidFx = nivelPct > 3;
 
   return (
     <article
@@ -104,23 +144,69 @@ export default function TanqueGrandeVisual({
             style={{ height: TANK_BODY_H }}
           >
             <div className="absolute inset-0 bg-gradient-to-b from-slate-100 to-slate-200/90 dark:from-slate-800 dark:to-slate-950" />
+
+            {/* Líquido com ondas */}
             <div
-              className="absolute inset-x-0 bottom-0 transition-[height] duration-[1.2s] ease-out"
-              style={{
-                height: `${nivelPct}%`,
-                background: `linear-gradient(180deg, ${cor} 0%, ${cor}dd 100%)`,
-              }}
-            />
-            {nivelPct > 2 ? (
+              className="absolute inset-x-0 bottom-0 overflow-hidden transition-[height] duration-[1.2s] ease-out"
+              style={{ height: `${nivelPct}%` }}
+            >
+              {/* Corpo do líquido */}
               <div
-                className="absolute inset-x-0 opacity-70"
+                className="absolute inset-x-0 bottom-0 top-2"
                 style={{
-                  bottom: `${nivelPct}%`,
-                  height: 2,
-                  background: `linear-gradient(90deg, transparent, ${cor}, transparent)`,
+                  background: `linear-gradient(180deg, ${cor}dd 0%, ${cor} 45%, ${cor}ee 100%)`,
                 }}
               />
-            ) : null}
+
+              {showLiquidFx ? (
+                <>
+                  {/* Ondas SVG na superfície — duas camadas em sentidos opostos */}
+                  <div className="tank-wave-bob pointer-events-none absolute -top-0.5 left-0 right-0 h-4 overflow-hidden" aria-hidden>
+                    <svg
+                      className="tank-wave-layer absolute top-0 h-4 w-[200%]"
+                      viewBox="0 0 144 16"
+                      preserveAspectRatio="none"
+                    >
+                      <path
+                        d="M0 8 Q9 2 18 8 T36 8 T54 8 T72 8 T90 8 T108 8 T126 8 T144 8 V16 H0 Z"
+                        fill={cor}
+                        opacity={0.95}
+                      />
+                    </svg>
+                    <svg
+                      className="tank-wave-layer-slow absolute top-0.5 h-3.5 w-[200%]"
+                      viewBox="0 0 144 14"
+                      preserveAspectRatio="none"
+                    >
+                      <path
+                        d="M0 7 Q9 1 18 7 T36 7 T54 7 T72 7 T90 7 T108 7 T126 7 T144 7 V14 H0 Z"
+                        fill="#ffffff"
+                        opacity={0.28}
+                      />
+                    </svg>
+                  </div>
+
+                  {/* Bolhas */}
+                  <span
+                    className="tank-bubble pointer-events-none absolute bottom-3 left-[22%] h-1.5 w-1.5 rounded-full bg-white/45"
+                    style={{ animationDelay: "0s" }}
+                    aria-hidden
+                  />
+                  <span
+                    className="tank-bubble pointer-events-none absolute bottom-5 left-[58%] h-1 w-1 rounded-full bg-white/40"
+                    style={{ animationDelay: "0.9s" }}
+                    aria-hidden
+                  />
+                  <span
+                    className="tank-bubble pointer-events-none absolute bottom-2 left-[72%] h-1.5 w-1.5 rounded-full bg-white/35"
+                    style={{ animationDelay: "1.6s" }}
+                    aria-hidden
+                  />
+                </>
+              ) : (
+                <div className="absolute inset-0" style={{ background: cor }} />
+              )}
+            </div>
           </div>
         </div>
 
@@ -143,7 +229,7 @@ export default function TanqueGrandeVisual({
       {/* Dados — colados ao tanque */}
       <div className="px-2.5 pb-2.5 pt-1">
         <p className="text-center text-base font-black tabular-nums leading-none text-slate-900 dark:text-white">
-          {fmtLitrosDashboard(saldoLitros)}
+          {fmtLitrosDashboard(litrosAnimados)}
           <span className="ml-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">L</span>
         </p>
 
