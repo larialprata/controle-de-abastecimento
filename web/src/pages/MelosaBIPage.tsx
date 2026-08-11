@@ -414,7 +414,10 @@ const tdPhotoCls =
   "border-b border-white/25 px-2 py-2 text-center align-middle dark:border-white/5";
 
 export default function MelosaBIPage() {
-  const { token } = useAuth();
+  const { token, canWriteBiAction } = useAuth();
+  const canAddBi = canWriteBiAction("bi_melosa", "add");
+  const canEditBi = canWriteBiAction("bi_melosa", "edit");
+  const canDeleteBi = canWriteBiAction("bi_melosa", "delete");
   const [searchParams] = useSearchParams();
   const periodoInicial = defaultPeriodoMesAtual();
   const ativoUrl = searchParams.get("ativo")?.trim() ?? "";
@@ -991,17 +994,19 @@ export default function MelosaBIPage() {
             {loading ? "A carregar…" : "Recarregar"}
           </button>
         </div>
-        <div className="flex flex-col gap-1">
-          <span className={labelCls}>Movimentação</span>
-          <button
-            type="button"
-            onClick={openAddForm}
-            disabled={loading}
-            className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
-          >
-            Adicionar movimentação
-          </button>
-        </div>
+        {canAddBi ? (
+          <div className="flex flex-col gap-1">
+            <span className={labelCls}>Movimentação</span>
+            <button
+              type="button"
+              onClick={openAddForm}
+              disabled={loading}
+              className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
+            >
+              Adicionar movimentação
+            </button>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-1">
           <span className={labelCls}>Exportação</span>
           <div className="flex flex-wrap gap-2">
@@ -1121,22 +1126,26 @@ export default function MelosaBIPage() {
           selecionada{selectedOperationIds.length === 1 ? "" : "s"}
         </span>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={openEditForm}
-            disabled={loading || selectedRows.length !== 1}
-            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Editar selecionada
-          </button>
-          <button
-            type="button"
-            onClick={() => openFotosForm()}
-            disabled={loading || selectedRows.length !== 1}
-            className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Adicionar / fotos
-          </button>
+          {canEditBi ? (
+            <button
+              type="button"
+              onClick={openEditForm}
+              disabled={loading || selectedRows.length !== 1}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Editar selecionada
+            </button>
+          ) : null}
+          {canEditBi ? (
+            <button
+              type="button"
+              onClick={() => openFotosForm()}
+              disabled={loading || selectedRows.length !== 1}
+              className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Adicionar / fotos
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void openTicket()}
@@ -1145,14 +1154,16 @@ export default function MelosaBIPage() {
           >
             Ticket{selectedRows.length > 0 ? ` (${selectedRows.length})` : ""}
           </button>
-          <button
-            type="button"
-            onClick={openDeleteConfirm}
-            disabled={loading || selectedOperationIds.length === 0}
-            className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Excluir selecionadas
-          </button>
+          {canDeleteBi ? (
+            <button
+              type="button"
+              onClick={openDeleteConfirm}
+              disabled={loading || selectedOperationIds.length === 0}
+              className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Excluir selecionadas
+            </button>
+          ) : null}
         </div>
       </div>
 

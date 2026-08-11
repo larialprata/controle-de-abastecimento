@@ -78,11 +78,11 @@ export default function LoginPage() {
   return (
     <div className="relative min-h-screen overflow-hidden">
       <div
-        className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-sky-100/95 via-violet-100/80 to-rose-100/70 dark:from-slate-950 dark:via-indigo-950 dark:to-slate-900"
+        className="pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br from-sky-100/95 via-violet-100/80 to-rose-100/70 dark:from-[#0a1113] dark:via-[#0d181a] dark:to-[#0b1416]"
         aria-hidden
       />
       <div
-        className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(ellipse_90%_60%_at_10%_-10%,rgba(159,47,56,0.2),transparent_55%),radial-gradient(ellipse_70%_50%_at_100%_0%,rgba(59,130,246,0.16),transparent_50%)] dark:bg-[radial-gradient(ellipse_80%_50%_at_20%_10%,rgba(159,47,56,0.32),transparent_55%)]"
+        className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(ellipse_90%_60%_at_10%_-10%,rgba(159,47,56,0.2),transparent_55%),radial-gradient(ellipse_70%_50%_at_100%_0%,rgba(59,130,246,0.16),transparent_50%)] dark:bg-[radial-gradient(ellipse_85%_55%_at_15%_0%,rgba(61,184,168,0.14),transparent_55%),radial-gradient(ellipse_60%_45%_at_90%_80%,rgba(45,120,130,0.16),transparent_50%)]"
         aria-hidden
       />
       <div className="absolute right-4 top-4 md:right-8 md:top-8">

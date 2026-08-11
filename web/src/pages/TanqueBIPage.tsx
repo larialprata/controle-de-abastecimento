@@ -464,7 +464,10 @@ function TanqueBiScrollTable({
 }
 
 export default function TanqueBIPage() {
-  const { token } = useAuth();
+  const { token, canWriteBiAction } = useAuth();
+  const canAddBi = canWriteBiAction("bi_tanque", "add");
+  const canEditBi = canWriteBiAction("bi_tanque", "edit");
+  const canDeleteBi = canWriteBiAction("bi_tanque", "delete");
   const periodoInicial = defaultPeriodoMesAtual();
   const [raw, setRaw] = useState<LinhaTanque[]>([]);
   const [obras, setObras] = useState<ObraRow[]>([]);
@@ -1003,22 +1006,26 @@ export default function TanqueBIPage() {
       ) : null}
 
       <div className={`mb-4 flex flex-wrap items-center justify-end gap-2 ${glassPanel} px-4 py-3`}>
-        <button
-          type="button"
-          onClick={() => setEntradaCombustivelOpen(true)}
-          disabled={loading}
-          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Adicionar combustível
-        </button>
-        <button
-          type="button"
-          onClick={() => setRetiradaEquipOpen(true)}
-          disabled={loading}
-          className="mr-auto rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Retirar para equipamento
-        </button>
+        {canAddBi ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setEntradaCombustivelOpen(true)}
+              disabled={loading}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Adicionar combustível
+            </button>
+            <button
+              type="button"
+              onClick={() => setRetiradaEquipOpen(true)}
+              disabled={loading}
+              className="mr-auto rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Retirar para equipamento
+            </button>
+          </>
+        ) : null}
         <button
           type="button"
           onClick={() => void openTicket()}
@@ -1027,30 +1034,36 @@ export default function TanqueBIPage() {
         >
           Ticket{selectedTicketRows.length > 0 ? ` (${selectedTicketRows.length})` : ""}
         </button>
-        <button
-          type="button"
-          onClick={handleEditSelected}
-          disabled={loading || selectedOperationIds.length !== 1}
-          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Editar selecionada
-        </button>
-        <button
-          type="button"
-          onClick={() => openFotosForm()}
-          disabled={loading || selectedRows.length !== 1}
-          className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Adicionar / fotos
-        </button>
-        <button
-          type="button"
-          onClick={openDeleteConfirm}
-          disabled={loading || selectedOperationIds.length === 0}
-          className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Excluir selecionadas
-        </button>
+        {canEditBi ? (
+          <>
+            <button
+              type="button"
+              onClick={handleEditSelected}
+              disabled={loading || selectedOperationIds.length !== 1}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Editar selecionada
+            </button>
+            <button
+              type="button"
+              onClick={() => openFotosForm()}
+              disabled={loading || selectedRows.length !== 1}
+              className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Adicionar / fotos
+            </button>
+          </>
+        ) : null}
+        {canDeleteBi ? (
+          <button
+            type="button"
+            onClick={openDeleteConfirm}
+            disabled={loading || selectedOperationIds.length === 0}
+            className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Excluir selecionadas
+          </button>
+        ) : null}
         <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
           {selectedOperationIds.length} selecionada{selectedOperationIds.length === 1 ? "" : "s"}
         </span>

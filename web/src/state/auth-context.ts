@@ -1,6 +1,6 @@
 import { createContext } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import type { WebPageKey, WebWritePageKey } from "../lib/webPermissions";
+import type { WebBiAction, WebBiPageKey, WebPageKey, WebWritePageKey } from "../lib/webPermissions";
 
 export type AuthContextValue = {
   loading: boolean;
@@ -16,6 +16,7 @@ export type AuthContextValue = {
   canAccessObra: (obraCodigo: number) => boolean;
   canAccessPage: (pageKey: WebPageKey) => boolean;
   canWriteOnPage: (pageKey: WebWritePageKey) => boolean;
+  canWriteBiAction: (page: WebBiPageKey, action: WebBiAction) => boolean;
   authError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithOutlook: () => Promise<void>;

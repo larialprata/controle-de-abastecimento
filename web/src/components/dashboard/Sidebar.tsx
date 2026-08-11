@@ -14,12 +14,14 @@ import {
   Settings2,
   Sun,
   Users,
+  ClipboardList,
   Warehouse,
   X,
 } from "lucide-react";
 import { useAuth } from "../../state/AuthContext";
 import { useTheme } from "../../state/ThemeContext";
 import { glassSidebar } from "../../lib/glass";
+import { navItemToPageKey } from "../../lib/webPermissions";
 
 export const APP_VERSION = "1.0.0";
 
@@ -70,7 +72,10 @@ const NAV_SECTIONS: NavSection[] = [
     id: "administracao",
     title: "Administração",
     icon: Settings2,
-    items: [{ to: "/usuarios", label: "Usuários", icon: Users, adminOnly: true }],
+    items: [
+      { to: "/usuarios", label: "Usuários", icon: Users, adminOnly: true },
+      { to: "/auditoria", label: "Auditoria", icon: ClipboardList, adminOnly: true },
+    ],
   },
 ];
 
@@ -213,7 +218,7 @@ function NavSectionDropdown({
 }
 
 export default function Sidebar({ open = false, onClose }: SidebarProps) {
-  const { signOut, isAdmin, user } = useAuth();
+  const { signOut, isAdmin, user, canAccessPage } = useAuth();
   const { theme, setTheme } = useTheme();
   const location = useLocation();
 
@@ -221,9 +226,12 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
     () =>
       NAV_SECTIONS.map((section) => ({
         ...section,
-        items: section.items.filter((item) => !item.adminOnly || isAdmin),
+        items: section.items.filter((item) => {
+          if (item.adminOnly && !isAdmin) return false;
+          return canAccessPage(navItemToPageKey(item.to));
+        }),
       })).filter((section) => section.items.length > 0),
-    [isAdmin],
+    [isAdmin, canAccessPage],
   );
 
   const activeSectionId = findSectionForPath(location.pathname, sections);
@@ -256,11 +264,11 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
     >
       <div className="relative shrink-0 border-b border-slate-200/80 bg-gradient-to-b from-white to-slate-50/80 px-4 pb-4 pt-5 dark:border-white/10 dark:bg-none">
         <div
-          className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent via-rose-500/80 to-violet-500/70"
+          className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-accent via-rose-500/80 to-violet-500/70 dark:via-teal-400/70 dark:to-cyan-600/50"
           aria-hidden
         />
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-rose-700 text-white shadow-md shadow-accent/25">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-rose-700 text-white shadow-md shadow-accent/25 dark:to-teal-800 dark:shadow-accent/20">
             <Fuel className="h-5 w-5" aria-hidden />
           </div>
           <div className="min-w-0 flex-1">
@@ -297,7 +305,7 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
 
       <div className="shrink-0 space-y-3 border-t border-slate-200/80 bg-white px-3 py-4 dark:border-white/10 dark:bg-transparent">
         <div className="flex items-center gap-2.5 rounded-xl border border-slate-200/80 bg-white px-3 py-2.5 shadow-sm dark:border-transparent dark:bg-white/[0.05] dark:shadow-none">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent/20 to-rose-100 text-sm font-bold text-accent dark:bg-none dark:bg-accent/25 dark:text-red-300">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent/20 to-rose-100 text-sm font-bold text-accent dark:bg-none dark:bg-accent/20 dark:text-teal-200">
             {userInitial(email)}
           </div>
           <div className="min-w-0 flex-1">

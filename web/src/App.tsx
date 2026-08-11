@@ -10,6 +10,7 @@ import MelosaBIPage from "./pages/MelosaBIPage";
 import ConsumoMedioPage from "./pages/ConsumoMedioPage";
 import TanqueBIPage from "./pages/TanqueBIPage";
 import UsersPage from "./pages/UsersPage";
+import AuditoriaPage from "./pages/AuditoriaPage";
 import ContratosPage from "./pages/ContratosPage";
 import MelosasPage from "./pages/MelosasPage";
 import EquipamentosPage from "./pages/EquipamentosPage";
@@ -20,7 +21,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#eef1f6] text-slate-600 dark:bg-[#0f1117] dark:text-slate-400">
+      <div className="flex min-h-screen items-center justify-center bg-[#eef1f6] text-slate-600 dark:bg-[#0a1113] dark:text-slate-400">
         A carregar…
       </div>
     );
@@ -33,7 +34,7 @@ function RequirePage({ page, children }: { page: WebPageKey; children: React.Rea
   const { canAccessPage, session, loading } = useAuth();
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#eef1f6] text-slate-600 dark:bg-[#0f1117] dark:text-slate-400">
+      <div className="flex min-h-screen items-center justify-center bg-[#eef1f6] text-slate-600 dark:bg-[#0a1113] dark:text-slate-400">
         A carregar…
       </div>
     );
@@ -59,7 +60,7 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   const { isAdmin, session, loading } = useAuth();
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#eef1f6] text-slate-600 dark:bg-[#0f1117] dark:text-slate-400">
+      <div className="flex min-h-screen items-center justify-center bg-[#eef1f6] text-slate-600 dark:bg-[#0a1113] dark:text-slate-400">
         A carregar…
       </div>
     );
@@ -164,6 +165,14 @@ function AppRoutes() {
           element={
             <RequireAdmin>
               <UsersPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="auditoria"
+          element={
+            <RequireAdmin>
+              <AuditoriaPage />
             </RequireAdmin>
           }
         />

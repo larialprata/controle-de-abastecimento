@@ -15,11 +15,11 @@ export default function DashboardLayout() {
   return (
     <div className="relative flex h-screen overflow-hidden font-sans text-slate-900 dark:text-slate-100">
       <div
-        className="pointer-events-none fixed inset-0 -z-20 bg-gradient-to-br from-sky-100/95 via-violet-100/80 to-rose-100/70 dark:from-slate-950 dark:via-indigo-950 dark:to-slate-900"
+        className="pointer-events-none fixed inset-0 -z-20 bg-gradient-to-br from-sky-100/95 via-violet-100/80 to-rose-100/70 dark:from-[#0a1113] dark:via-[#0d181a] dark:to-[#0b1416]"
         aria-hidden
       />
       <div
-        className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(ellipse_90%_60%_at_10%_-10%,rgba(159,47,56,0.22),transparent_55%),radial-gradient(ellipse_70%_50%_at_100%_0%,rgba(59,130,246,0.18),transparent_50%),radial-gradient(ellipse_60%_40%_at_50%_100%,rgba(139,92,246,0.14),transparent_45%)] dark:bg-[radial-gradient(ellipse_80%_50%_at_20%_10%,rgba(159,47,56,0.35),transparent_55%),radial-gradient(ellipse_60%_45%_at_90%_80%,rgba(30,64,175,0.4),transparent_50%)]"
+        className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(ellipse_90%_60%_at_10%_-10%,rgba(159,47,56,0.22),transparent_55%),radial-gradient(ellipse_70%_50%_at_100%_0%,rgba(59,130,246,0.18),transparent_50%),radial-gradient(ellipse_60%_40%_at_50%_100%,rgba(139,92,246,0.14),transparent_45%)] dark:bg-[radial-gradient(ellipse_85%_55%_at_15%_0%,rgba(61,184,168,0.16),transparent_55%),radial-gradient(ellipse_65%_50%_at_90%_85%,rgba(45,120,130,0.18),transparent_50%),radial-gradient(ellipse_50%_40%_at_40%_100%,rgba(20,40,48,0.55),transparent_45%)]"
         aria-hidden
       />
 

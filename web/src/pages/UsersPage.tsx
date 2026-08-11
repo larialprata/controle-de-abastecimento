@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { Loader2, Mail, Monitor, Plus, Shield, Smartphone, X } from "lucide-react";
+import { Loader2, Mail, Monitor, Plus, Shield, Smartphone, Trash2, X } from "lucide-react";
 import { useAuth } from "../state/AuthContext";
-import { apiGet, apiPost } from "../lib/api";
+import { apiDelete, apiGet, apiPost } from "../lib/api";
 import { glassField, glassPanel } from "../lib/glass";
 import {
   DEFAULT_WEB_PERMISSIONS,
   normalizeWebPermissions,
   normalizeWebWritePermissions,
+  WEB_BI_PAGES,
+  WEB_BI_WRITE_ACTIONS,
   WEB_PAGES,
   WEB_WRITE_PAGES,
+  biActionsForPage,
+  biWriteActionKey,
+  type WebBiPageKey,
   type WebPageKey,
   type WebWritePageKey,
 } from "../lib/webPermissions";
@@ -54,11 +59,14 @@ function profileBadgeClass(u: AdminUserRow): string {
 }
 
 export default function UsersPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingCnhUserId, setLoadingCnhUserId] = useState<string | null>(null);
+  const [deleteUser, setDeleteUser] = useState<AdminUserRow | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addEmail, setAddEmail] = useState("");
   const [addPassword, setAddPassword] = useState("");
@@ -188,6 +196,34 @@ export default function UsersPage() {
     await load();
   }
 
+  function openDeleteModal(u: AdminUserRow) {
+    setDeleteUser(u);
+    setDeleteError(null);
+  }
+
+  function closeDeleteModal() {
+    if (deleteSaving) return;
+    setDeleteUser(null);
+    setDeleteError(null);
+  }
+
+  async function confirmDeleteUser() {
+    if (!token || !deleteUser) return;
+    setDeleteSaving(true);
+    setDeleteError(null);
+    setError(null);
+    try {
+      await apiDelete(`/v1/admin/users/${deleteUser.id}`, token);
+      setDeleteUser(null);
+      setOkMsg(`Utilizador ${deleteUser.email ?? deleteUser.id} excluído.`);
+      await load();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Erro ao excluir utilizador");
+    } finally {
+      setDeleteSaving(false);
+    }
+  }
+
   function openPermModal(user: AdminUserRow) {
     setPermUser(user);
     const read = normalizeWebPermissions(user.web_permissions);
@@ -216,18 +252,29 @@ export default function UsersPage() {
   function togglePermDraft(key: WebPageKey, checked: boolean) {
     togglePermissionList(setPermDraft, key, checked);
     if (!checked) {
-      setPermWriteDraft((prev) => prev.filter((k) => k !== key));
+      setPermWriteDraft((prev) => {
+        const biKeys = new Set(
+          WEB_BI_WRITE_ACTIONS.filter((a) => a.page === key).map((a) => a.key),
+        );
+        return prev.filter((k) => k !== key && !biKeys.has(k as (typeof WEB_BI_WRITE_ACTIONS)[number]["key"]));
+      });
     }
   }
 
   function togglePermWriteDraft(key: WebWritePageKey, checked: boolean) {
-    if (!permDraft.includes(key)) return;
+    const cadastro = WEB_WRITE_PAGES.some((p) => p.key === key);
+    if (cadastro && !permDraft.includes(key as WebPageKey)) return;
     setPermWriteDraft((prev) => {
       const set = new Set(prev);
       if (checked) set.add(key);
       else set.delete(key);
-      return WEB_WRITE_PAGES.map((p) => p.key).filter((k) => set.has(k));
+      return normalizeWebWritePermissions(permDraft, Array.from(set));
     });
+  }
+
+  function toggleBiWriteDraft(page: WebBiPageKey, action: "add" | "edit" | "delete", checked: boolean) {
+    if (!permDraft.includes(page)) return;
+    togglePermWriteDraft(biWriteActionKey(page, action), checked);
   }
 
   async function saveWebPermissions() {
@@ -584,121 +631,133 @@ export default function UsersPage() {
                         )}
                       </td>
                       <td className="border-b border-slate-100 px-4 py-3 align-middle dark:border-white/5">
-                        {u.role === "admin" ? (
-                          <div className="flex min-h-[32px] flex-wrap items-center gap-x-3 gap-y-1">
+                        <div className="flex min-h-[32px] flex-wrap items-center gap-x-3 gap-y-1">
+                          {u.role === "admin" ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setRole(u.id, "user")}
+                                className="text-sm font-semibold text-accent hover:underline"
+                              >
+                                Remover ADM
+                              </button>
+                              {u.active ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setActive(u.id, false)}
+                                  className="text-sm font-semibold text-amber-700 hover:underline dark:text-amber-300"
+                                >
+                                  Desativar
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setActive(u.id, true)}
+                                  className="text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+                                >
+                                  Ativar
+                                </button>
+                              )}
+                              {u.is_melosa ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setMelosa(u.id, false)}
+                                  className="text-sm font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
+                                >
+                                  Tirar Melosa
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setMelosa(u.id, true)}
+                                  className="text-sm font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
+                                >
+                                  Definir Melosa
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setRole(u.id, "admin")}
+                                className="text-sm font-semibold text-accent hover:underline"
+                              >
+                                Dar ADM
+                              </button>
+                              {u.access_platform !== "app" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setAccessPlatform(u.id, "app")}
+                                  className="text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+                                >
+                                  Definir App
+                                </button>
+                              ) : null}
+                              {u.access_platform !== "web" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setAccessPlatform(u.id, "web")}
+                                  className="text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                                >
+                                  Definir Web
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => openPermModal(u)}
+                                  className="text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                                >
+                                  Páginas
+                                </button>
+                              )}
+                              {u.active ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setActive(u.id, false)}
+                                  className="text-sm font-semibold text-amber-700 hover:underline dark:text-amber-300"
+                                >
+                                  Desativar
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setActive(u.id, true)}
+                                  className="text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+                                >
+                                  Ativar
+                                </button>
+                              )}
+                              {u.is_melosa ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setMelosa(u.id, false)}
+                                  className="text-sm font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
+                                >
+                                  Tirar Melosa
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setMelosa(u.id, true)}
+                                  className="text-sm font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
+                                >
+                                  Definir Melosa
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {user?.id !== u.id ? (
                             <button
                               type="button"
-                              onClick={() => setRole(u.id, "user")}
-                              className="text-sm font-semibold text-accent hover:underline"
+                              onClick={() => openDeleteModal(u)}
+                              className="inline-flex items-center gap-1 text-sm font-semibold text-red-700 hover:underline dark:text-red-300"
                             >
-                              Remover ADM
+                              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                              Excluir
                             </button>
-                            {u.active ? (
-                              <button
-                                type="button"
-                                onClick={() => setActive(u.id, false)}
-                                className="text-sm font-semibold text-amber-700 hover:underline dark:text-amber-300"
-                              >
-                                Desativar
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setActive(u.id, true)}
-                                className="text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
-                              >
-                                Ativar
-                              </button>
-                            )}
-                            {u.is_melosa ? (
-                              <button
-                                type="button"
-                                onClick={() => setMelosa(u.id, false)}
-                                className="text-sm font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
-                              >
-                                Tirar Melosa
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setMelosa(u.id, true)}
-                                className="text-sm font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
-                              >
-                                Definir Melosa
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex min-h-[32px] flex-wrap items-center gap-x-3 gap-y-1">
-                            <button
-                              type="button"
-                              onClick={() => setRole(u.id, "admin")}
-                              className="text-sm font-semibold text-accent hover:underline"
-                            >
-                              Dar ADM
-                            </button>
-                            {u.access_platform !== "app" ? (
-                              <button
-                                type="button"
-                                onClick={() => setAccessPlatform(u.id, "app")}
-                                className="text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
-                              >
-                                Definir App
-                              </button>
-                            ) : null}
-                            {u.access_platform !== "web" ? (
-                              <button
-                                type="button"
-                                onClick={() => setAccessPlatform(u.id, "web")}
-                                className="text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300"
-                              >
-                                Definir Web
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => openPermModal(u)}
-                                className="text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300"
-                              >
-                                Páginas
-                              </button>
-                            )}
-                            {u.active ? (
-                              <button
-                                type="button"
-                                onClick={() => setActive(u.id, false)}
-                                className="text-sm font-semibold text-amber-700 hover:underline dark:text-amber-300"
-                              >
-                                Desativar
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setActive(u.id, true)}
-                                className="text-sm font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
-                              >
-                                Ativar
-                              </button>
-                            )}
-                            {u.is_melosa ? (
-                              <button
-                                type="button"
-                                onClick={() => setMelosa(u.id, false)}
-                                className="text-sm font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
-                              >
-                                Tirar Melosa
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setMelosa(u.id, true)}
-                                className="text-sm font-semibold text-indigo-700 hover:underline dark:text-indigo-300"
-                              >
-                                Definir Melosa
-                              </button>
-                            )}
-                          </div>
-                        )}
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -712,6 +771,68 @@ export default function UsersPage() {
                 ) : null}
               </tbody>
             </table>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteUser ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-user-title"
+        >
+          <div className={`w-full max-w-md p-6 ${glassPanel}`}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 id="delete-user-title" className="text-lg font-bold text-slate-900 dark:text-white">
+                  Excluir utilizador
+                </h2>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                  Esta ação remove a conta de forma permanente. O histórico de movimentações mantém-se.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deleteSaving}
+                className="rounded-lg p-1 text-slate-500 hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" aria-hidden />
+              </button>
+            </div>
+
+            <p className="mb-4 text-sm text-slate-800 dark:text-slate-200">
+              Confirma a exclusão de{" "}
+              <span className="font-semibold">{deleteUser.email ?? deleteUser.id}</span>?
+            </p>
+
+            {deleteError ? (
+              <div className="mb-4 rounded-lg border border-red-300/80 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+                {deleteError}
+              </div>
+            ) : null}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deleteSaving}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-black/5 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-white/10"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteUser}
+                disabled={deleteSaving}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleteSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
+                Excluir
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -884,7 +1005,7 @@ export default function UsersPage() {
           aria-modal="true"
           aria-labelledby="perm-user-title"
         >
-          <div className={`w-full max-w-md p-6 ${glassPanel}`}>
+          <div className={`w-full max-w-lg p-6 ${glassPanel}`}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h2 id="perm-user-title" className="text-lg font-bold text-slate-900 dark:text-white">
@@ -935,7 +1056,7 @@ export default function UsersPage() {
 
               <div>
                 <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Pode adicionar / editar / excluir
+                  Pode adicionar / editar / excluir (cadastros)
                 </p>
                 <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
                   Só aparece o botão de adicionar na página se a opção abaixo estiver marcada (e a página estiver
@@ -953,6 +1074,40 @@ export default function UsersPage() {
                       />
                       <span className="text-sm text-slate-700 dark:text-slate-300">{page.label}</span>
                     </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  BI — adicionar / editar / excluir
+                </p>
+                <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+                  Libere a página do BI acima e marque cada ação permitida. Todas as alterações ficam no histórico
+                  de auditoria.
+                </p>
+                <div className="space-y-3">
+                  {WEB_BI_PAGES.map((bi) => (
+                    <div
+                      key={bi.key}
+                      className="rounded-xl border border-slate-200/80 px-3 py-2 dark:border-white/10"
+                    >
+                      <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200">{bi.label}</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-2">
+                        {biActionsForPage(bi.key).map((action) => (
+                          <label key={action.key} className="flex cursor-pointer items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={permWriteDraft.includes(action.key)}
+                              disabled={permSaving || !permDraft.includes(bi.key)}
+                              onChange={(e) => toggleBiWriteDraft(bi.key, action.action, e.target.checked)}
+                              className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span className="text-sm text-slate-700 dark:text-slate-300">{action.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>

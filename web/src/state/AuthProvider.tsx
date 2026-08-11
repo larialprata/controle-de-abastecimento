@@ -3,10 +3,14 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { apiPost } from "../lib/api";
 import {
+  canAccessWebPage,
+  canWriteBiAction as canWriteBiActionPerm,
   canWriteWebPage,
   DEFAULT_WEB_PERMISSIONS,
   normalizeWebPermissions,
   normalizeWebWritePermissions,
+  type WebBiAction,
+  type WebBiPageKey,
   type WebPageKey,
   type WebWritePageKey,
 } from "../lib/webPermissions";
@@ -98,11 +102,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [hasObraRestriction, obraCodigos],
   );
 
-  const canAccessPage = useCallback((_pageKey: WebPageKey) => true, []);
+  const canAccessPage = useCallback(
+    (pageKey: WebPageKey) => canAccessWebPage(isAdmin, accessPlatform, webPermissions, pageKey),
+    [isAdmin, accessPlatform, webPermissions],
+  );
 
   const canWriteOnPage = useCallback(
     (pageKey: WebWritePageKey) =>
       canWriteWebPage(isAdmin, accessPlatform, webPermissions, webWritePermissions, pageKey),
+    [isAdmin, accessPlatform, webPermissions, webWritePermissions],
+  );
+
+  const canWriteBiAction = useCallback(
+    (page: WebBiPageKey, action: WebBiAction) =>
+      canWriteBiActionPerm(isAdmin, accessPlatform, webPermissions, webWritePermissions, page, action),
     [isAdmin, accessPlatform, webPermissions, webWritePermissions],
   );
 
@@ -226,6 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canAccessObra,
       canAccessPage,
       canWriteOnPage,
+      canWriteBiAction,
       authError,
       signIn,
       signInWithOutlook,
@@ -247,6 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canAccessObra,
       canAccessPage,
       canWriteOnPage,
+      canWriteBiAction,
       authError,
       clearAuthError,
     ],

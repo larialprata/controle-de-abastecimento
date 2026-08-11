@@ -8,6 +8,13 @@
   --color-accent-hover: #7f252e;
 }
 
+/* Dark: carvão suave + teal (só modo escuro; claro mantém o vermelho da marca) */
+.dark {
+  --color-accent: #3db8a8;
+  --color-accent-hover: #2f9e90;
+  color-scheme: dark;
+}
+
 html {
   font-family: var(--font-sans);
   overflow-x: hidden;
@@ -61,8 +68,8 @@ select.glass-select {
 }
 
 .dark select.glass-select {
-  background-color: #1e293b;
-  color: #f1f5f9;
+  background-color: #152022;
+  color: #e8f1f0;
 }
 
 select option {
@@ -71,8 +78,8 @@ select option {
 }
 
 .dark select option {
-  background-color: #1e293b;
-  color: #f8fafc;
+  background-color: #152022;
+  color: #f1f7f6;
 }
 
 select option:checked,
@@ -83,8 +90,8 @@ select option:hover {
 
 .dark select option:checked,
 .dark select option:hover {
-  background-color: #475569;
-  color: #f8fafc;
+  background-color: #2a4542;
+  color: #f1f7f6;
 }
 
 /* Tanque — ondas de água (SVG deslocando horizontalmente) */
