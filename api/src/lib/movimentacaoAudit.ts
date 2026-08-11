@@ -54,6 +54,7 @@ export type AuditListFiltros = {
   de?: string | null;
   ate?: string | null;
   entity?: AuditEntity | null;
+  action?: AuditAction | null;
   operationId?: string | null;
   actorUserId?: string | null;
   obraCodigo?: number | null;
@@ -68,6 +69,7 @@ export type AuditRow = {
   obra_codigo: number | null;
   actor_user_id: string | null;
   actor_full_name: string | null;
+  actor_email: string | null;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   created_at: string;
@@ -106,6 +108,7 @@ export async function listMovimentacaoAudit(
   if (filtros.de) query = query.gte("created_at", `${filtros.de}T00:00:00`);
   if (filtros.ate) query = query.lte("created_at", `${filtros.ate}T23:59:59`);
   if (filtros.entity) query = query.eq("entity", filtros.entity);
+  if (filtros.action) query = query.eq("action", filtros.action);
   if (filtros.operationId) query = query.eq("operation_id", filtros.operationId);
   if (filtros.actorUserId) query = query.eq("actor_user_id", filtros.actorUserId);
   if (filtros.obraCodigo != null) {
@@ -117,19 +120,21 @@ export async function listMovimentacaoAudit(
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []) as Omit<AuditRow, "actor_full_name" | "changed_keys">[];
+  const rows = (data ?? []) as Omit<AuditRow, "actor_full_name" | "actor_email" | "changed_keys">[];
   const userIds = Array.from(
     new Set(rows.map((r) => r.actor_user_id).filter((id): id is string => typeof id === "string")),
   );
 
   const nameById = new Map<string, string>();
+  const emailById = new Map<string, string>();
   if (userIds.length > 0) {
     const { data: profiles } = await service
       .from("profiles")
-      .select("user_id, full_name")
+      .select("user_id, full_name, email")
       .in("user_id", userIds);
     (profiles ?? []).forEach((p) => {
       if (p.user_id && p.full_name) nameById.set(String(p.user_id), String(p.full_name));
+      if (p.user_id && p.email) emailById.set(String(p.user_id), String(p.email));
     });
   }
 
@@ -138,6 +143,7 @@ export async function listMovimentacaoAudit(
     before: (r.before as Record<string, unknown> | null) ?? null,
     after: (r.after as Record<string, unknown> | null) ?? null,
     actor_full_name: r.actor_user_id ? nameById.get(r.actor_user_id) ?? null : null,
+    actor_email: r.actor_user_id ? emailById.get(r.actor_user_id) ?? null : null,
     changed_keys: diffKeys(
       (r.before as Record<string, unknown> | null) ?? null,
       (r.after as Record<string, unknown> | null) ?? null,

@@ -186,12 +186,16 @@ create table if not exists public.profiles (
   access_platform text not null default 'app' check (access_platform in ('app', 'web', 'both')),
   web_permissions text[] not null default array['dashboard']::text[]
     check (
-      web_permissions <@ array['dashboard', 'contratos', 'melosas', 'equipamentos', 'tanques', 'bi_tanque', 'bi_melosa', 'consumo_medio']::text[]
+      web_permissions <@ array['dashboard', 'contratos', 'melosas', 'equipamentos', 'tanques', 'bi_tanque', 'bi_melosa', 'consumo_medio', 'requisicoes']::text[]
       and 'dashboard' = any (web_permissions)
     ),
   web_write_permissions text[] not null default array[]::text[]
     check (
-      web_write_permissions <@ array['contratos', 'melosas', 'equipamentos', 'tanques']::text[]
+      web_write_permissions <@ array[
+        'contratos', 'melosas', 'equipamentos', 'tanques',
+        'bi_tanque_add', 'bi_tanque_edit', 'bi_tanque_delete',
+        'bi_melosa_add', 'bi_melosa_edit', 'bi_melosa_delete'
+      ]::text[]
     ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -491,3 +495,21 @@ using (
   and (storage.foldername(name))[1] = auth.uid()::text
 );
 
+
+-- Auditoria de movimentações (BI tanque / melosa)
+create table if not exists public.movimentacao_audit (
+  id uuid primary key default gen_random_uuid(),
+  entity text not null check (entity in ('melosa', 'tanque')),
+  action text not null check (action in ('insert', 'update', 'delete')),
+  operation_id uuid not null,
+  obra_codigo int null,
+  actor_user_id uuid null,
+  before jsonb null,
+  after jsonb null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists movimentacao_audit_created_at_idx on public.movimentacao_audit (created_at desc);
+alter table public.movimentacao_audit enable row level security;
+drop policy if exists movimentacao_audit_admin_select on public.movimentacao_audit;
+create policy movimentacao_audit_admin_select on public.movimentacao_audit for select using (public.is_admin());

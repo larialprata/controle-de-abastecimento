@@ -7,7 +7,7 @@ Backend REST (Express) com Supabase Auth, Postgres e Storage.
 ```bash
 npm install
 cp .env.example .env   # preencher chaves do Supabase
-npm run dev            # http://localhost:3001
+npm run dev            # http://localhost:3002
 npm run seed:admin     # primeiro usuário admin
 ```
 

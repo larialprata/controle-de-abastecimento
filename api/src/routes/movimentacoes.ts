@@ -9,6 +9,8 @@ import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
 import { logMovimentacaoAudit } from "../lib/movimentacaoAudit";
+import { denyWebBiWriteIfNeeded, loadWebWriteProfile } from "../lib/webWriteAccess";
+import { canWriteBiAction } from "../lib/webPermissions";
 
 const router = Router();
 
@@ -502,6 +504,22 @@ function sanitizeMelosaRowForDb(row: Record<string, unknown>): Record<string, un
   return out;
 }
 
+const BI_WRITE_DENIED =
+  "Sem permissão para alterar movimentações neste BI. Peça ao administrador.";
+
+/**
+ * Utilizador web precisa de permissão granular no BI.
+ * Motoristas do app mantêm o fluxo próprio (dono/obra).
+ */
+async function denyIfNoBiWrite(
+  service: ReturnType<typeof createSupabaseServiceRole>,
+  userId: string,
+  page: "bi_tanque" | "bi_melosa",
+  action: "add" | "edit" | "delete",
+): Promise<{ status: number; error: string } | null> {
+  return denyWebBiWriteIfNeeded(service, userId, page, action);
+}
+
 async function isAdmin(service: ReturnType<typeof createSupabaseServiceRole>, userId: string) {
   const { data, error } = await service.from("profiles").select("role").eq("user_id", userId).maybeSingle();
   if (error) throw error;
@@ -749,6 +767,9 @@ router.post("/melosa/movimentacoes", requireAuth, async (req: AuthedRequest, res
     const service = createSupabaseServiceRole();
     const payload = parsedBody.data;
 
+    const blocked = await denyIfNoBiWrite(service, req.userId, "bi_melosa", "add");
+    if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+
     try {
       await assertUserObraAccess(service, req.userId, payload.obra_codigo);
     } catch (e) {
@@ -819,9 +840,29 @@ async function assertCanEditMelosaMov(
   service: ReturnType<typeof createSupabaseServiceRole>,
   userId: string,
   current: { usuario_id: string; obra_codigo?: number | null },
+  action: "edit" | "delete" = "edit",
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const admin = await isAdmin(service, userId);
-  if (admin || current.usuario_id === userId) return { ok: true };
+  if (admin) return { ok: true };
+
+  const profile = await loadWebWriteProfile(service, userId);
+  if (profile?.access_platform === "web") {
+    if (!canWriteBiAction(profile, "bi_melosa", action)) {
+      return { ok: false, status: 403, error: BI_WRITE_DENIED };
+    }
+    if (current.obra_codigo != null) {
+      try {
+        await assertUserObraAccess(service, userId, Number(current.obra_codigo));
+        return { ok: true };
+      } catch (e) {
+        if (e instanceof ObraAccessError) return { ok: false, status: e.status, error: e.message };
+        throw e;
+      }
+    }
+    return { ok: true };
+  }
+
+  if (current.usuario_id === userId) return { ok: true };
   if (current.obra_codigo != null) {
     try {
       await assertUserObraAccess(service, userId, Number(current.obra_codigo));
@@ -832,6 +873,36 @@ async function assertCanEditMelosaMov(
     }
   }
   return { ok: false, status: 403, error: "Sem permissão para editar esta movimentação" };
+}
+
+async function assertCanMutateTanqueMov(
+  service: ReturnType<typeof createSupabaseServiceRole>,
+  userId: string,
+  current: { usuario_id: string; obra_codigo?: number | null },
+  action: "edit" | "delete",
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const admin = await isAdmin(service, userId);
+  if (admin) return { ok: true };
+
+  const profile = await loadWebWriteProfile(service, userId);
+  if (profile?.access_platform === "web") {
+    if (!canWriteBiAction(profile, "bi_tanque", action)) {
+      return { ok: false, status: 403, error: BI_WRITE_DENIED };
+    }
+    if (current.obra_codigo != null) {
+      try {
+        await assertUserObraAccess(service, userId, Number(current.obra_codigo));
+        return { ok: true };
+      } catch (e) {
+        if (e instanceof ObraAccessError) return { ok: false, status: e.status, error: e.message };
+        throw e;
+      }
+    }
+    return { ok: true };
+  }
+
+  if (current.usuario_id === userId) return { ok: true };
+  return { ok: false, status: 403, error: `Sem permissão para ${action === "delete" ? "excluir" : "editar"} esta movimentação` };
 }
 
 router.patch("/melosa/movimentacoes/:operationId", requireAuth, async (req: AuthedRequest, res) => {
@@ -983,10 +1054,8 @@ router.delete("/melosa/movimentacoes/:operationId", requireAuth, async (req: Aut
     if (currentError) return res.status(400).json({ error: currentError.message });
     if (!current) return res.status(404).json({ error: "Movimentação não encontrada" });
 
-    const admin = await isAdmin(service, req.userId);
-    if (!admin && current.usuario_id !== req.userId) {
-      return res.status(403).json({ error: "Sem permissão para excluir esta movimentação" });
-    }
+    const canDelete = await assertCanEditMelosaMov(service, req.userId, current, "delete");
+    if (!canDelete.ok) return res.status(canDelete.status).json({ error: canDelete.error });
 
     const { error: deleteError } = await service.from("melosa_movimentacoes").delete().eq("operation_id", operationId);
     if (deleteError) return res.status(400).json({ error: deleteError.message });
@@ -1027,10 +1096,8 @@ router.patch("/tanque/movimentacoes/:operationId", requireAuth, async (req: Auth
     if (currentError) return res.status(400).json({ error: currentError.message });
     if (!current) return res.status(404).json({ error: "Movimentação não encontrada" });
 
-    const admin = await isAdmin(service, req.userId);
-    if (!admin && current.usuario_id !== req.userId) {
-      return res.status(403).json({ error: "Sem permissão para editar esta movimentação" });
-    }
+    const canEdit = await assertCanMutateTanqueMov(service, req.userId, current, "edit");
+    if (!canEdit.ok) return res.status(canEdit.status).json({ error: canEdit.error });
 
     if (current.tipo !== "ENTRADA_TANQUE_OBRA" && current.tipo !== "RETIRADA_TANQUE") {
       return res.status(400).json({ error: "Esta rota edita apenas movimentações de tanque" });
@@ -1087,7 +1154,7 @@ router.post("/tanque/movimentacoes/:operationId/photos", requireAuth, async (req
       return res.status(400).json({ error: "Esta rota é apenas para movimentações de tanque" });
     }
 
-    const canEdit = await assertCanEditMelosaMov(service, req.userId, current);
+    const canEdit = await assertCanMutateTanqueMov(service, req.userId, current, "edit");
     if (!canEdit.ok) return res.status(canEdit.status).json({ error: canEdit.error });
 
     const kind = parsedBody.data.kind as TanquePhotoKind;
@@ -1152,10 +1219,8 @@ router.delete("/tanque/movimentacoes/:operationId", requireAuth, async (req: Aut
     if (currentError) return res.status(400).json({ error: currentError.message });
     if (!current) return res.status(404).json({ error: "Movimentação não encontrada" });
 
-    const admin = await isAdmin(service, req.userId);
-    if (!admin && current.usuario_id !== req.userId) {
-      return res.status(403).json({ error: "Sem permissão para excluir esta movimentação" });
-    }
+    const canDelete = await assertCanMutateTanqueMov(service, req.userId, current, "delete");
+    if (!canDelete.ok) return res.status(canDelete.status).json({ error: canDelete.error });
 
     if (current.tipo !== "ENTRADA_TANQUE_OBRA" && current.tipo !== "RETIRADA_TANQUE") {
       return res.status(400).json({ error: "Esta rota exclui apenas movimentações de tanque" });
@@ -1191,6 +1256,9 @@ router.post("/tanque/movimentacoes/entrada", requireAuth, async (req: AuthedRequ
 
     const service = createSupabaseServiceRole();
     const payload = parsedBody.data;
+
+    const blocked = await denyIfNoBiWrite(service, req.userId, "bi_tanque", "add");
+    if (blocked) return res.status(blocked.status).json({ error: blocked.error });
 
     try {
       await assertUserObraAccess(service, req.userId, payload.obra_codigo);
@@ -1268,6 +1336,9 @@ router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res
     const service = createSupabaseServiceRole();
     const payload = parsedBody.data;
 
+    const blocked = await denyIfNoBiWrite(service, req.userId, "bi_tanque", "add");
+    if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+
     try {
       await assertUserObraAccess(service, req.userId, payload.obra_codigo);
     } catch (e) {
@@ -1288,6 +1359,7 @@ router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res
       });
     }
 
+    // Retirada direta: abate saldo do tanque sem ciclo de melosa.
     const patrimonio = payload.ativo_equipamento_texto.trim().toUpperCase();
     if (!patrimonio) return res.status(400).json({ error: "Informe o patrimônio do equipamento." });
 

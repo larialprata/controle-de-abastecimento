@@ -5,6 +5,7 @@ import { envValidated } from "../config";
 import { requireAdmin, type AuthedRequest } from "../middleware/requireAdmin";
 import { DEFAULT_WEB_PERMISSIONS, FULL_WEB_USER_PERMISSIONS, normalizeWebPermissions, normalizeWebWritePermissions } from "../lib/webPermissions";
 import { listObraCodigosForUsers, setUserObraCodigos } from "../lib/userObras";
+import { listMovimentacaoAudit, type AuditAction, type AuditEntity } from "../lib/movimentacaoAudit";
 
 const router = Router();
 
@@ -393,6 +394,84 @@ router.get("/users/:userId/cnh-url", requireAdmin, async (req: AuthedRequest, re
   } catch (err: any) {
     // eslint-disable-next-line no-console
     console.error("[API] /v1/admin/users/:userId/cnh-url error:", err);
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+router.delete("/users/:userId", requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const userId = String(req.params.userId ?? "").trim();
+    if (!userId) return res.status(400).json({ error: "userId inválido" });
+    if (req.userId && req.userId === userId) {
+      return res.status(400).json({ error: "Não pode excluir a própria conta." });
+    }
+
+    const service = createSupabaseServiceRole();
+    const { data: profile, error: profileError } = await service
+      .from("profiles")
+      .select("role, email, full_name")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (profileError) return res.status(500).json({ error: profileError.message });
+
+    if (profile?.role === "admin") {
+      const { count, error: countError } = await service
+        .from("profiles")
+        .select("user_id", { count: "exact", head: true })
+        .eq("role", "admin");
+      if (countError) return res.status(500).json({ error: countError.message });
+      if ((count ?? 0) <= 1) {
+        return res.status(400).json({ error: "Não é possível excluir o último administrador." });
+      }
+    }
+
+    const { error: deleteError } = await service.auth.admin.deleteUser(userId);
+    if (deleteError) return res.status(400).json({ error: deleteError.message });
+
+    return res.json({
+      ok: true,
+      user_id: userId,
+      email: profile?.email ?? null,
+      full_name: profile?.full_name ?? null,
+    });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error("[API] DELETE /v1/admin/users/:userId error:", err);
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+router.get("/movimentacao-audit", requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const service = createSupabaseServiceRole();
+    const entityRaw = String(req.query.entity ?? "").trim().toLowerCase();
+    const actionRaw = String(req.query.action ?? "").trim().toLowerCase();
+    const entity = entityRaw === "melosa" || entityRaw === "tanque" ? (entityRaw as AuditEntity) : null;
+    const actionFilter = actionRaw === "insert" || actionRaw === "update" || actionRaw === "delete"
+      ? (actionRaw as AuditAction)
+      : null;
+
+    const rows = await listMovimentacaoAudit(
+      service,
+      {
+        de: typeof req.query.de === "string" ? req.query.de : null,
+        ate: typeof req.query.ate === "string" ? req.query.ate : null,
+        entity,
+        action: actionFilter,
+        operationId: typeof req.query.operationId === "string" ? req.query.operationId : null,
+        actorUserId: typeof req.query.actorUserId === "string" ? req.query.actorUserId : null,
+        obraCodigo: req.query.obraCodigo != null && req.query.obraCodigo !== ""
+          ? Number(req.query.obraCodigo)
+          : null,
+        limit: req.query.limit != null ? Number(req.query.limit) : 200,
+      },
+      null,
+    );
+
+    return res.json({ rows });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error("[API] GET /v1/admin/movimentacao-audit error:", err);
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
 });
