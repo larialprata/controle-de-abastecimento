@@ -464,6 +464,7 @@ router.get("/movimentacao-audit", requireAdmin, async (req: AuthedRequest, res) 
           ? Number(req.query.obraCodigo)
           : null,
         limit: req.query.limit != null ? Number(req.query.limit) : 200,
+        webUsersOnly: true,
       },
       null,
     );
@@ -472,6 +473,52 @@ router.get("/movimentacao-audit", requireAdmin, async (req: AuthedRequest, res) 
   } catch (err: any) {
     // eslint-disable-next-line no-console
     console.error("[API] GET /v1/admin/movimentacao-audit error:", err);
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+const deleteAuditSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
+});
+
+router.post("/movimentacao-audit/delete", requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const parsed = deleteAuditSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const { error, count } = await service
+      .from("movimentacao_audit")
+      .delete({ count: "exact" })
+      .in("id", parsed.data.ids);
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ ok: true, deleted: count ?? parsed.data.ids.length });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error("[API] POST /v1/admin/movimentacao-audit/delete error:", err);
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+router.delete("/movimentacao-audit/:id", requireAdmin, async (req: AuthedRequest, res) => {
+  try {
+    const id = String(req.params.id ?? "").trim();
+    const parsedId = z.string().uuid().safeParse(id);
+    if (!parsedId.success) return res.status(400).json({ error: "id inválido" });
+
+    const service = createSupabaseServiceRole();
+    const { error, count } = await service
+      .from("movimentacao_audit")
+      .delete({ count: "exact" })
+      .eq("id", parsedId.data);
+
+    if (error) return res.status(400).json({ error: error.message });
+    if ((count ?? 0) === 0) return res.status(404).json({ error: "Registo não encontrado" });
+    return res.json({ ok: true, deleted: 1 });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error("[API] DELETE /v1/admin/movimentacao-audit/:id error:", err);
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
 });

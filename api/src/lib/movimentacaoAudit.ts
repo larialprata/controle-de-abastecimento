@@ -59,6 +59,8 @@ export type AuditListFiltros = {
   actorUserId?: string | null;
   obraCodigo?: number | null;
   limit?: number;
+  /** Só alterações feitas por utilizador web (não admin / não app). */
+  webUsersOnly?: boolean;
 };
 
 export type AuditRow = {
@@ -104,6 +106,19 @@ export async function listMovimentacaoAudit(
     .select("id, entity, action, operation_id, obra_codigo, actor_user_id, before, after, created_at")
     .order("created_at", { ascending: false })
     .limit(limit);
+
+  if (filtros.webUsersOnly) {
+    const { data: webProfiles, error: webErr } = await service
+      .from("profiles")
+      .select("user_id")
+      .eq("access_platform", "web");
+    if (webErr) throw new Error(webErr.message);
+    const webIds = (webProfiles ?? [])
+      .map((p) => (typeof p.user_id === "string" ? p.user_id : null))
+      .filter((id): id is string => Boolean(id));
+    if (webIds.length === 0) return [];
+    query = query.in("actor_user_id", webIds);
+  }
 
   if (filtros.de) query = query.gte("created_at", `${filtros.de}T00:00:00`);
   if (filtros.ate) query = query.lte("created_at", `${filtros.ate}T23:59:59`);

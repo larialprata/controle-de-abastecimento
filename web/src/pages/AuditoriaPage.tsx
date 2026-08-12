@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, Fragment } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import { useAuth } from "../state/AuthContext";
-import { apiGet } from "../lib/api";
+import { apiDelete, apiGet, apiPost } from "../lib/api";
 import { glassField, glassPanel, glassSelect } from "../lib/glass";
 
 type AuditAction = "insert" | "update" | "delete";
@@ -65,11 +65,15 @@ export default function AuditoriaPage() {
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [okMsg, setOkMsg] = useState<string | null>(null);
   const [entity, setEntity] = useState<"" | AuditEntity>("");
   const [action, setAction] = useState<"" | AuditAction>("");
   const [dataDe, setDataDe] = useState("");
   const [dataAte, setDataAte] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmIds, setConfirmIds] = useState<string[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -87,6 +91,7 @@ export default function AuditoriaPage() {
         token,
       );
       setRows(json.rows ?? []);
+      setSelected(new Set());
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erro ao carregar auditoria");
     } finally {
@@ -98,12 +103,57 @@ export default function AuditoriaPage() {
     void load();
   }, [load]);
 
+  const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
+
+  function toggleAll(checked: boolean) {
+    if (!checked) {
+      setSelected(new Set());
+      return;
+    }
+    setSelected(new Set(rows.map((r) => r.id)));
+  }
+
+  function toggleOne(id: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function confirmDelete() {
+    if (!token || !confirmIds?.length) return;
+    setDeleting(true);
+    setError(null);
+    setOkMsg(null);
+    try {
+      if (confirmIds.length === 1) {
+        await apiDelete(`/v1/admin/movimentacao-audit/${confirmIds[0]}`, token);
+      } else {
+        await apiPost("/v1/admin/movimentacao-audit/delete", token, { ids: confirmIds });
+      }
+      setOkMsg(
+        confirmIds.length === 1
+          ? "Registo de auditoria excluído."
+          : `${confirmIds.length} registos de auditoria excluídos.`,
+      );
+      setConfirmIds(null);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erro ao excluir");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <header>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Auditoria</h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Histórico de inclusões, edições e exclusões nos BIs de tanque e abastecimentos.
+          Alterações feitas por utilizadores web nos BIs de tanque e abastecimentos. Ações de
+          administradores e do app não aparecem aqui.
         </p>
       </header>
 
@@ -150,11 +200,25 @@ export default function AuditoriaPage() {
           {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
           Atualizar
         </button>
+        <button
+          type="button"
+          onClick={() => setConfirmIds(Array.from(selected))}
+          disabled={loading || selected.size === 0}
+          className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden />
+          Excluir selecionados{selected.size > 0 ? ` (${selected.size})` : ""}
+        </button>
       </div>
 
       {error ? (
         <div className="rounded-2xl border border-red-300/80 bg-red-50/90 px-4 py-3 text-sm font-semibold text-red-800 dark:border-red-900/50 dark:bg-red-950/50 dark:text-red-200">
           {error}
+        </div>
+      ) : null}
+      {okMsg ? (
+        <div className="rounded-2xl border border-emerald-300/80 bg-emerald-50/90 px-4 py-3 text-sm font-semibold text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+          {okMsg}
         </div>
       ) : null}
 
@@ -163,6 +227,16 @@ export default function AuditoriaPage() {
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50/80 text-xs font-bold uppercase tracking-wide text-slate-500 dark:bg-white/5 dark:text-slate-400">
               <tr>
+                <th className="px-3 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={(e) => toggleAll(e.target.checked)}
+                    disabled={rows.length === 0}
+                    className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+                    aria-label="Selecionar todos"
+                  />
+                </th>
                 <th className="px-4 py-3">Quando</th>
                 <th className="px-4 py-3">Quem</th>
                 <th className="px-4 py-3">Ação</th>
@@ -170,6 +244,7 @@ export default function AuditoriaPage() {
                 <th className="px-4 py-3">Obra</th>
                 <th className="px-4 py-3">Resumo</th>
                 <th className="px-4 py-3">Detalhe</th>
+                <th className="px-4 py-3">Excluir</th>
               </tr>
             </thead>
             <tbody>
@@ -178,6 +253,15 @@ export default function AuditoriaPage() {
                 return (
                   <Fragment key={row.id}>
                     <tr className="border-t border-slate-100 dark:border-white/5">
+                      <td className="px-3 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(row.id)}
+                          onChange={(e) => toggleOne(row.id, e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+                          aria-label={`Selecionar ${row.id}`}
+                        />
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700 dark:text-slate-300">
                         {formatWhen(row.created_at)}
                       </td>
@@ -206,10 +290,20 @@ export default function AuditoriaPage() {
                           {open ? "Ocultar" : "Ver JSON"}
                         </button>
                       </td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmIds([row.id])}
+                          className="inline-flex items-center gap-1 text-sm font-semibold text-red-700 hover:underline dark:text-red-300"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          Excluir
+                        </button>
+                      </td>
                     </tr>
                     {open ? (
                       <tr className="border-t border-slate-100 bg-slate-50/60 dark:border-white/5 dark:bg-black/20">
-                        <td colSpan={7} className="px-4 py-3">
+                        <td colSpan={9} className="px-4 py-3">
                           <p className="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
                             operation_id: {row.operation_id}
                           </p>
@@ -229,7 +323,7 @@ export default function AuditoriaPage() {
               })}
               {!loading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={9} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
                     Nenhum registo de auditoria encontrado.
                   </td>
                 </tr>
@@ -238,6 +332,63 @@ export default function AuditoriaPage() {
           </table>
         </div>
       </div>
+
+      {confirmIds ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-audit-title"
+        >
+          <div className={`w-full max-w-md p-6 ${glassPanel}`}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 id="delete-audit-title" className="text-lg font-bold text-slate-900 dark:text-white">
+                  Excluir auditoria
+                </h2>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                  Esta ação remove o histórico de forma permanente e não pode ser desfeita.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !deleting && setConfirmIds(null)}
+                disabled={deleting}
+                className="rounded-lg p-1 text-slate-500 hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10"
+                aria-label="Fechar"
+              >
+                <X className="h-5 w-5" aria-hidden />
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-slate-800 dark:text-slate-200">
+              Confirma a exclusão de{" "}
+              <span className="font-semibold">
+                {confirmIds.length} registo{confirmIds.length === 1 ? "" : "s"}
+              </span>
+              ?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmIds(null)}
+                disabled={deleting}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-black/5 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-white/10"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDelete()}
+                disabled={deleting}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
