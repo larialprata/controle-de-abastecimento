@@ -42,6 +42,14 @@ export const env = {
   DAILY_REPORT_HOUR: process.env.DAILY_REPORT_HOUR
     ? Number(process.env.DAILY_REPORT_HOUR)
     : undefined,
+  /** sharepoint (padrão) | supabase (legado) */
+  STORAGE_PROVIDER: (process.env.STORAGE_PROVIDER ?? "sharepoint").toLowerCase() as string,
+  SHAREPOINT_TENANT_ID: process.env.SHAREPOINT_TENANT_ID as string | undefined,
+  SHAREPOINT_CLIENT_ID: process.env.SHAREPOINT_CLIENT_ID as string | undefined,
+  SHAREPOINT_CLIENT_SECRET: process.env.SHAREPOINT_CLIENT_SECRET as string | undefined,
+  SHAREPOINT_SITE_ID: process.env.SHAREPOINT_SITE_ID as string | undefined,
+  SHAREPOINT_FOLDER_CNH: (process.env.SHAREPOINT_FOLDER_CNH ?? "Teste/CNH") as string,
+  SHAREPOINT_FOLDER_OPERATION: (process.env.SHAREPOINT_FOLDER_OPERATION ?? "Teste/Combustível") as string,
 };
 
 function assertEnv() {
@@ -50,12 +58,23 @@ function assertEnv() {
   if (!env.SUPABASE_ANON_KEY) missing.push("SUPABASE_ANON_KEY");
   if (!env.SUPABASE_SERVICE_ROLE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
   if (!env.PORT) missing.push("PORT");
+
+  const provider = env.STORAGE_PROVIDER === "sharepoint" ? "sharepoint" : "supabase";
+  if (provider === "sharepoint") {
+    if (!env.SHAREPOINT_TENANT_ID) missing.push("SHAREPOINT_TENANT_ID");
+    if (!env.SHAREPOINT_CLIENT_ID) missing.push("SHAREPOINT_CLIENT_ID");
+    if (!env.SHAREPOINT_CLIENT_SECRET) missing.push("SHAREPOINT_CLIENT_SECRET");
+    if (!env.SHAREPOINT_SITE_ID) missing.push("SHAREPOINT_SITE_ID");
+  }
+
   if (missing.length) {
     throw new Error(`Missing env vars: ${missing.join(", ")}`);
   }
 }
 
 assertEnv();
+
+const storageProvider = env.STORAGE_PROVIDER === "sharepoint" ? "sharepoint" : "supabase";
 
 // Depois de validar via assertEnv, o TypeScript ainda enxerga possivelmente undefined.
 // Este cast “trava” os tipos para o restante do projeto.
@@ -86,5 +105,11 @@ export const envValidated = {
   RESEND_FROM: env.RESEND_FROM,
   CRON_SECRET: env.CRON_SECRET,
   DAILY_REPORT_HOUR: env.DAILY_REPORT_HOUR,
+  STORAGE_PROVIDER: storageProvider as "supabase" | "sharepoint",
+  SHAREPOINT_TENANT_ID: (env.SHAREPOINT_TENANT_ID ?? "") as string,
+  SHAREPOINT_CLIENT_ID: (env.SHAREPOINT_CLIENT_ID ?? "") as string,
+  SHAREPOINT_CLIENT_SECRET: (env.SHAREPOINT_CLIENT_SECRET ?? "") as string,
+  SHAREPOINT_SITE_ID: (env.SHAREPOINT_SITE_ID ?? "") as string,
+  SHAREPOINT_FOLDER_CNH: env.SHAREPOINT_FOLDER_CNH,
+  SHAREPOINT_FOLDER_OPERATION: env.SHAREPOINT_FOLDER_OPERATION,
 };
-

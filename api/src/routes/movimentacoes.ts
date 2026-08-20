@@ -3,6 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { criarCicloRetiradaTanque, vincularAbastecimentoAoCicloAberto } from "../lib/melosaCiclo";
+import { registrarTransferenciaMelosa } from "../lib/melosaTransferencia";
 import { parseMedidorNumero } from "../lib/melosaMedidorContinuidade";
 import { envValidated } from "../config";
 import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
@@ -11,35 +12,24 @@ import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../li
 import { logMovimentacaoAudit } from "../lib/movimentacaoAudit";
 import { denyWebBiWriteIfNeeded, loadWebWriteProfile } from "../lib/webWriteAccess";
 import { canWriteBiAction } from "../lib/webPermissions";
+import {
+  storageCreateSignedUrl,
+  storageDownload,
+  storageExists,
+  storageUpload,
+} from "../lib/storage";
+import { buildMonthOrganizedStoragePath } from "../lib/storage/photoNaming";
 
 const router = Router();
 
 async function storageObjectExists(
-  service: ReturnType<typeof createSupabaseServiceRole>,
+  _service: ReturnType<typeof createSupabaseServiceRole>,
   bucket: string,
   storagePath: string
 ): Promise<boolean> {
   const path = storagePath.trim().replace(/^\/+/, "");
   if (!path) return false;
-
-  const { data, error } = await service.storage.from(bucket).exists(path);
-  if (error) {
-    console.warn("[storage.exists]", bucket, path, error.message);
-  }
-  if (data === true) return true;
-
-  const slash = path.lastIndexOf("/");
-  const folder = slash >= 0 ? path.slice(0, slash) : "";
-  const fileName = slash >= 0 ? path.slice(slash + 1) : path;
-  const { data: listed, error: listError } = await service.storage.from(bucket).list(folder, {
-    limit: 200,
-    search: fileName,
-  });
-  if (listError) {
-    console.warn("[storage.list]", bucket, folder, listError.message);
-    return false;
-  }
-  return listed?.some((f) => f.name === fileName) ?? false;
+  return storageExists(bucket, path);
 }
 
 const MELOSA_PHOTO_BUCKETS = [
@@ -55,15 +45,14 @@ const MELOSA_PHOTO_BUCKETS = [
 ] as const;
 
 async function findMelosaStorageFile(
-  service: ReturnType<typeof createSupabaseServiceRole>,
+  _service: ReturnType<typeof createSupabaseServiceRole>,
   rawPath: string,
 ): Promise<{ bucket: string; path: string } | null> {
   const path = rawPath.trim().replace(/^\/+/, "");
   if (!path) return null;
 
   for (const bucket of MELOSA_PHOTO_BUCKETS) {
-    const { error } = await service.storage.from(bucket).download(path);
-    if (!error) return { bucket, path };
+    if (await storageExists(bucket, path)) return { bucket, path };
   }
   return null;
 }
@@ -697,13 +686,10 @@ router.get("/melosa/photo-url", requireAuth, async (req: AuthedRequest, res) => 
     const found = await findMelosaStorageFile(service, rawPath);
     if (!found) return res.status(404).json({ error: "Foto não encontrada no Storage" });
 
-    const { data, error } = await service.storage.from(found.bucket).createSignedUrl(found.path, 3600);
-    if (error || !data?.signedUrl) {
-      return res.status(404).json({ error: error?.message ?? "Foto não encontrada no Storage" });
-    }
+    const url = await storageCreateSignedUrl(found.bucket, found.path, 3600);
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
-    return res.json({ url: data.signedUrl, bucket: found.bucket });
+    return res.json({ url, bucket: found.bucket });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
@@ -718,12 +704,7 @@ router.get("/melosa/photo-data", requireAuth, async (req: AuthedRequest, res) =>
     const found = await findMelosaStorageFile(service, rawPath);
     if (!found) return res.status(404).json({ error: "Foto não encontrada no Storage" });
 
-    const { data, error } = await service.storage.from(found.bucket).download(found.path);
-    if (error || !data) {
-      return res.status(404).json({ error: error?.message ?? "Foto não encontrada no Storage" });
-    }
-
-    const buf = Buffer.from(await data.arrayBuffer());
+    const buf = await storageDownload(found.bucket, found.path);
     const contentType = mimeFromStoragePath(found.path);
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
@@ -745,13 +726,10 @@ router.get("/tanque/photo-url", requireAuth, async (req: AuthedRequest, res) => 
     const found = await findTanqueStorageFile(service, rawPath);
     if (!found) return res.status(404).json({ error: "Foto não encontrada no Storage" });
 
-    const { data, error } = await service.storage.from(found.bucket).createSignedUrl(found.path, 3600);
-    if (error || !data?.signedUrl) {
-      return res.status(404).json({ error: error?.message ?? "Foto não encontrada no Storage" });
-    }
+    const url = await storageCreateSignedUrl(found.bucket, found.path, 3600);
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
-    return res.json({ url: data.signedUrl, bucket: found.bucket });
+    return res.json({ url, bucket: found.bucket });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }
@@ -987,7 +965,7 @@ router.post("/melosa/movimentacoes/:operationId/photos", requireAuth, async (req
     const { data: current, error: currentError } = await service
       .from("melosa_movimentacoes")
       .select(
-        "operation_id, usuario_id, obra_codigo, melosa_quantidade_abastecida_storage_path, melosa_horimetro_equipamento_abastecido_storage_path, melosa_equipamento_operador_storage_path, melosa_assinatura_operador_storage_path, melosa_assinatura_motorista_storage_path",
+        "operation_id, usuario_id, obra_codigo, data_hora, ativo_melosa_texto, ativo_equipamento_texto, melosa_quantidade_abastecida_storage_path, melosa_horimetro_equipamento_abastecido_storage_path, melosa_equipamento_operador_storage_path, melosa_assinatura_operador_storage_path, melosa_assinatura_motorista_storage_path",
       )
       .eq("operation_id", operationId)
       .maybeSingle();
@@ -1007,15 +985,28 @@ router.post("/melosa/movimentacoes/:operationId/photos", requireAuth, async (req
       return res.status(400).json({ error: e instanceof Error ? e.message : "Imagem inválida" });
     }
 
-    const ownerId = String(current.usuario_id || req.userId);
-    const storagePath = `${ownerId}/${meta.pathSuffix(operationId, parsedImage.ext)}`;
+    const storagePath = buildMonthOrganizedStoragePath({
+      ativo:
+        (current.ativo_equipamento_texto as string) ||
+        (current.ativo_melosa_texto as string) ||
+        null,
+      dataHora: (current.data_hora as string) || new Date().toISOString(),
+      kind,
+      ext: parsedImage.ext,
+      uniqueSuffix: operationId,
+    });
     const bucket = meta.bucket();
 
-    const { error: uploadError } = await service.storage.from(bucket).upload(storagePath, parsedImage.bytes, {
-      contentType: parsedImage.contentType,
-      upsert: true,
-    });
-    if (uploadError) return res.status(400).json({ error: `Falha no upload: ${uploadError.message}` });
+    try {
+      await storageUpload(bucket, storagePath, parsedImage.bytes, {
+        contentType: parsedImage.contentType,
+        upsert: true,
+      });
+    } catch (e: unknown) {
+      return res.status(400).json({
+        error: `Falha no upload: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
 
     const { error: updateError } = await service
       .from("melosa_movimentacoes")
@@ -1142,7 +1133,7 @@ router.post("/tanque/movimentacoes/:operationId/photos", requireAuth, async (req
     const service = createSupabaseServiceRole();
     const { data: current, error: currentError } = await service
       .from("movimentacoes")
-      .select("operation_id, usuario_id, obra_codigo, tipo")
+      .select("operation_id, usuario_id, obra_codigo, tipo, data_hora, placa_texto, tanque_numero")
       .eq("operation_id", operationId)
       .maybeSingle();
 
@@ -1170,17 +1161,28 @@ router.post("/tanque/movimentacoes/:operationId/photos", requireAuth, async (req
       return res.status(400).json({ error: e instanceof Error ? e.message : "Imagem inválida" });
     }
 
-    const ownerId = String(current.usuario_id || req.userId);
-    const storagePathUpload = `${ownerId}/${meta.pathSuffix(operationId, parsedImage.ext)}`;
+    const ativoLabel =
+      String(current.placa_texto ?? "").trim() ||
+      (current.tanque_numero != null ? `TANQUE-${current.tanque_numero}` : null);
+    const storagePathUpload = buildMonthOrganizedStoragePath({
+      ativo: ativoLabel,
+      dataHora: (current.data_hora as string) || new Date().toISOString(),
+      kind: kind.replace(/_/g, "-"),
+      ext: parsedImage.ext,
+      uniqueSuffix: operationId,
+    });
     const bucket = meta.bucket();
 
-    const { error: uploadError } = await service.storage
-      .from(bucket)
-      .upload(storagePathUpload, parsedImage.bytes, {
+    try {
+      await storageUpload(bucket, storagePathUpload, parsedImage.bytes, {
         contentType: parsedImage.contentType,
         upsert: true,
       });
-    if (uploadError) return res.status(400).json({ error: `Falha no upload: ${uploadError.message}` });
+    } catch (e: unknown) {
+      return res.status(400).json({
+        error: `Falha no upload: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
 
     const { error: updateError } = await service
       .from("movimentacoes")
@@ -1480,8 +1482,8 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         return res.status(400).json({ error: "valor_unitario é obrigatório" });
       }
 
-      const { data: noteExists } = await service.storage.from(envValidated.NOTAS_BUCKET).exists(notaStoragePath);
-      if (noteExists !== true) {
+      const noteExists = await storageExists(envValidated.NOTAS_BUCKET, notaStoragePath);
+      if (!noteExists) {
         return res.status(400).json({ error: "Arquivo da nota não encontrado no Storage" });
       }
 
@@ -1535,25 +1537,28 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
 
       const retiradaHorimetroFotoPath = payload.retirada_horimetro_foto_storage_path?.trim();
       if (retiradaHorimetroFotoPath) {
-        const { data: horimetroFotoExists } = await service.storage
-          .from(envValidated.RETIRADA_HORIMETRO_BUCKET)
-          .exists(retiradaHorimetroFotoPath);
-        if (horimetroFotoExists !== true) {
+        const horimetroFotoExists = await storageExists(
+          envValidated.RETIRADA_HORIMETRO_BUCKET,
+          retiradaHorimetroFotoPath,
+        );
+        if (!horimetroFotoExists) {
           return res.status(400).json({ error: "Foto do horímetro não encontrada no Storage" });
         }
       }
 
-      const { data: lacreTanqueExists } = await service.storage
-        .from(envValidated.LACRE_TANQUE_BUCKET)
-        .exists(payload.lacre_tanque_storage_path);
-      if (lacreTanqueExists !== true) {
+      const lacreTanqueExists = await storageExists(
+        envValidated.LACRE_TANQUE_BUCKET,
+        payload.lacre_tanque_storage_path,
+      );
+      if (!lacreTanqueExists) {
         return res.status(400).json({ error: "Arquivo do lacre do tanque não encontrado no Storage" });
       }
 
-      const { data: lacreMelosaExists } = await service.storage
-        .from(envValidated.LACRE_MELOSA_BUCKET)
-        .exists(payload.lacre_melosa_storage_path);
-      if (lacreMelosaExists !== true) {
+      const lacreMelosaExists = await storageExists(
+        envValidated.LACRE_MELOSA_BUCKET,
+        payload.lacre_melosa_storage_path,
+      );
+      if (!lacreMelosaExists) {
         return res.status(400).json({ error: "Arquivo do lacre da melosa não encontrado no Storage" });
       }
 

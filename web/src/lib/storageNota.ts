@@ -1,15 +1,10 @@
-import { supabase } from "./supabase";
-
-const BUCKET = "notas";
-const SIGNED_URL_TTL = 3600;
-
-export async function getNotaSignedUrl(storagePath: string): Promise<string | null> {
-  const path = storagePath.trim();
-  if (!path) return null;
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_URL_TTL);
-  if (error) {
-    console.warn("[storage notas]", error.message);
-    return null;
-  }
-  return data.signedUrl;
+/**
+ * @deprecated Acesso direto ao Supabase Storage descontinuado.
+ * Use os endpoints da API: GET /v1/tanque/photo-url
+ */
+export async function getNotaSignedUrl(_storagePath: string): Promise<string | null> {
+  console.warn(
+    "[storageNota] descontinuado — use GET /v1/tanque/photo-url via API autenticada",
+  );
+  return null;
 }

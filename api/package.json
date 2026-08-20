@@ -11,7 +11,9 @@
     "seed:admin": "npm run build && node dist/scripts/seedAdmin.js",
     "confirm:email": "npm run build && node dist/scripts/confirmUserEmail.js",
     "migrate:equipamento-empresa": "npx ts-node --transpile-only src/scripts/applyEquipamentoEmpresaMigration.ts",
-    "test:equipamentos-externos": "npx ts-node --transpile-only src/scripts/testEquipamentosExternos.ts"
+    "test:equipamentos-externos": "npx ts-node --transpile-only src/scripts/testEquipamentosExternos.ts",
+    "migrate:photos-sharepoint": "npx ts-node --transpile-only src/scripts/migratePhotosToSharePoint.ts",
+    "reorganize:photos-sharepoint": "npx ts-node --transpile-only src/scripts/reorganizeSharePointPhotos.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

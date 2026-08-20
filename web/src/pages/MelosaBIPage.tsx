@@ -4,6 +4,7 @@ import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import MelosaMovimentacaoFormModal, {
   type MelosaMovimentacaoFormRow,
 } from "../components/bi/MelosaMovimentacaoFormModal";
+import MelosaTransferenciaFormModal from "../components/bi/MelosaTransferenciaFormModal";
 import MelosaFotosModal, { type MelosaFotosRow } from "../components/bi/MelosaFotosModal";
 import MelosaTicketModal, { type MelosaTicketRow } from "../components/bi/MelosaTicketModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
@@ -446,6 +447,7 @@ export default function MelosaBIPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"add" | "edit">("add");
   const [formRow, setFormRow] = useState<MelosaMovimentacaoFormRow | null>(null);
+  const [transfOpen, setTransfOpen] = useState(false);
   const [fotosOpen, setFotosOpen] = useState(false);
   const [fotosRow, setFotosRow] = useState<MelosaFotosRow | null>(null);
   const [highlightOp, setHighlightOp] = useState(opUrl);
@@ -997,14 +999,24 @@ export default function MelosaBIPage() {
         {canAddBi ? (
           <div className="flex flex-col gap-1">
             <span className={labelCls}>Movimentação</span>
-            <button
-              type="button"
-              onClick={openAddForm}
-              disabled={loading}
-              className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
-            >
-              Adicionar movimentação
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={openAddForm}
+                disabled={loading}
+                className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
+              >
+                Adicionar movimentação
+              </button>
+              <button
+                type="button"
+                onClick={() => setTransfOpen(true)}
+                disabled={loading}
+                className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-700/20 transition hover:bg-sky-800 disabled:opacity-50"
+              >
+                Transferir melosa → melosa
+              </button>
+            </div>
           </div>
         ) : null}
         <div className="flex flex-col gap-1">
@@ -1425,6 +1437,18 @@ export default function MelosaBIPage() {
           apiBase={apiBase}
           token={authToken}
           onClose={() => setFormOpen(false)}
+          onSaved={handleFormSaved}
+        />
+      ) : null}
+
+      {transfOpen ? (
+        <MelosaTransferenciaFormModal
+          open={transfOpen}
+          obras={obras.map((o) => ({ codigo: o.codigo, nome: o.nome }))}
+          melosasAtivos={patrimoniosMelosaOpcoes}
+          apiBase={apiBase}
+          token={authToken}
+          onClose={() => setTransfOpen(false)}
           onSaved={handleFormSaved}
         />
       ) : null}

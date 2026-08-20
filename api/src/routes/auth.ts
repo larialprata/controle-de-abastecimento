@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseServiceRole } from "../lib/supabase";
+import { storageExists } from "../lib/storage";
 import { envValidated } from "../config";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { canAccessClientPlatform, parseClientPlatform } from "../lib/accessPlatform";
@@ -120,8 +121,8 @@ async function upsertProfileFromValidatedOrThrow(
   if (cpfRow && cpfRow.user_id !== userId) throw new HttpError(409, "CPF já cadastrado");
 
   const cnhPath = input.cnh_storage_path;
-  const { data: fileExists } = await service.storage.from(envValidated.CNH_BUCKET).exists(cnhPath);
-  if (fileExists !== true) throw new HttpError(400, "Arquivo da CNH não encontrado no Storage");
+  const fileExists = await storageExists(envValidated.CNH_BUCKET, cnhPath);
+  if (!fileExists) throw new HttpError(400, "Arquivo da CNH não encontrado no Storage");
 
   const email =
     (typeof input.email === "string" && input.email.trim().length > 0 ? input.email.trim() : null) ??

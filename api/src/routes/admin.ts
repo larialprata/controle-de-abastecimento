@@ -6,6 +6,7 @@ import { requireAdmin, type AuthedRequest } from "../middleware/requireAdmin";
 import { DEFAULT_WEB_PERMISSIONS, FULL_WEB_USER_PERMISSIONS, normalizeWebPermissions, normalizeWebWritePermissions } from "../lib/webPermissions";
 import { listObraCodigosForUsers, setUserObraCodigos } from "../lib/userObras";
 import { listMovimentacaoAudit, type AuditAction, type AuditEntity } from "../lib/movimentacaoAudit";
+import { storageCreateSignedUrl } from "../lib/storage";
 
 const router = Router();
 
@@ -388,9 +389,12 @@ router.get("/users/:userId/cnh-url", requireAdmin, async (req: AuthedRequest, re
     const path = typeof profile?.cnh_storage_path === "string" ? profile.cnh_storage_path.trim() : "";
     if (!path) return res.status(404).json({ error: "CNH não encontrada para este usuário" });
 
-    const { data, error } = await service.storage.from(envValidated.CNH_BUCKET).createSignedUrl(path, 3600);
-    if (error || !data?.signedUrl) return res.status(404).json({ error: "Arquivo da CNH não encontrado no bucket" });
-    return res.json({ url: data.signedUrl });
+    try {
+      const url = await storageCreateSignedUrl(envValidated.CNH_BUCKET, path, 3600);
+      return res.json({ url });
+    } catch {
+      return res.status(404).json({ error: "Arquivo da CNH não encontrado no bucket" });
+    }
   } catch (err: any) {
     // eslint-disable-next-line no-console
     console.error("[API] /v1/admin/users/:userId/cnh-url error:", err);

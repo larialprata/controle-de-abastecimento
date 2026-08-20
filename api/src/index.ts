@@ -15,6 +15,7 @@ import equipamentoConsumoRouter from "./routes/equipamentoConsumo";
 import empresasRouter from "./routes/empresas";
 import reportEmailRouter, { startDailyReportScheduler } from "./routes/reportEmail";
 import alertasRouter from "./routes/alertas";
+import mediaRouter from "./routes/media";
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.get("/health", (_req, res) =>
     ok: true,
     melosa_fluxo: "quantidade_abastecida",
     melosa_db_columns: "ativo_melosa_texto,ativo_equipamento_texto,melosa_quantidade_abastecida",
+    storage_provider: envValidated.STORAGE_PROVIDER,
   }),
 );
 
@@ -52,6 +54,7 @@ app.use("/v1", melosaMedidorRouter);
 app.use("/v1", estoqueDashboardRouter);
 app.use("/v1", equipamentoConsumoRouter);
 app.use("/v1", alertasRouter);
+app.use("/v1", mediaRouter);
 app.use("/v1", mobileErrorsRouter);
 
 // Tratador global de erros (caso algum erro escape de try/catch).

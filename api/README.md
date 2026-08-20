@@ -1,6 +1,6 @@
 # API — Controle de Abastecimento
 
-Backend REST (Express) com Supabase Auth, Postgres e Storage.
+Backend REST (Express) com Supabase Auth/Postgres. Fotos: Supabase Storage ou **SharePoint** (`STORAGE_PROVIDER=sharepoint` + vars `SHAREPOINT_*` em `.env.example`). Upload mobile: `POST /v1/media/upload`.
 
 ## Comandos
 
@@ -17,7 +17,7 @@ npm run seed:admin     # primeiro usuário admin
 src/
 ├── index.ts           # bootstrap Express
 ├── config.ts          # variáveis de ambiente
-├── lib/               # cliente Supabase
+├── lib/               # Supabase, storage (SharePoint/Supabase), domínio
 ├── middleware/        # auth e admin
 ├── routes/            # endpoints /v1
 └── scripts/           # seed admin, confirmar e-mail

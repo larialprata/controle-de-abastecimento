@@ -112,19 +112,24 @@ export async function apiPost<TResponse = any>(
   path: string,
   token: string,
   body?: unknown,
-  context?: ApiPostContext
+  context?: ApiPostContext,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS
 ) {
   let res: Response;
   try {
-    res = await fetchWithTimeout(`${API_URL}${path}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "X-Client-Platform": "app",
+    res = await fetchWithTimeout(
+      `${API_URL}${path}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-Client-Platform": "app",
+        },
+        body: body ? JSON.stringify(body) : undefined,
       },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+      timeoutMs
+    );
   } catch (err: any) {
     const msg = errorToMessage(err);
     const meta = buildErrorMeta(err);

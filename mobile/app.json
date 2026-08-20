@@ -2,7 +2,7 @@
   "expo": {
     "name": "Controle-Combustível",
     "slug": "mobileapp",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -23,7 +23,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.lariprata.mobileapp",
-      "versionCode": 3
+      "versionCode": 4
     },
     "plugins": [
       [

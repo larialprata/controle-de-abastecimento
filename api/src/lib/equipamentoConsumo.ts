@@ -587,6 +587,16 @@ async function fetchMovimentacoes(
   if (error) throw new Error(error.message);
 
   let rows = (data ?? []) as MelosaAbastecimentoRow[];
+
+  // Transferências melosa→melosa não entram no consumo de equipamento.
+  const { data: melosasCadastro } = await service.from("equipamentos").select("ativo").eq("tipo", "MELOSA");
+  const melosasSet = new Set((melosasCadastro ?? []).map((m) => normAtivo(m.ativo)));
+  rows = rows.filter((r) => {
+    const destino = normAtivo(r.ativo_equipamento_texto);
+    if (destino && melosasSet.has(destino)) return false;
+    return true;
+  });
+
   if (filtros.ativoEquipamento) {
     const alvo = normAtivo(filtros.ativoEquipamento);
     rows = rows.filter((r) => normAtivo(r.ativo_equipamento_texto) === alvo);

@@ -227,7 +227,7 @@ export async function buildMelosaFluxo(
 
   const { data: ciclosData } = await service
     .from("melosa_ciclos")
-    .select("ciclo_numero, retirada_operation_id, obra_codigo, data_hora")
+    .select("ciclo_numero, retirada_operation_id, obra_codigo, data_hora, litros_retirada")
     .ilike("ativo_melosa_texto", ativo)
     .order("data_hora", { ascending: true });
 
@@ -315,6 +315,25 @@ export async function buildMelosaFluxo(
     });
   }
 
+  // Enchimentos sem RETIRADA_TANQUE (ex.: transferência melosa → melosa).
+  const enchimentoIds = new Set(rawEventos.filter((e) => e.tipo === "enchimento_melosa").map((e) => e.id));
+  (ciclosData ?? []).forEach((c) => {
+    const opId = String(c.retirada_operation_id ?? "");
+    if (!opId || enchimentoIds.has(`enc-${opId}`)) return;
+    const litros = toNum(c.litros_retirada);
+    if (litros <= 0) return;
+    rawEventos.push({
+      id: `enc-${opId}`,
+      tipo: "enchimento_melosa",
+      data_hora: String(c.data_hora ?? ""),
+      litros,
+      titulo: "Enchimento da melosa",
+      subtitulo: `${fmtLitros(litros)} L recebidos (transferência / ajuste) → melosa ${ativo}`,
+      equipamento: null,
+      ciclo_numero: Number(c.ciclo_numero) || null,
+    });
+  });
+
   const { data: melosaRows } = await service
     .from("melosa_movimentacoes")
     .select("*")
@@ -330,13 +349,17 @@ export async function buildMelosaFluxo(
     const equipamento = String(r.ativo_equipamento_texto ?? "").trim() || null;
     if (r.obra_codigo != null) obrasMelosa.add(Number(r.obra_codigo));
 
+    const obs = String(r.obs ?? "");
+    const isTransfer = obs.toUpperCase().includes("[TRANSFERENCIA_MELOSA]");
     rawEventos.push({
       id: `ab-${opId}`,
       tipo: "abastecimento_equip",
       data_hora: dataHora,
       litros,
-      titulo: "Abastecimento de equipamento",
-      subtitulo: `${fmtLitros(litros)} L para ${equipamento ?? "equipamento"} (saldo na melosa diminui)`,
+      titulo: isTransfer ? "Transferência para outra melosa" : "Abastecimento de equipamento",
+      subtitulo: isTransfer
+        ? `${fmtLitros(litros)} L transferidos para ${equipamento ?? "melosa"} (saldo na melosa diminui)`
+        : `${fmtLitros(litros)} L para ${equipamento ?? "equipamento"} (saldo na melosa diminui)`,
       equipamento,
       ciclo_numero: null,
     });

@@ -1889,18 +1889,35 @@ export default function App() {
       const ext = (extMatch?.[1] ?? "jpg").toLowerCase();
       const safeExt = ext === "png" ? "png" : "jpg";
       const filePath = `${userId}/cnh.${safeExt}`;
+      const cnhBytesArr = new Uint8Array(cnhBytes);
+      let cnhBinary = "";
+      for (let i = 0; i < cnhBytesArr.length; i++) cnhBinary += String.fromCharCode(cnhBytesArr[i]!);
+      const cnhDataBase64 = btoa(cnhBinary);
 
       setMessage("Enviando foto da CNH...");
-      const { error: uploadError } = await withTimeout(
-        supabase.storage.from(CNH_BUCKET).upload(filePath, cnhBytes, {
-          contentType: cnhContentType,
-          upsert: false,
-        }),
-        30000,
-        "Tempo limite no upload da foto da CNH."
-      );
-      if (uploadError && !String(uploadError.message ?? "").toLowerCase().includes("already exists")) {
-        throw new Error(`Falha ao enviar foto da CNH: ${uploadError.message}`);
+      try {
+        await withTimeout(
+          apiPost(
+            "/v1/media/upload",
+            activeSession.access_token,
+            {
+              bucket: CNH_BUCKET,
+              storage_path: filePath,
+              content_type: cnhContentType,
+              data_base64: cnhDataBase64,
+              upsert: false,
+            },
+            { action: "cnh_upload" },
+            60000
+          ),
+          60000,
+          "Tempo limite no upload da foto da CNH."
+        );
+      } catch (uploadErr: any) {
+        const msg = String(uploadErr?.message ?? uploadErr);
+        if (!msg.toLowerCase().includes("already exists") && !msg.toLowerCase().includes("duplicate")) {
+          throw new Error(`Falha ao enviar foto da CNH: ${msg}`);
+        }
       }
 
       setMessage("Gravando perfil...");

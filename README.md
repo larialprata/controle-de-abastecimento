@@ -255,7 +255,7 @@ cp mobile/.env.example mobile/.env
 
 | App | Arquivo | Variáveis |
 |-----|---------|-----------|
-| API | `api/.env` | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `PORT` |
+| API | `api/.env` | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `PORT`; fotos: `STORAGE_PROVIDER=sharepoint` + `SHAREPOINT_*` (ver `api/.env.example`) |
 | Web | `web/.env` | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_URL`, opcional `VITE_GOOGLE_MAPS_API_KEY` |
 | Mobile | `mobile/.env` | `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_URL` |
 

@@ -1,7 +1,6 @@
 import { apiPost } from "../lib/api";
 import { deletePendingMedia, getOutboxPending, deleteOutbox, getPendingMedia } from "../db/sqlite";
-import { readImageUriAsArrayBuffer } from "../lib/readImageUri";
-import { supabase } from "../lib/supabase";
+import * as FileSystem from "expo-file-system/legacy";
 import type { MovimentacaoPayload } from "../types/movimentacao";
 
 const LEGACY_MELOSA_KEYS = [
@@ -68,18 +67,30 @@ function explainSyncError(message: string): string {
   return message;
 }
 
-async function uploadPendingMediaForOperation(operationId: string): Promise<void> {
+async function uploadPendingMediaForOperation(operationId: string, token: string): Promise<void> {
   const rows = getPendingMedia(operationId);
   if (rows.length === 0) return;
 
   for (const row of rows) {
-    const { arrayBuffer, contentType } = await readImageUriAsArrayBuffer(row.local_uri);
-    const { error } = await supabase.storage.from(row.bucket).upload(row.storage_path, arrayBuffer, {
-      contentType: contentType || row.content_type,
-      upsert: true,
+    const dataBase64 = await FileSystem.readAsStringAsync(row.local_uri, {
+      encoding: FileSystem.EncodingType.Base64,
     });
-    if (error) {
-      const msg = String(error.message ?? error);
+    try {
+      await apiPost(
+        "/v1/media/upload",
+        token,
+        {
+          bucket: row.bucket,
+          storage_path: row.storage_path,
+          content_type: row.content_type || "image/jpeg",
+          data_base64: dataBase64,
+          upsert: true,
+        },
+        { operation_id: operationId, action: "media_upload" },
+        60000,
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
       const alreadyExists =
         msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("duplicate");
       if (!alreadyExists) {
@@ -119,7 +130,7 @@ export async function syncOutbox(token: string) {
       if (!payload.data_hora) {
         payload.data_hora = new Date().toISOString();
       }
-      await uploadPendingMediaForOperation(row.operation_id);
+      await uploadPendingMediaForOperation(row.operation_id, token);
       const resp = await apiPost<{
         medidor_continuidade?: {
           status?: string;
