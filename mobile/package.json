@@ -5,7 +5,7 @@
   "scripts": {
     "icons:generate": "node scripts/generate-app-icons.mjs",
     "icons:android": "npm run icons:generate && npx expo prebuild --platform android --no-install",
-    "preandroid": "node scripts/sync-android-autolinking.cjs",
+    "preandroid": "node scripts/patch-foojay-gradle.cjs && node scripts/sync-android-autolinking.cjs",
     "prestart": "node scripts/sync-android-autolinking.cjs",
     "android:device": "powershell -ExecutionPolicy Bypass -File ./scripts/prepare-android-device.ps1 && npx expo run:android",
     "repair:deps": "powershell -ExecutionPolicy Bypass -File ./scripts/repair-monorepo-deps.ps1",
