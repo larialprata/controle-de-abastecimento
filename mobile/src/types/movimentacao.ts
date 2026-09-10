@@ -34,6 +34,8 @@ export type MovimentacaoPayload = {
   melosa_comprovante_storage_path?: string | null;
   melosa_quantidade_abastecida?: string | null;
   melosa_quantidade_abastecida_storage_path?: string | null;
+  melosa_encerrante_inicial_numero?: string | null;
+  melosa_encerrante_final_numero?: string | null;
   melosa_lacre_numero?: string | null;
   melosa_lacre_storage_path?: string | null;
   melosa_horimetro_equipamento_abastecido_numero?: string | null;

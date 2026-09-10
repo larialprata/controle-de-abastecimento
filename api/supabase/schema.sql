@@ -30,7 +30,8 @@ insert into public.obras (codigo, nome) values
   (246, 'ATA'),
   (247, 'ATA'),
   (248, 'ATA'),
-  (249, 'ATA')
+  (249, 'ATA'),
+  (9020, 'Usina')
 on conflict (codigo) do update
 set nome = excluded.nome;
 

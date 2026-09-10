@@ -142,6 +142,8 @@ const movimentoSchema = z.object({
   melosa_comprovante_storage_path: z.string().optional().nullable(),
   melosa_quantidade_abastecida: z.string().optional().nullable(),
   melosa_quantidade_abastecida_storage_path: z.string().optional().nullable(),
+  melosa_encerrante_inicial_numero: z.string().optional().nullable(),
+  melosa_encerrante_final_numero: z.string().optional().nullable(),
   melosa_lacre_numero: z.string().optional().nullable(),
   melosa_lacre_storage_path: z.string().optional().nullable(),
   melosa_horimetro_equipamento_abastecido_numero: z.string().optional().nullable(),
@@ -430,6 +432,8 @@ const MELOSA_DB_COLUMN_KEYS = [
   "melosa_comprovante_storage_path",
   "melosa_quantidade_abastecida",
   "melosa_quantidade_abastecida_storage_path",
+  "melosa_encerrante_inicial_numero",
+  "melosa_encerrante_final_numero",
   "melosa_lacre_numero",
   "melosa_lacre_storage_path",
   "melosa_horimetro_equipamento_abastecido_numero",
@@ -1604,6 +1608,29 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       if (categoria != null && categoria !== "ESTACIONARIA" && categoria !== "MOVEL") {
         return res.status(400).json({ error: "melosa_categoria inválido (use ESTACIONARIA ou MOVEL)" });
       }
+      const isUsina = Number(payload.obra_codigo) === 9020;
+      const encerranteInicial = payload.melosa_encerrante_inicial_numero?.trim() ?? "";
+      const encerranteFinal = payload.melosa_encerrante_final_numero?.trim() ?? "";
+      if (isUsina) {
+        if (!encerranteInicial) {
+          return res.status(400).json({ error: "melosa_encerrante_inicial_numero é obrigatório na obra Usina" });
+        }
+        if (!encerranteFinal) {
+          return res.status(400).json({ error: "melosa_encerrante_final_numero é obrigatório na obra Usina" });
+        }
+        const inicialNum = parseMedidorMelosaNumero(encerranteInicial);
+        const finalNum = parseMedidorMelosaNumero(encerranteFinal);
+        if (inicialNum == null || finalNum == null) {
+          return res.status(400).json({ error: "Encerrante inicial/final inválido" });
+        }
+        if (finalNum < inicialNum) {
+          return res.status(400).json({ error: "Encerrante final deve ser maior ou igual ao inicial" });
+        }
+      } else if (encerranteInicial || encerranteFinal) {
+        return res.status(400).json({
+          error: "Encerrante inicial/final só é permitido na obra Usina (9020)",
+        });
+      }
       if (!payload.melosa_quantidade_abastecida?.trim()) {
         return res.status(400).json({ error: "melosa_quantidade_abastecida é obrigatório" });
       }
@@ -1705,6 +1732,8 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         melosa_comprovante_storage_path: payload.melosa_comprovante_storage_path ?? null,
         melosa_quantidade_abastecida: payload.melosa_quantidade_abastecida ?? null,
         melosa_quantidade_abastecida_storage_path: payload.melosa_quantidade_abastecida_storage_path ?? null,
+        melosa_encerrante_inicial_numero: isUsina ? encerranteInicial || null : null,
+        melosa_encerrante_final_numero: isUsina ? encerranteFinal || null : null,
         melosa_lacre_numero: lacreNumero || null,
         melosa_lacre_storage_path: lacrePath || null,
         melosa_horimetro_equipamento_abastecido_numero: payload.melosa_horimetro_equipamento_abastecido_numero ?? null,

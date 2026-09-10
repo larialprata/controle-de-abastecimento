@@ -9,7 +9,11 @@ export const OBRAS = [
   { codigo: 247, nome: "ATA" },
   { codigo: 248, nome: "ATA" },
   { codigo: 249, nome: "ATA" },
+  { codigo: 9020, nome: "Usina" },
 ] as const;
+
+/** Obra Usina: na retirada melosa exige Encerrante Inicial/Final. */
+export const OBRA_USINA_CODIGO = 9020;
 
 export type Obra = (typeof OBRAS)[number];
 

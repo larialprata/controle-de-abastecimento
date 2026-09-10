@@ -38,7 +38,7 @@ import {
 } from "./src/lib/melosaFlowCheckpoint";
 import { clearOutbox, enqueueOutbox, initDb, outboxCount } from "./src/db/sqlite";
 import { syncOutbox } from "./src/sync/syncOutbox";
-import { OBRAS } from "./src/constants/obras";
+import { OBRAS, OBRA_USINA_CODIGO } from "./src/constants/obras";
 import type { MovimentoTipo, MovimentacaoPayload } from "./src/types/movimentacao";
 import { v4 as uuidv4 } from "uuid";
 import { apiGet, apiPost, registerCredentials } from "./src/lib/api";
@@ -837,6 +837,8 @@ export default function App() {
   const [melosaComprovanteFotoUri, setMelosaComprovanteFotoUri] = useState<string | null>(null);
   const [melosaQuantidadeAbastecidaTexto, setMelosaQuantidadeAbastecidaTexto] = useState("");
   const [melosaQuantidadeAbastecidaFotoUri, setMelosaQuantidadeAbastecidaFotoUri] = useState<string | null>(null);
+  const [melosaEncerranteInicialTexto, setMelosaEncerranteInicialTexto] = useState("");
+  const [melosaEncerranteFinalTexto, setMelosaEncerranteFinalTexto] = useState("");
   const [melosaHorimetroEquipamentoNumero, setMelosaHorimetroEquipamentoNumero] = useState("");
   const [melosaHorimetroEquipamentoFotoUri, setMelosaHorimetroEquipamentoFotoUri] = useState<string | null>(null);
   const [melosaNaoTenhoHorimetro, setMelosaNaoTenhoHorimetro] = useState(false);
@@ -991,6 +993,8 @@ export default function App() {
     setMelosaEquipamentoEmpresa(checkpoint.melosaEquipamentoEmpresa);
     setMelosaQuantidadeAbastecidaTexto(checkpoint.melosaQuantidadeAbastecidaTexto);
     setMelosaQuantidadeAbastecidaFotoUri(checkpoint.melosaQuantidadeAbastecidaFotoUri);
+    setMelosaEncerranteInicialTexto(checkpoint.melosaEncerranteInicialTexto ?? "");
+    setMelosaEncerranteFinalTexto(checkpoint.melosaEncerranteFinalTexto ?? "");
     setMelosaHorimetroEquipamentoNumero(checkpoint.melosaHorimetroEquipamentoNumero);
     setMelosaHorimetroEquipamentoFotoUri(checkpoint.melosaHorimetroEquipamentoFotoUri);
     setMelosaNaoTenhoHorimetro(checkpoint.melosaNaoTenhoHorimetro);
@@ -1023,6 +1027,8 @@ export default function App() {
       melosaEquipamentoEmpresa,
       melosaQuantidadeAbastecidaTexto,
       melosaQuantidadeAbastecidaFotoUri,
+      melosaEncerranteInicialTexto,
+      melosaEncerranteFinalTexto,
       melosaHorimetroEquipamentoNumero,
       melosaHorimetroEquipamentoFotoUri,
       melosaNaoTenhoHorimetro,
@@ -1295,6 +1301,8 @@ export default function App() {
     setMelosaComprovanteFotoUri(null);
     setMelosaQuantidadeAbastecidaTexto("");
     setMelosaQuantidadeAbastecidaFotoUri(null);
+    setMelosaEncerranteInicialTexto("");
+    setMelosaEncerranteFinalTexto("");
     setMelosaNaoTenhoHorimetro(false);
     setMelosaHorimetroMotivo("");
     setMelosaLubrificado(false);
@@ -2079,6 +2087,29 @@ export default function App() {
     return value;
   }
 
+  function isMelosaObraUsina(obraCodigo = melosaObraCodigo) {
+    return Number(obraCodigo) === OBRA_USINA_CODIGO;
+  }
+
+  function syncMelosaQuantidadeFromEncerrante(inicialTexto: string, finalTexto: string) {
+    const inicial = parseMelosaMedidorNumero(inicialTexto);
+    const final = parseMelosaMedidorNumero(finalTexto);
+    if (inicial == null || final == null || final < inicial) return;
+    const diff = final - inicial;
+    const formatted = Number.isInteger(diff) ? String(diff) : String(Number(diff.toFixed(3)));
+    setMelosaQuantidadeAbastecidaTexto(formatted);
+  }
+
+  function onMelosaEncerranteInicialChange(text: string) {
+    setMelosaEncerranteInicialTexto(text);
+    syncMelosaQuantidadeFromEncerrante(text, melosaEncerranteFinalTexto);
+  }
+
+  function onMelosaEncerranteFinalChange(text: string) {
+    setMelosaEncerranteFinalTexto(text);
+    syncMelosaQuantidadeFromEncerrante(melosaEncerranteInicialTexto, text);
+  }
+
   async function captureLocationAndAddress(): Promise<{
     latitude: number;
     longitude: number;
@@ -2627,6 +2658,26 @@ export default function App() {
       Alert.alert("Insumo obrigatório", "Selecione o insumo (Diesel ou Gasolina).");
       return;
     }
+    if (isMelosaObraUsina()) {
+      if (!melosaEncerranteInicialTexto.trim()) {
+        Alert.alert("Encerrante obrigatório", "Informe o Encerrante Inicial.");
+        return;
+      }
+      if (!melosaEncerranteFinalTexto.trim()) {
+        Alert.alert("Encerrante obrigatório", "Informe o Encerrante Final.");
+        return;
+      }
+      const inicial = parseMelosaMedidorNumero(melosaEncerranteInicialTexto);
+      const final = parseMelosaMedidorNumero(melosaEncerranteFinalTexto);
+      if (inicial == null || final == null) {
+        Alert.alert("Encerrante inválido", "Informe números válidos para Encerrante Inicial e Final.");
+        return;
+      }
+      if (final < inicial) {
+        Alert.alert("Encerrante inválido", "O Encerrante Final deve ser maior ou igual ao Inicial.");
+        return;
+      }
+    }
     if (!melosaQuantidadeAbastecidaTexto.trim()) {
       Alert.alert("Quantidade obrigatória", "Informe a quantidade abastecida em litros.");
       return;
@@ -2753,6 +2804,12 @@ export default function App() {
       melosa_comprovante_storage_path: null,
       melosa_quantidade_abastecida: melosaQuantidadeAbastecidaTexto.trim(),
       melosa_quantidade_abastecida_storage_path: quantidadePath,
+      melosa_encerrante_inicial_numero: isMelosaObraUsina()
+        ? melosaEncerranteInicialTexto.trim() || null
+        : null,
+      melosa_encerrante_final_numero: isMelosaObraUsina()
+        ? melosaEncerranteFinalTexto.trim() || null
+        : null,
       melosa_horimetro_equipamento_abastecido_numero: incluirHorimetro
         ? melosaHorimetroEquipamentoNumero.trim() || null
         : melosaHorimetroMotivo === "QUEBRADO"
@@ -2824,8 +2881,33 @@ export default function App() {
       Alert.alert("Insumo obrigatório", "Selecione o insumo (Diesel ou Gasolina).");
       return;
     }
+    if (isMelosaObraUsina()) {
+      if (!melosaEncerranteInicialTexto.trim()) {
+        Alert.alert("Encerrante obrigatório", "Informe o Encerrante Inicial.");
+        return;
+      }
+      if (!melosaEncerranteFinalTexto.trim()) {
+        Alert.alert("Encerrante obrigatório", "Informe o Encerrante Final.");
+        return;
+      }
+      const inicial = parseMelosaMedidorNumero(melosaEncerranteInicialTexto);
+      const final = parseMelosaMedidorNumero(melosaEncerranteFinalTexto);
+      if (inicial == null || final == null) {
+        Alert.alert("Encerrante inválido", "Informe números válidos para Encerrante Inicial e Final.");
+        return;
+      }
+      if (final < inicial) {
+        Alert.alert("Encerrante inválido", "O Encerrante Final deve ser maior ou igual ao Inicial.");
+        return;
+      }
+    }
     if (!melosaQuantidadeAbastecidaTexto.trim()) {
       Alert.alert("Quantidade obrigatória", "Informe a quantidade abastecida em litros.");
+      return;
+    }
+    const litros = parseMelosaMedidorNumero(melosaQuantidadeAbastecidaTexto);
+    if (litros == null || litros <= 0) {
+      Alert.alert("Quantidade inválida", "Informe uma quantidade abastecida válida (maior que zero).");
       return;
     }
     if (!melosaQuantidadeAbastecidaFotoUri) {
@@ -3510,7 +3592,14 @@ export default function App() {
                   <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
                     <Picker
                       selectedValue={melosaObraCodigo}
-                      onValueChange={(v) => setMelosaObraCodigo(Number(v))}
+                      onValueChange={(v) => {
+                        const codigo = Number(v);
+                        setMelosaObraCodigo(codigo);
+                        if (codigo !== OBRA_USINA_CODIGO) {
+                          setMelosaEncerranteInicialTexto("");
+                          setMelosaEncerranteFinalTexto("");
+                        }
+                      }}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
                       {obrasDisponiveis.map((o) => (
@@ -3627,6 +3716,33 @@ export default function App() {
                       <Picker.Item label="Gasolina" value="GASOLINA" />
                     </Picker>
                   </View>
+
+                  {isMelosaObraUsina() ? (
+                    <>
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                        Encerrante Inicial
+                      </Text>
+                      <TextInput
+                        value={melosaEncerranteInicialTexto}
+                        onChangeText={onMelosaEncerranteInicialChange}
+                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                        placeholder="Ex.: 1000"
+                        placeholderTextColor={inputPlaceholderColor}
+                        keyboardType="decimal-pad"
+                      />
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                        Encerrante Final
+                      </Text>
+                      <TextInput
+                        value={melosaEncerranteFinalTexto}
+                        onChangeText={onMelosaEncerranteFinalChange}
+                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                        placeholder="Ex.: 1100"
+                        placeholderTextColor={inputPlaceholderColor}
+                        keyboardType="decimal-pad"
+                      />
+                    </>
+                  ) : null}
 
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
                     Quantidade Abastecida
@@ -3953,6 +4069,26 @@ export default function App() {
                         {obraResumoLabel}
                       </Text>
                     </View>
+                    {isMelosaObraUsina() ? (
+                      <>
+                        <View style={styles.melosaResumoRow}>
+                          <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                            Encerrante Inicial
+                          </Text>
+                          <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                            {melosaEncerranteInicialTexto.trim() || "—"}
+                          </Text>
+                        </View>
+                        <View style={styles.melosaResumoRow}>
+                          <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                            Encerrante Final
+                          </Text>
+                          <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                            {melosaEncerranteFinalTexto.trim() || "—"}
+                          </Text>
+                        </View>
+                      </>
+                    ) : null}
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                         Ativo Melosa

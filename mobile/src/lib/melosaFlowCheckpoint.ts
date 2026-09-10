@@ -13,6 +13,8 @@ export type MelosaFlowCheckpoint = {
   melosaEquipamentoEmpresa: string;
   melosaQuantidadeAbastecidaTexto: string;
   melosaQuantidadeAbastecidaFotoUri: string | null;
+  melosaEncerranteInicialTexto?: string;
+  melosaEncerranteFinalTexto?: string;
   melosaHorimetroEquipamentoNumero: string;
   melosaHorimetroEquipamentoFotoUri: string | null;
   melosaNaoTenhoHorimetro: boolean;
