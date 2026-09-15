@@ -828,6 +828,89 @@ router.post("/melosa/movimentacoes", requireAuth, async (req: AuthedRequest, res
   }
 });
 
+const melosaTransferenciaWebSchema = z.object({
+  obra_codigo: z.number().int(),
+  data_hora: z.string().datetime(),
+  ativo_melosa_origem: z.string().min(1),
+  ativo_melosa_destino: z.string().min(1),
+  litros: z.number().positive(),
+  melosa_combustivel_tipo_retirada: z.string().optional().nullable(),
+  obs: z.string().optional().nullable(),
+});
+
+// Transferência melosa → melosa (registro manual pela web).
+router.post("/melosa/transferencias", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const parsedBody = melosaTransferenciaWebSchema.safeParse(req.body);
+    if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const payload = parsedBody.data;
+
+    const blocked = await denyIfNoBiWrite(service, req.userId, "bi_melosa", "add");
+    if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+
+    try {
+      await assertUserObraAccess(service, req.userId, payload.obra_codigo);
+    } catch (e) {
+      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+
+    const result = await registrarTransferenciaMelosa(service, {
+      usuarioId: req.userId,
+      obraCodigo: payload.obra_codigo,
+      dataHora: payload.data_hora,
+      ativoOrigem: payload.ativo_melosa_origem,
+      ativoDestino: payload.ativo_melosa_destino,
+      litros: payload.litros,
+      combustivelTipo: payload.melosa_combustivel_tipo_retirada,
+      obs: payload.obs,
+    });
+
+    await logMovimentacaoAudit(service, {
+      entity: "melosa",
+      action: "insert",
+      operationId: result.saida_operation_id,
+      obraCodigo: payload.obra_codigo,
+      actorUserId: req.userId,
+      before: null,
+      after: {
+        tipo: "TRANSFERENCIA_MELOSA",
+        ativo_melosa_origem: payload.ativo_melosa_origem.trim().toUpperCase(),
+        ativo_melosa_destino: payload.ativo_melosa_destino.trim().toUpperCase(),
+        litros: payload.litros,
+        saida_operation_id: result.saida_operation_id,
+        entrada_operation_id: result.entrada_operation_id,
+        ciclo_numero: result.ciclo.ciclo_numero,
+      },
+    });
+
+    return res.json({
+      ok: true,
+      saida_operation_id: result.saida_operation_id,
+      entrada_operation_id: result.entrada_operation_id,
+      ciclo_numero: result.ciclo.ciclo_numero,
+      ciclo_status: result.ciclo.status,
+      volume_excedente: result.ciclo.volume_excedente,
+    });
+  } catch (err: any) {
+    const msg = err?.message ?? "Unknown error";
+    const status =
+      typeof msg === "string" &&
+      (msg.includes("não está cadastrado") ||
+        msg.includes("devem ser") ||
+        msg.includes("Informe") ||
+        msg.includes("Litros") ||
+        msg.includes("Data/hora"))
+        ? 400
+        : 500;
+    return res.status(status).json({ error: msg });
+  }
+});
+
 async function assertCanEditMelosaMov(
   service: ReturnType<typeof createSupabaseServiceRole>,
   userId: string,
