@@ -119,16 +119,35 @@ type RawEvento = {
   ciclo_numero: number | null;
 };
 
-async function findCapacidadeMelosa(service: SupabaseClient, ativo: string): Promise<number | null> {
+type MelosaCadastro = {
+  capacidade_litros: number | null;
+  saldo_inicial_litros: number;
+  saldo_inicial_em: string | null;
+};
+
+async function findMelosaCadastro(service: SupabaseClient, ativo: string): Promise<MelosaCadastro> {
   const { data } = await service
     .from("equipamentos")
-    .select("capacidade_litros, ativo, tipo")
+    .select("capacidade_litros, saldo_inicial_litros, saldo_inicial_em, ativo, tipo")
     .eq("tipo", "MELOSA");
-  if (!data?.length) return null;
+  const empty: MelosaCadastro = {
+    capacidade_litros: null,
+    saldo_inicial_litros: 0,
+    saldo_inicial_em: null,
+  };
+  if (!data?.length) return empty;
   const row = data.find((r) => normalizeAtivo(String(r.ativo ?? "")) === ativo);
-  if (!row) return null;
+  if (!row) return empty;
   const cap = toNum(row.capacidade_litros);
-  return cap > 0 ? cap : null;
+  const saldo =
+    row.saldo_inicial_litros != null && Number.isFinite(toNum(row.saldo_inicial_litros))
+      ? toNum(row.saldo_inicial_litros)
+      : 0;
+  return {
+    capacidade_litros: cap > 0 ? cap : null,
+    saldo_inicial_litros: Math.max(0, saldo),
+    saldo_inicial_em: row.saldo_inicial_em ? String(row.saldo_inicial_em) : null,
+  };
 }
 
 function buildPorDia(eventos: FluxoEvento[]): FluxoDiaResumo[] {
@@ -160,13 +179,35 @@ function buildPorDia(eventos: FluxoEvento[]): FluxoDiaResumo[] {
 function aplicarSaldos(
   raw: RawEvento[],
   capacidade: number | null,
+  opts?: { saldoInicialLitros?: number; saldoInicialEm?: string | null },
 ): FluxoEvento[] {
   let saldoTanque = 0;
-  let saldoMelosa = 0;
+  let saldoMelosa = Math.max(0, opts?.saldoInicialLitros ?? 0);
+  const cutoffMs =
+    opts?.saldoInicialEm && !Number.isNaN(new Date(opts.saldoInicialEm).getTime())
+      ? new Date(opts.saldoInicialEm).getTime()
+      : null;
   const out: FluxoEvento[] = [];
 
   raw.forEach((ev) => {
     const alertas: string[] = [];
+    const evMs = new Date(ev.data_hora).getTime();
+    const antesDoSaldoInicial =
+      cutoffMs != null && Number.isFinite(evMs) && evMs < cutoffMs;
+    const afetaMelosa = ev.tipo === "enchimento_melosa" || ev.tipo === "abastecimento_equip";
+
+    if (antesDoSaldoInicial && afetaMelosa) {
+      out.push({
+        ...ev,
+        saldo_tanque: saldoTanque,
+        saldo_melosa: saldoMelosa,
+        capacidade_melosa: capacidade,
+        alertas: [
+          "Evento anterior à quantidade cadastrada na melosa — já está embutido no saldo inicial e não altera o nível.",
+        ],
+      });
+      return;
+    }
 
     if (ev.tipo === "entrada_tanque") {
       saldoTanque += ev.litros;
@@ -223,7 +264,8 @@ export async function buildMelosaFluxo(
   const ativo = normalizeAtivo(params.ativoMelosa);
   if (!ativo) throw new Error("Informe o ativo da melosa.");
 
-  const capacidade = await findCapacidadeMelosa(service, ativo);
+  const cadastro = await findMelosaCadastro(service, ativo);
+  const capacidade = cadastro.capacidade_litros;
 
   const { data: ciclosData } = await service
     .from("melosa_ciclos")
@@ -370,7 +412,10 @@ export async function buildMelosaFluxo(
   const limit = params.limit ?? 500;
   const limited = rawEventos.length > limit ? rawEventos.slice(-limit) : rawEventos;
 
-  const eventos = aplicarSaldos(limited, capacidade);
+  const eventos = aplicarSaldos(limited, capacidade, {
+    saldoInicialLitros: cadastro.saldo_inicial_litros,
+    saldoInicialEm: cadastro.saldo_inicial_em,
+  });
   const alertasCount = eventos.filter((e) => e.alertas.length > 0).length;
 
   let totalEntrada = 0;
@@ -393,7 +438,7 @@ export async function buildMelosaFluxo(
     eventos,
     resumo: {
       saldo_tanque_atual: ultimo?.saldo_tanque ?? 0,
-      saldo_melosa_atual: ultimo?.saldo_melosa ?? 0,
+      saldo_melosa_atual: ultimo?.saldo_melosa ?? cadastro.saldo_inicial_litros,
       total_entrada_tanque: totalEntrada,
       total_retirada_melosa: totalRetirada,
       total_abastecimentos: totalAbast,

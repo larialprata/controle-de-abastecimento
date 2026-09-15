@@ -34,21 +34,56 @@ function toNum(v: unknown): number {
   return 0;
 }
 
+type MelosaCadastro = {
+  capacidade_litros: number | null;
+  saldo_inicial_litros: number;
+  saldo_inicial_em: string | null;
+};
+
+async function findMelosaCadastro(
+  service: SupabaseClient,
+  ativoMelosa: string,
+): Promise<MelosaCadastro> {
+  const ativo = normalizeAtivo(ativoMelosa);
+  const empty: MelosaCadastro = {
+    capacidade_litros: null,
+    saldo_inicial_litros: 0,
+    saldo_inicial_em: null,
+  };
+  const { data } = await service
+    .from("equipamentos")
+    .select("capacidade_litros, saldo_inicial_litros, saldo_inicial_em, ativo, tipo")
+    .eq("tipo", "MELOSA");
+
+  if (!data?.length) return empty;
+  const row = data.find((r) => normalizeAtivo(String(r.ativo ?? "")) === ativo);
+  if (!row) return empty;
+  const cap = toNum(row.capacidade_litros);
+  const saldo =
+    row.saldo_inicial_litros != null && Number.isFinite(toNum(row.saldo_inicial_litros))
+      ? toNum(row.saldo_inicial_litros)
+      : 0;
+  return {
+    capacidade_litros: cap > 0 ? cap : null,
+    saldo_inicial_litros: Math.max(0, saldo),
+    saldo_inicial_em: row.saldo_inicial_em ? String(row.saldo_inicial_em) : null,
+  };
+}
+
 async function findCapacidadeMelosa(
   service: SupabaseClient,
   ativoMelosa: string,
 ): Promise<number | null> {
-  const ativo = normalizeAtivo(ativoMelosa);
-  const { data } = await service
-    .from("equipamentos")
-    .select("capacidade_litros, ativo, tipo")
-    .eq("tipo", "MELOSA");
+  const cadastro = await findMelosaCadastro(service, ativoMelosa);
+  return cadastro.capacidade_litros;
+}
 
-  if (!data?.length) return null;
-  const row = data.find((r) => normalizeAtivo(String(r.ativo ?? "")) === ativo);
-  if (!row) return null;
-  const cap = toNum(row.capacidade_litros);
-  return cap > 0 ? cap : null;
+function saldoInicialAplicaEm(dataHora: string, saldoInicialEm: string | null): boolean {
+  if (!saldoInicialEm) return true;
+  const evMs = new Date(dataHora).getTime();
+  const cutoffMs = new Date(saldoInicialEm).getTime();
+  if (!Number.isFinite(evMs) || !Number.isFinite(cutoffMs)) return true;
+  return evMs >= cutoffMs;
 }
 
 async function findCicloAnteriorMesmoAtivo(
@@ -186,7 +221,8 @@ export async function criarCicloRetiradaTanque(
     return existente;
   }
 
-  const capacidade = await findCapacidadeMelosa(service, ativo);
+  const cadastro = await findMelosaCadastro(service, ativo);
+  const capacidade = cadastro.capacidade_litros;
   const cicloAnterior = await findCicloAnteriorMesmoAtivo(service, ativo);
 
   let litrosSobraAnterior = 0;
@@ -198,6 +234,11 @@ export async function criarCicloRetiradaTanque(
       params.dataHora,
     );
     litrosSobraAnterior = calcularSobraAposAbastecimentos(litrosDisponivelNoCiclo(cicloAnterior), abast);
+  } else if (
+    cadastro.saldo_inicial_litros > 0 &&
+    saldoInicialAplicaEm(params.dataHora, cadastro.saldo_inicial_em)
+  ) {
+    litrosSobraAnterior = cadastro.saldo_inicial_litros;
   }
 
   const { volumeExcedente, status } = avaliarEnchimentoMelosa(
@@ -336,24 +377,44 @@ export async function enriquecerCiclosParaListagem(
     const chain = (chainData ?? []) as MelosaCicloRow[];
     if (!chain.length) continue;
 
-    const movimentacoes = await fetchMovimentacoesMelosaDesde(service, ativo, chain[0].data_hora);
+    const cadastro = await findMelosaCadastro(service, ativo);
+    const deFetch =
+      cadastro.saldo_inicial_litros > 0 &&
+      cadastro.saldo_inicial_em &&
+      new Date(cadastro.saldo_inicial_em).getTime() < new Date(chain[0].data_hora).getTime()
+        ? cadastro.saldo_inicial_em
+        : chain[0].data_hora;
+    const movimentacoes = await fetchMovimentacoesMelosaDesde(service, ativo, deFetch);
 
     // Propaga a sobra RECALCULADA ao longo da cadeia (não usa o valor armazenado,
     // que pode estar defasado quando há abastecimentos lançados retroativamente).
-    let disponivelAnterior = 0;
-    let dataHoraAnterior: string | null = null;
+    // Se não há ciclo anterior, parte do saldo cadastrado na melosa (quando aplicável).
+    let disponivelAnterior =
+      cadastro.saldo_inicial_litros > 0 &&
+      saldoInicialAplicaEm(chain[0].data_hora, cadastro.saldo_inicial_em)
+        ? cadastro.saldo_inicial_litros
+        : 0;
+    let dataHoraAnterior: string | null =
+      disponivelAnterior > 0 && cadastro.saldo_inicial_em
+        ? cadastro.saldo_inicial_em
+        : null;
 
     for (let i = 0; i < chain.length; i++) {
       const ciclo = chain[i];
 
       let sobraAnterior = 0;
-      if (i > 0 && dataHoraAnterior != null) {
+      if (i === 0 && dataHoraAnterior == null && disponivelAnterior > 0) {
+        sobraAnterior = disponivelAnterior;
+      } else if (dataHoraAnterior != null) {
         const abastEntreCiclos = sumMovimentacoesNoIntervalo(
           movimentacoes,
           dataHoraAnterior,
           ciclo.data_hora,
         );
         sobraAnterior = calcularSobraAposAbastecimentos(disponivelAnterior, abastEntreCiclos);
+      } else if (i > 0) {
+        // fallback: sem âncora de data, mantém comportamento antigo (sobra 0 no 1º)
+        sobraAnterior = 0;
       }
 
       const disponivel = sobraAnterior + toNum(ciclo.litros_retirada);

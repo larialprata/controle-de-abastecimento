@@ -29,6 +29,30 @@ function buildTanqueAtivo(obraCodigo: number, tanqueNumero: number): string {
   return `T${obraCodigo}-${tanqueNumero}`;
 }
 
+/** Aceita ISO completo ou só a data (YYYY-MM-DD → fim do dia em America/Sao_Paulo). */
+function resolveSaldoInicialEm(
+  input: string | null | undefined,
+  hasSaldo: boolean,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (!hasSaldo) return { ok: true, value: null };
+  const trimmed = input?.trim() ?? "";
+  if (!trimmed) {
+    return { ok: true, value: new Date().toISOString() };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const d = new Date(`${trimmed}T23:59:59.999-03:00`);
+    if (Number.isNaN(d.getTime())) {
+      return { ok: false, error: "Data da quantidade inválida." };
+    }
+    return { ok: true, value: d.toISOString() };
+  }
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) {
+    return { ok: false, error: "Data da quantidade inválida." };
+  }
+  return { ok: true, value: d.toISOString() };
+}
+
 const equipamentoTipoSchema = z.enum(["TANQUE", "MELOSA", "EQUIPAMENTO"]);
 const equipamentoMobilidadeSchema = z.enum(["ESTACIONARIO", "MOVEL"]);
 const equipamentoEmpresaInputSchema = z.string().trim().max(100).nullable().optional();
@@ -50,6 +74,7 @@ const createEquipamentoSchema = z
     tanque_numero: z.number().int().positive().optional(),
     capacidade_litros: z.number().positive().nullable().optional(),
     saldo_inicial_litros: z.number().nonnegative().nullable().optional(),
+    saldo_inicial_em: z.string().trim().min(1).nullable().optional(),
     mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
     empresa: equipamentoEmpresaInputSchema,
     placa: equipamentoPlacaInputSchema,
@@ -106,10 +131,28 @@ const createEquipamentoSchema = z
         path: ["capacidade_litros"],
       });
     }
-    if (data.tipo !== "TANQUE" && data.saldo_inicial_litros != null) {
+    if (data.tipo !== "TANQUE" && data.tipo !== "MELOSA" && data.saldo_inicial_litros != null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Saldo inicial só se aplica a tanques.",
+        message: "Saldo inicial só se aplica a tanques e melosas.",
+        path: ["saldo_inicial_litros"],
+      });
+    }
+    if (data.tipo !== "TANQUE" && data.tipo !== "MELOSA" && data.saldo_inicial_em != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Data do saldo inicial só se aplica a tanques e melosas.",
+        path: ["saldo_inicial_em"],
+      });
+    }
+    if (
+      (data.tipo === "TANQUE" || data.tipo === "MELOSA") &&
+      data.saldo_inicial_litros == null &&
+      data.saldo_inicial_em != null
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Informe a quantidade junto com a data de referência.",
         path: ["saldo_inicial_litros"],
       });
     }
@@ -473,6 +516,7 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     obra_codigo,
     capacidade_litros,
     saldo_inicial_litros,
+    saldo_inicial_em,
     mobilidade,
     empresa,
     placa,
@@ -521,8 +565,25 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   if (tipo === "TANQUE" && capacidade_litros != null && capacidade_litros <= 0) {
     return res.status(400).json({ error: "Capacidade do tanque deve ser maior que zero." });
   }
-  if (tipo === "TANQUE" && saldo_inicial_litros != null && saldo_inicial_litros < 0) {
-    return res.status(400).json({ error: "Quantidade no tanque não pode ser negativa." });
+  if (
+    (tipo === "TANQUE" || tipo === "MELOSA") &&
+    saldo_inicial_litros != null &&
+    saldo_inicial_litros < 0
+  ) {
+    return res.status(400).json({
+      error:
+        tipo === "MELOSA"
+          ? "Quantidade na melosa não pode ser negativa."
+          : "Quantidade no tanque não pode ser negativa.",
+    });
+  }
+
+  const saldoEmResolved = resolveSaldoInicialEm(
+    saldo_inicial_em,
+    (tipo === "TANQUE" || tipo === "MELOSA") && saldo_inicial_litros != null,
+  );
+  if (!saldoEmResolved.ok) {
+    return res.status(400).json({ error: saldoEmResolved.error });
   }
 
   if (obraCodigoNormalizado != null && req.userId) {
@@ -568,9 +629,9 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
       tanque_numero: tipo === "TANQUE" ? tanqueNumeroFinal : null,
       capacidade_litros:
         tipo === "MELOSA" || tipo === "TANQUE" ? (capacidade_litros ?? null) : null,
-      saldo_inicial_litros: tipo === "TANQUE" ? (saldo_inicial_litros ?? null) : null,
-      saldo_inicial_em:
-        tipo === "TANQUE" && saldo_inicial_litros != null ? new Date().toISOString() : null,
+      saldo_inicial_litros:
+        tipo === "TANQUE" || tipo === "MELOSA" ? (saldo_inicial_litros ?? null) : null,
+      saldo_inicial_em: tipo === "TANQUE" || tipo === "MELOSA" ? saldoEmResolved.value : null,
       mobilidade:
         tipo === "EQUIPAMENTO" ? resolveMobilidadeEquipamento(nome, mobilidade) : null,
       empresa: empresaNormalizada,
@@ -749,6 +810,7 @@ const updateEquipamentoSchema = z
     tanque_numero: z.number().int().positive().optional(),
     capacidade_litros: z.number().positive().nullable().optional(),
     saldo_inicial_litros: z.number().nonnegative().nullable().optional(),
+    saldo_inicial_em: z.string().trim().min(1).nullable().optional(),
     mobilidade: equipamentoMobilidadeSchema.nullable().optional(),
     empresa: equipamentoEmpresaInputSchema,
     placa: equipamentoPlacaInputSchema,
@@ -782,11 +844,28 @@ const updateEquipamentoSchema = z
         path: ["placa"],
       });
     }
-    if (data.tipo != null && data.tipo !== "TANQUE" && data.saldo_inicial_litros != null) {
+    if (
+      data.tipo != null &&
+      data.tipo !== "TANQUE" &&
+      data.tipo !== "MELOSA" &&
+      data.saldo_inicial_litros != null
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Saldo inicial só se aplica a tanques.",
+        message: "Saldo inicial só se aplica a tanques e melosas.",
         path: ["saldo_inicial_litros"],
+      });
+    }
+    if (
+      data.tipo != null &&
+      data.tipo !== "TANQUE" &&
+      data.tipo !== "MELOSA" &&
+      data.saldo_inicial_em != null
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Data do saldo inicial só se aplica a tanques e melosas.",
+        path: ["saldo_inicial_em"],
       });
     }
   });
@@ -833,11 +912,32 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
     return res.status(400).json({ error: "Informe uma descrição para o tanque." });
   }
   if (
-    tipo === "TANQUE" &&
+    (tipo === "TANQUE" || tipo === "MELOSA") &&
     parsed.data.saldo_inicial_litros != null &&
     parsed.data.saldo_inicial_litros < 0
   ) {
-    return res.status(400).json({ error: "Quantidade no tanque não pode ser negativa." });
+    return res.status(400).json({
+      error:
+        tipo === "MELOSA"
+          ? "Quantidade na melosa não pode ser negativa."
+          : "Quantidade no tanque não pode ser negativa.",
+    });
+  }
+
+  let saldoInicialPatch:
+    | { saldo_inicial_litros: number | null; saldo_inicial_em: string | null }
+    | undefined;
+  if (parsed.data.saldo_inicial_litros !== undefined) {
+    const aplicarSaldo = tipo === "TANQUE" || tipo === "MELOSA";
+    const litros = aplicarSaldo ? parsed.data.saldo_inicial_litros : null;
+    const emResolved = resolveSaldoInicialEm(parsed.data.saldo_inicial_em, litros != null);
+    if (!emResolved.ok) {
+      return res.status(400).json({ error: emResolved.error });
+    }
+    saldoInicialPatch = {
+      saldo_inicial_litros: litros,
+      saldo_inicial_em: emResolved.value,
+    };
   }
 
   let obra_codigo: number | null;
@@ -951,15 +1051,7 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
               tipo === "MELOSA" || tipo === "TANQUE" ? parsed.data.capacidade_litros : null,
           }
         : {}),
-      ...(parsed.data.saldo_inicial_litros !== undefined
-        ? {
-            saldo_inicial_litros: tipo === "TANQUE" ? parsed.data.saldo_inicial_litros : null,
-            saldo_inicial_em:
-              tipo === "TANQUE" && parsed.data.saldo_inicial_litros != null
-                ? new Date().toISOString()
-                : null,
-          }
-        : {}),
+      ...(saldoInicialPatch ?? {}),
     })
     .eq("ativo", ativoAtual)
     .select(EQUIPAMENTO_SELECT)

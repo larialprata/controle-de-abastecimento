@@ -36,10 +36,33 @@ type EquipamentoRow = {
   tipo: CadastroAtivoTipo;
   obra_codigo: number | null;
   capacidade_litros?: number | null;
+  saldo_inicial_litros?: number | null;
+  saldo_inicial_em?: string | null;
   mobilidade?: EquipamentoMobilidade | null;
   empresa?: string | null;
   placa?: string | null;
 };
+
+/** Ontem em America/Sao_Paulo, no formato YYYY-MM-DD (input type=date). */
+function dataOntemYmd(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+}
+
+function isoParaDataInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+}
+
+function formatDataSaldoBr(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
 
 const MOBILIDADE_LABEL: Record<EquipamentoMobilidade, string> = {
   ESTACIONARIO: "Estacionário",
@@ -97,6 +120,8 @@ export default function CadastroAtivosPage({
   const [formNome, setFormNome] = useState("");
   const [formObraCodigo, setFormObraCodigo] = useState<string>("");
   const [formCapacidadeLitros, setFormCapacidadeLitros] = useState<string>("");
+  const [formSaldoLitros, setFormSaldoLitros] = useState<string>("");
+  const [formSaldoData, setFormSaldoData] = useState<string>("");
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<EquipamentoRow | null>(null);
@@ -132,6 +157,7 @@ export default function CadastroAtivosPage({
   const [qrExporting, setQrExporting] = useState(false);
 
   const showCapacidade = fixedTipo === "MELOSA";
+  const showSaldoInicial = fixedTipo === "MELOSA";
   const showObra = fixedTipo === "EQUIPAMENTO";
 
   const obrasPorCodigo = useMemo(() => new Map(obras.map((o) => [o.codigo, o.nome])), [obras]);
@@ -410,6 +436,8 @@ export default function CadastroAtivosPage({
     setFormNome("");
     setFormObraCodigo("");
     setFormCapacidadeLitros("");
+    setFormSaldoLitros("");
+    setFormSaldoData(dataOntemYmd());
     setFormMobilidade("");
     setFormEmpresa("");
     setFormPlaca("");
@@ -441,6 +469,12 @@ export default function CadastroAtivosPage({
         ? String(e.capacidade_litros)
         : "",
     );
+    setFormSaldoLitros(
+      e.saldo_inicial_litros != null && Number.isFinite(Number(e.saldo_inicial_litros))
+        ? String(e.saldo_inicial_litros)
+        : "",
+    );
+    setFormSaldoData(isoParaDataInput(e.saldo_inicial_em) || dataOntemYmd());
     setFormMobilidade(e.mobilidade ?? "");
     setFormEmpresa(normalizeEquipamentoEmpresa(e.empresa) ?? "");
     setFormPlaca(e.placa ?? "");
@@ -515,6 +549,27 @@ export default function CadastroAtivosPage({
       }
     }
 
+    if (showSaldoInicial) {
+      const saldoTrim = formSaldoLitros.trim();
+      if (saldoTrim) {
+        const saldo = Number(saldoTrim.replace(",", "."));
+        if (!Number.isFinite(saldo) || saldo < 0) {
+          setFormError("Quantidade na melosa inválida.");
+          return;
+        }
+        const dataTrim = formSaldoData.trim();
+        if (!dataTrim || !/^\d{4}-\d{2}-\d{2}$/.test(dataTrim)) {
+          setFormError("Informe a data dessa quantidade (fim do dia).");
+          return;
+        }
+        payload.saldo_inicial_litros = saldo;
+        payload.saldo_inicial_em = dataTrim;
+      } else if (isEditing) {
+        payload.saldo_inicial_litros = null;
+        payload.saldo_inicial_em = null;
+      }
+    }
+
     if (showMobilidade) {
       const nomeParaRegra = nomeTrim || ativoTrim;
       payload.mobilidade = resolveMobilidadeEquipamento(
@@ -564,6 +619,8 @@ export default function CadastroAtivosPage({
       setFormNome("");
       setFormObraCodigo("");
       setFormCapacidadeLitros("");
+      setFormSaldoLitros("");
+      setFormSaldoData("");
       setFormMobilidade("");
       setFormEmpresa("");
       setFormPlaca("");
@@ -583,6 +640,8 @@ export default function CadastroAtivosPage({
     fixedTipo,
     formAtivo,
     formCapacidadeLitros,
+    formSaldoLitros,
+    formSaldoData,
     formMobilidade,
     formEmpresa,
     formPlaca,
@@ -591,6 +650,7 @@ export default function CadastroAtivosPage({
     isEditing,
     load,
     showCapacidade,
+    showSaldoInicial,
     showMobilidade,
     showEmpresa,
     showPlaca,
@@ -733,6 +793,7 @@ export default function CadastroAtivosPage({
     (showEmpresa ? 1 : 0) +
     (showMobilidade ? 1 : 0) +
     (showCapacidade ? 1 : 0) +
+    (showSaldoInicial ? 1 : 0) +
     (canWrite ? 1 : 0);
 
   return (
@@ -1011,6 +1072,11 @@ export default function CadastroAtivosPage({
                     Capacidade (L)
                   </th>
                 ) : null}
+                {showSaldoInicial ? (
+                  <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
+                    Qtd. (fim do dia)
+                  </th>
+                ) : null}
                 {canWrite ? (
                   <th className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-white/10 dark:bg-slate-800/90 dark:text-slate-400">
                     Ações
@@ -1094,6 +1160,22 @@ export default function CadastroAtivosPage({
                         {e.capacidade_litros != null
                           ? new Intl.NumberFormat("pt-BR").format(Number(e.capacidade_litros))
                           : "—"}
+                      </td>
+                    ) : null}
+                    {showSaldoInicial ? (
+                      <td className="border-b border-slate-100 px-4 py-3 text-slate-600 dark:border-white/5 dark:text-slate-400">
+                        {e.saldo_inicial_litros != null ? (
+                          <span className="tabular-nums">
+                            {new Intl.NumberFormat("pt-BR").format(Number(e.saldo_inicial_litros))} L
+                            {e.saldo_inicial_em ? (
+                              <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                                em {formatDataSaldoBr(e.saldo_inicial_em)}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
                       </td>
                     ) : null}
                     {canWrite ? (
@@ -1348,6 +1430,54 @@ export default function CadastroAtivosPage({
                     Usada no controle de ciclos para detectar enchimento acima do permitido.
                   </p>
                 </div>
+              ) : null}
+
+              {showSaldoInicial ? (
+                <>
+                  <div>
+                    <label
+                      htmlFor="cadastro-form-saldo"
+                      className="mb-1 block text-xs font-bold uppercase text-slate-500"
+                    >
+                      Quantidade na melosa (litros)
+                    </label>
+                    <input
+                      id="cadastro-form-saldo"
+                      type="text"
+                      inputMode="decimal"
+                      className={glassField}
+                      placeholder="Ex.: 3500"
+                      value={formSaldoLitros}
+                      onChange={(e) => setFormSaldoLitros(e.target.value)}
+                      disabled={formSaving}
+                    />
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Use a quantidade conhecida do <strong>fim do dia</strong> de referência (não
+                      precisa ser o valor deste instante).
+                    </p>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="cadastro-form-saldo-data"
+                      className="mb-1 block text-xs font-bold uppercase text-slate-500"
+                    >
+                      Data dessa quantidade (fim do dia)
+                    </label>
+                    <input
+                      id="cadastro-form-saldo-data"
+                      type="date"
+                      className={glassField}
+                      value={formSaldoData}
+                      onChange={(e) => setFormSaldoData(e.target.value)}
+                      disabled={formSaving}
+                    />
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Só enchimentos e abastecimentos <strong>depois</strong> desse dia passam a
+                      alterar o saldo. Ex.: se informar o fechamento de ontem, o movimento de hoje já
+                      conta.
+                    </p>
+                  </div>
+                </>
               ) : null}
             </div>
 

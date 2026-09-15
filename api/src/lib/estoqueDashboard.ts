@@ -408,19 +408,12 @@ async function buildMelosasEstoque(
   service: SupabaseClient,
   params: { obraCodigo?: number | null; obraScope?: number[] | null },
 ): Promise<EstoqueMelosaItem[]> {
-  let eqQuery = service
+  // Melosas são ativos globais (obra_codigo null) — não filtrar o cadastro por obra.
+  const { data: equipamentos } = await service
     .from("equipamentos")
-    .select("ativo, capacidade_litros, obra_codigo")
+    .select("ativo, capacidade_litros, obra_codigo, saldo_inicial_litros, saldo_inicial_em")
     .eq("tipo", "MELOSA")
     .order("ativo");
-
-  if (params.obraCodigo != null) {
-    eqQuery = eqQuery.eq("obra_codigo", params.obraCodigo);
-  } else if (params.obraScope?.length) {
-    eqQuery = eqQuery.in("obra_codigo", params.obraScope);
-  }
-
-  const { data: equipamentos } = await eqQuery;
 
   let cicloQuery = service.from("melosa_ciclos").select("*").order("ciclo_numero", { ascending: false });
   if (params.obraCodigo != null) {
@@ -439,6 +432,61 @@ async function buildMelosasEstoque(
     if (!ultimoCicloPorAtivo.has(ativo)) ultimoCicloPorAtivo.set(ativo, c);
   });
 
+  type MelosaEq = {
+    ativo: string;
+    capacidade_litros: unknown;
+    obra_codigo: number | null;
+    saldo_inicial_litros: unknown;
+    saldo_inicial_em: unknown;
+  };
+
+  const eqPorAtivo = new Map<string, MelosaEq>();
+  (equipamentos ?? []).forEach((eq) => {
+    const ativo = normPlaca(eq.ativo);
+    if (ativo) eqPorAtivo.set(ativo, eq as MelosaEq);
+  });
+
+  const cutoffPorAtivo = new Map<string, Date>();
+  const saldoInicialPorAtivo = new Map<string, number>();
+  eqPorAtivo.forEach((eq, ativo) => {
+    if (eq.saldo_inicial_litros == null || !Number.isFinite(toNum(eq.saldo_inicial_litros))) return;
+    saldoInicialPorAtivo.set(ativo, Math.max(0, toNum(eq.saldo_inicial_litros)));
+    const em = parseDataHoraMov(eq.saldo_inicial_em);
+    cutoffPorAtivo.set(ativo, em ?? SALDO_INICIAL_CUTOFF_PADRAO);
+  });
+
+  const enchimentosApos = new Map<string, number>();
+  ciclos.forEach((c) => {
+    const ativo = normPlaca(c.ativo_melosa_texto);
+    const cutoff = cutoffPorAtivo.get(ativo);
+    if (!cutoff) return;
+    const dh = parseDataHoraMov(c.data_hora);
+    if (!dh || dh.getTime() <= cutoff.getTime()) return;
+    enchimentosApos.set(ativo, (enchimentosApos.get(ativo) ?? 0) + toNum(c.litros_retirada));
+  });
+
+  const abastApos = new Map<string, number>();
+  if (saldoInicialPorAtivo.size > 0) {
+    const ativosComSaldo = Array.from(saldoInicialPorAtivo.keys());
+    const cutoffs = Array.from(cutoffPorAtivo.values());
+    const minCutoff = cutoffs.reduce((min, d) => (d.getTime() < min.getTime() ? d : min), cutoffs[0]!);
+    const { data: movMelosa } = await service
+      .from("melosa_movimentacoes")
+      .select("ativo_melosa_texto, litros, data_hora")
+      .in("ativo_melosa_texto", ativosComSaldo)
+      .gt("data_hora", minCutoff.toISOString())
+      .order("data_hora", { ascending: true });
+
+    (movMelosa ?? []).forEach((row) => {
+      const ativo = normPlaca(row.ativo_melosa_texto);
+      const cutoff = cutoffPorAtivo.get(ativo);
+      if (!cutoff) return;
+      const dh = parseDataHoraMov(row.data_hora);
+      if (!dh || dh.getTime() <= cutoff.getTime()) return;
+      abastApos.set(ativo, (abastApos.get(ativo) ?? 0) + toNum(row.litros));
+    });
+  }
+
   const ativosVistos = new Set<string>();
   const resultado: EstoqueMelosaItem[] = [];
 
@@ -455,14 +503,24 @@ async function buildMelosasEstoque(
     let saldo = 0;
     let cicloNumero: number | null = null;
 
-    if (ciclo) {
+    const saldoInicial = saldoInicialPorAtivo.get(key);
+    if (saldoInicial != null) {
+      saldo = Math.max(
+        0,
+        saldoInicial + (enchimentosApos.get(key) ?? 0) - (abastApos.get(key) ?? 0),
+      );
+      if (ciclo) cicloNumero = ciclo.ciclo_numero;
+    } else if (ciclo) {
       const m = metricas.get(ciclo.id);
       if (m) {
         saldo = m.litros_sobra_atual;
       } else {
         const sobraAnt = toNum(ciclo.litros_sobra_anterior);
         const abast = toNum(ciclo.litros_abastecidos);
-        saldo = calcularSobraAposAbastecimentos(litrosDisponivelNoCiclo({ ...ciclo, litros_sobra_anterior: sobraAnt }), abast);
+        saldo = calcularSobraAposAbastecimentos(
+          litrosDisponivelNoCiclo({ ...ciclo, litros_sobra_anterior: sobraAnt }),
+          abast,
+        );
       }
       cicloNumero = ciclo.ciclo_numero;
     }
@@ -482,10 +540,14 @@ async function buildMelosasEstoque(
     });
   };
 
-  (equipamentos ?? []).forEach((eq) => {
-    const ativo = normPlaca(eq.ativo);
+  eqPorAtivo.forEach((eq, ativo) => {
     const cap = eq.capacidade_litros != null ? toNum(eq.capacidade_litros) : null;
-    pushMelosa(ativo, cap && cap > 0 ? cap : null, eq.obra_codigo != null ? Number(eq.obra_codigo) : null, ultimoCicloPorAtivo.get(ativo));
+    pushMelosa(
+      ativo,
+      cap && cap > 0 ? cap : null,
+      eq.obra_codigo != null ? Number(eq.obra_codigo) : null,
+      ultimoCicloPorAtivo.get(ativo),
+    );
   });
 
   ultimoCicloPorAtivo.forEach((ciclo, ativo) => {

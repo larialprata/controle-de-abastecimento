@@ -406,6 +406,16 @@ const tanqueRetiradaEquipamentoWebSchema = z.object({
   obs: z.string().optional().nullable(),
 });
 
+const tanqueRetiradaMelosaWebSchema = z.object({
+  obra_codigo: z.number().int(),
+  data_hora: z.string().datetime(),
+  tanque_numero: tanqueNumeroSchema,
+  ativo_melosa_texto: z.string().min(1),
+  quantidade_litros: z.number().positive(),
+  combustivel_tipo: z.string().optional().nullable(),
+  obs: z.string().optional().nullable(),
+});
+
 const tanqueEntradaCombustivelWebSchema = z.object({
   obra_codigo: z.number().int(),
   data_hora: z.string().datetime(),
@@ -1402,6 +1412,107 @@ router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res
     });
 
     return res.json({ ok: true, operation_id: operationId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Unknown error" });
+  }
+});
+
+// Retirada do tanque para enchimento da melosa (registro manual pela web / usina sem celular).
+// Abate o saldo do tanque e abre ciclo de melosa (mesmo fluxo do app).
+router.post("/tanque/movimentacoes/melosa", requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const parsedBody = tanqueRetiradaMelosaWebSchema.safeParse(req.body);
+    if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+
+    const service = createSupabaseServiceRole();
+    const payload = parsedBody.data;
+
+    const blocked = await denyIfNoBiWrite(service, req.userId, "bi_tanque", "add");
+    if (blocked) return res.status(blocked.status).json({ error: blocked.error });
+
+    try {
+      await assertUserObraAccess(service, req.userId, payload.obra_codigo);
+    } catch (e) {
+      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+
+    const { data: tanqueCadastrado } = await service
+      .from("equipamentos")
+      .select("ativo")
+      .eq("tipo", "TANQUE")
+      .eq("obra_codigo", payload.obra_codigo)
+      .eq("tanque_numero", payload.tanque_numero)
+      .maybeSingle();
+    if (!tanqueCadastrado) {
+      return res.status(400).json({
+        error: `Tanque ${payload.tanque_numero} não cadastrado para a obra ${payload.obra_codigo}.`,
+      });
+    }
+
+    const ativoMelosa = payload.ativo_melosa_texto.trim().toUpperCase();
+    if (!ativoMelosa) return res.status(400).json({ error: "Informe a melosa de destino." });
+
+    const { data: melosas } = await service.from("equipamentos").select("ativo, tipo").eq("tipo", "MELOSA");
+    const melosaOk = (melosas ?? []).some(
+      (r) => String(r.ativo ?? "").trim().toUpperCase() === ativoMelosa,
+    );
+    if (!melosaOk) {
+      return res.status(400).json({ error: `Ativo ${ativoMelosa} não está cadastrado como melosa.` });
+    }
+
+    const operationId = randomUUID();
+    const quantidadeStr = String(payload.quantidade_litros);
+    const dataHoraIso = new Date(payload.data_hora).toISOString();
+
+    const retiradaRow = {
+      operation_id: operationId,
+      usuario_id: req.userId,
+      tipo: "RETIRADA_TANQUE",
+      obra_codigo: payload.obra_codigo,
+      data_hora: dataHoraIso,
+      litros: payload.quantidade_litros,
+      combustivel_tipo: payload.combustivel_tipo?.trim() || null,
+      tanque_numero: payload.tanque_numero,
+      tanque_quantidade_abastecida: quantidadeStr,
+      placa_texto: ativoMelosa,
+      placa_caminhao: ativoMelosa,
+      fornecedor_texto: ativoMelosa,
+      obs: payload.obs?.trim() || null,
+    };
+
+    const { error } = await service.from("movimentacoes").insert(retiradaRow);
+    if (error) return res.status(400).json({ error: error.message });
+
+    await logMovimentacaoAudit(service, {
+      entity: "tanque",
+      action: "insert",
+      operationId,
+      obraCodigo: payload.obra_codigo,
+      actorUserId: req.userId,
+      before: null,
+      after: retiradaRow as Record<string, unknown>,
+    });
+
+    const ciclo = await criarCicloRetiradaTanque(service, {
+      operationId,
+      ativoMelosa,
+      obraCodigo: payload.obra_codigo,
+      dataHora: dataHoraIso,
+      litrosRetirada: payload.quantidade_litros,
+    });
+
+    return res.json({
+      ok: true,
+      operation_id: operationId,
+      ciclo_numero: ciclo.ciclo_numero,
+      ciclo_anterior_numero: ciclo.ciclo_anterior_numero,
+      ciclo_status: ciclo.status,
+      volume_excedente: ciclo.volume_excedente,
+      litros_sobra_anterior: ciclo.litros_sobra_anterior,
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Unknown error" });
   }

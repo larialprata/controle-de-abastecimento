@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetState
 import ImagePanZoomLightbox from "../components/bi/ImagePanZoomLightbox";
 import TanqueTicketModal, { type TanqueTicketRow } from "../components/bi/TanqueTicketModal";
 import TanqueRetiradaEquipamentoModal from "../components/bi/TanqueRetiradaEquipamentoModal";
+import TanqueRetiradaMelosaModal from "../components/bi/TanqueRetiradaMelosaModal";
 import TanqueEntradaCombustivelModal from "../components/bi/TanqueEntradaCombustivelModal";
 import TanqueFotosModal, { type TanqueFotosRow } from "../components/bi/TanqueFotosModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
@@ -485,6 +486,7 @@ export default function TanqueBIPage() {
   const [ticketOpen, setTicketOpen] = useState(false);
   const [ticketRows, setTicketRows] = useState<TanqueTicketRow[]>([]);
   const [retiradaEquipOpen, setRetiradaEquipOpen] = useState(false);
+  const [retiradaMelosaOpen, setRetiradaMelosaOpen] = useState(false);
   const [entradaCombustivelOpen, setEntradaCombustivelOpen] = useState(false);
   const [fotosOpen, setFotosOpen] = useState(false);
   const [fotosRow, setFotosRow] = useState<TanqueFotosRow | null>(null);
@@ -1018,6 +1020,14 @@ export default function TanqueBIPage() {
             </button>
             <button
               type="button"
+              onClick={() => setRetiradaMelosaOpen(true)}
+              disabled={loading}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Retirada para Melosa
+            </button>
+            <button
+              type="button"
               onClick={() => setRetiradaEquipOpen(true)}
               disabled={loading}
               className="mr-auto rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1173,6 +1183,15 @@ export default function TanqueBIPage() {
         apiBase={apiBase}
         token={authToken}
         onClose={() => setRetiradaEquipOpen(false)}
+        onSaved={() => void load()}
+      />
+
+      <TanqueRetiradaMelosaModal
+        open={retiradaMelosaOpen}
+        obras={obras}
+        apiBase={apiBase}
+        token={authToken}
+        onClose={() => setRetiradaMelosaOpen(false)}
         onSaved={() => void load()}
       />
 
