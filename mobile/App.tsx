@@ -821,6 +821,7 @@ export default function App() {
   const [melosaObraCodigo, setMelosaObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
   const [melosaPlacaTexto, setMelosaPlacaTexto] = useState("");
   const [melosaFornecedorTexto, setMelosaFornecedorTexto] = useState("");
+  const [melosaIsTransbordo, setMelosaIsTransbordo] = useState(false);
   const [melosaEquipamentoPlacaTexto, setMelosaEquipamentoPlacaTexto] = useState("");
   const [melosaEquipamentoNomeTexto, setMelosaEquipamentoNomeTexto] = useState("");
   const [melosaEquipamentoEmpresa, setMelosaEquipamentoEmpresa] = useState("");
@@ -988,6 +989,7 @@ export default function App() {
     setMelosaObraCodigo(checkpoint.melosaObraCodigo);
     setMelosaPlacaTexto(checkpoint.melosaPlacaTexto);
     setMelosaFornecedorTexto(checkpoint.melosaFornecedorTexto);
+    setMelosaIsTransbordo(checkpoint.melosaIsTransbordo === true);
     setMelosaEquipamentoPlacaTexto(checkpoint.melosaEquipamentoPlacaTexto);
     setMelosaEquipamentoNomeTexto(checkpoint.melosaEquipamentoNomeTexto);
     setMelosaEquipamentoEmpresa(checkpoint.melosaEquipamentoEmpresa);
@@ -1022,6 +1024,7 @@ export default function App() {
       melosaObraCodigo,
       melosaPlacaTexto,
       melosaFornecedorTexto,
+      melosaIsTransbordo,
       melosaEquipamentoPlacaTexto,
       melosaEquipamentoNomeTexto,
       melosaEquipamentoEmpresa,
@@ -1180,6 +1183,7 @@ export default function App() {
 
   useEffect(() => {
     if (screen.name !== "melosa" || screen.step !== "register") return;
+    if (melosaIsTransbordo) return;
 
     const ativo = melosaFornecedorTexto.trim();
     if (!ativo) {
@@ -1227,7 +1231,7 @@ export default function App() {
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [melosaFornecedorTexto, melosaObraCodigo, session?.access_token, isOnline, screen]);
+  }, [melosaFornecedorTexto, melosaIsTransbordo, melosaObraCodigo, session?.access_token, isOnline, screen]);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -1288,6 +1292,7 @@ export default function App() {
     setMelosaObraCodigo(obrasDisponiveis[0]?.codigo ?? 229);
     setMelosaPlacaTexto("");
     setMelosaFornecedorTexto("");
+    setMelosaIsTransbordo(false);
     setMelosaEquipamentoPlacaTexto("");
     setMelosaEquipamentoNomeTexto("");
     setMelosaEquipamentoEmpresa("");
@@ -2784,6 +2789,12 @@ export default function App() {
       melosaAssinaturaMotoristaDataUrl as string,
     );
 
+    const origemMelosa = melosaPlacaTexto.trim().toUpperCase();
+    const destinoOuEquipamento = melosaFornecedorTexto.trim().toUpperCase();
+    const obsTransferencia = melosaIsTransbordo
+      ? `[TRANSFERENCIA_MELOSA] ${origemMelosa} → ${destinoOuEquipamento}`
+      : null;
+
     const payload: MovimentacaoPayload = {
       operation_id: operationId,
       tipo: "RETIRADA_MELOSA",
@@ -2792,8 +2803,10 @@ export default function App() {
       litros: litrosMelosa,
       placa_texto: melosaPlacaTexto.trim(),
       fornecedor_texto: melosaFornecedorTexto.trim(),
-      ativo_equipamento_empresa: melosaEquipamentoEmpresa || null,
-      ativo_equipamento_nome: melosaEquipamentoNomeTexto.trim() || null,
+      ativo_equipamento_empresa: melosaIsTransbordo ? null : melosaEquipamentoEmpresa || null,
+      ativo_equipamento_nome: melosaIsTransbordo
+        ? melosaEquipamentoNomeTexto.trim() || melosaFornecedorTexto.trim() || null
+        : melosaEquipamentoNomeTexto.trim() || null,
       melosa_operador_nome: driverFullName.trim() || null,
       melosa_categoria: null,
       tanque_numero: melosaTanqueNumero,
@@ -2833,15 +2846,17 @@ export default function App() {
       local_latitude: gpsLatitude,
       local_longitude: gpsLongitude,
       local_address: gpsAddress,
-      obs: null,
+      obs: obsTransferencia,
     };
 
     enqueueOutbox(operationId, payload);
     setPending(outboxCount());
 
     const ack = await finalizeSaveWithAck({
-      titulo: "Retirada da melosa",
-      ativo: melosaFornecedorTexto.trim() || melosaPlacaTexto.trim(),
+      titulo: melosaIsTransbordo ? "Transbordo entre melosas" : "Retirada da melosa",
+      ativo: melosaIsTransbordo
+        ? `${origemMelosa} → ${destinoOuEquipamento}`
+        : melosaFornecedorTexto.trim() || melosaPlacaTexto.trim(),
       litros: melosaQuantidadeAbastecidaTexto.trim() || litrosMelosa,
     });
 
@@ -2864,11 +2879,21 @@ export default function App() {
 
     const ativo = melosaFornecedorTexto.trim();
     if (!ativo) {
-      Alert.alert("Patrimônio Equipamento obrigatório", "Informe o Patrimônio Equipamento.");
+      Alert.alert(
+        melosaIsTransbordo ? "Melosa destino obrigatória" : "Patrimônio Equipamento obrigatório",
+        melosaIsTransbordo
+          ? "Selecione a melosa que vai receber o combustível."
+          : "Informe o Patrimônio Equipamento.",
+      );
       return;
     }
 
-    if (isOnline && session?.access_token) {
+    if (melosaIsTransbordo) {
+      if (ativo.toUpperCase() === melosaPlacaTexto.trim().toUpperCase()) {
+        Alert.alert("Melosas iguais", "Origem e destino devem ser melosas diferentes.");
+        return;
+      }
+    } else if (isOnline && session?.access_token) {
       void lookupMelosaEquipamentoPatrimonio(ativo);
     }
 
@@ -3500,7 +3525,9 @@ export default function App() {
       !melosaEquipamentoQrLoading &&
       !melosaEquipamentoAtivoLookupLoading;
     const melosaSubtitle = isRegister
-      ? "Dados iniciais da retirada"
+      ? melosaIsTransbordo
+        ? "Dados iniciais do transbordo"
+        : "Dados iniciais da retirada"
       : isQuantidadeAbastecida
         ? "Quantidade abastecida"
         : isHorimetro
@@ -3583,7 +3610,7 @@ export default function App() {
                 innerStyle={isQuantidadeAbastecida || isHorimetro || isResumo ? styles.glassInnerCompact : undefined}
               >
               <Text style={[styles.formTitle, !isDarkMode ? styles.formTitleLight : null]}>
-                Retirada tanque melosa
+                {melosaIsTransbordo ? "Transbordo entre melosas" : "Retirada tanque melosa"}
               </Text>
 
               {isRegister ? (
@@ -3613,7 +3640,18 @@ export default function App() {
                     <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
                       <Picker
                         selectedValue={melosaPlacaTexto}
-                        onValueChange={(v) => setMelosaPlacaTexto(String(v))}
+                        onValueChange={(v) => {
+                          const origem = String(v);
+                          setMelosaPlacaTexto(origem);
+                          if (
+                            melosaIsTransbordo &&
+                            melosaFornecedorTexto.trim() &&
+                            melosaFornecedorTexto.trim().toUpperCase() === origem.trim().toUpperCase()
+                          ) {
+                            setMelosaFornecedorTexto("");
+                            setMelosaEquipamentoNomeTexto("");
+                          }
+                        }}
                         style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                       >
                         <Picker.Item label="Selecione o ativo da melosa" value="" />
@@ -3642,6 +3680,124 @@ export default function App() {
                     </>
                   )}
 
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                    Tipo de retirada
+                  </Text>
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 6, marginBottom: 4 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.chip,
+                        !melosaIsTransbordo
+                          ? { backgroundColor: "#c00", borderColor: "#c00" }
+                          : !isDarkMode
+                            ? { backgroundColor: "#fff", borderColor: "#ccc" }
+                            : { backgroundColor: "#222", borderColor: "#444" },
+                        { flex: 1, alignItems: "center", justifyContent: "center" },
+                      ]}
+                      onPress={() => {
+                        if (!melosaIsTransbordo) return;
+                        setMelosaIsTransbordo(false);
+                        setMelosaFornecedorTexto("");
+                        setMelosaEquipamentoNomeTexto("");
+                        setMelosaEquipamentoEmpresa("");
+                        setMelosaEquipamentoPlacaTexto("");
+                      }}
+                      disabled={busy}
+                    >
+                      <Text style={{ color: !melosaIsTransbordo ? "#fff" : !isDarkMode ? "#333" : "#ddd", fontWeight: "700" }}>
+                        Equipamento
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.chip,
+                        melosaIsTransbordo
+                          ? { backgroundColor: "#c00", borderColor: "#c00" }
+                          : !isDarkMode
+                            ? { backgroundColor: "#fff", borderColor: "#ccc" }
+                            : { backgroundColor: "#222", borderColor: "#444" },
+                        { flex: 1, alignItems: "center", justifyContent: "center" },
+                      ]}
+                      onPress={() => {
+                        if (melosaIsTransbordo) return;
+                        setMelosaIsTransbordo(true);
+                        setMelosaFornecedorTexto("");
+                        setMelosaEquipamentoNomeTexto("");
+                        setMelosaEquipamentoEmpresa("");
+                        setMelosaEquipamentoPlacaTexto("");
+                        setMelosaEquipamentoQrOpen(false);
+                      }}
+                      disabled={busy}
+                    >
+                      <Text style={{ color: melosaIsTransbordo ? "#fff" : !isDarkMode ? "#333" : "#ddd", fontWeight: "700" }}>
+                        Transbordo
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4 }]}>
+                    {melosaIsTransbordo
+                      ? "Passar combustível de uma melosa para outra (ex.: 1563 → 1399)."
+                      : "Abastecer um equipamento (QR ou patrimônio)."}
+                  </Text>
+
+                  {melosaIsTransbordo ? (
+                    <>
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                        Melosa destino
+                      </Text>
+                      {melosasCadastradas.length > 0 ? (
+                        <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
+                          <Picker
+                            selectedValue={melosaFornecedorTexto}
+                            onValueChange={(v) => {
+                              const destino = String(v);
+                              setMelosaFornecedorTexto(destino);
+                              const melosa = melosasCadastradas.find(
+                                (m) => m.ativo.toUpperCase() === destino.trim().toUpperCase(),
+                              );
+                              setMelosaEquipamentoNomeTexto(
+                                melosa?.nome && melosa.nome !== melosa.ativo ? melosa.nome : destino,
+                              );
+                              setMelosaEquipamentoEmpresa("");
+                              setMelosaEquipamentoPlacaTexto("");
+                            }}
+                            style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
+                          >
+                            <Picker.Item label="Selecione a melosa de destino" value="" />
+                            {melosasCadastradas
+                              .filter(
+                                (m) =>
+                                  !melosaPlacaTexto.trim() ||
+                                  m.ativo.toUpperCase() !== melosaPlacaTexto.trim().toUpperCase(),
+                              )
+                              .map((m) => (
+                                <Picker.Item
+                                  key={m.ativo}
+                                  label={m.nome && m.nome !== m.ativo ? `${m.ativo} - ${m.nome}` : m.ativo}
+                                  value={m.ativo}
+                                />
+                              ))}
+                          </Picker>
+                        </View>
+                      ) : (
+                        <TextInput
+                          value={melosaFornecedorTexto}
+                          onChangeText={(t) => {
+                            setMelosaFornecedorTexto(t);
+                            setMelosaEquipamentoNomeTexto(t.trim().toUpperCase());
+                          }}
+                          style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                          placeholder="Ex.: CCL1399"
+                          placeholderTextColor={inputPlaceholderColor}
+                          autoCapitalize="characters"
+                        />
+                      )}
+                      <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
+                        A melosa de cima cede combustível para esta melosa.
+                      </Text>
+                    </>
+                  ) : (
+                    <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
                     Patrimônio Equipamento
                   </Text>
@@ -3700,6 +3856,8 @@ export default function App() {
                       Sem internet — a descrição e a empresa serão buscadas ao continuar, se estiver online.
                     </Text>
                   ) : null}
+                    </>
+                  )}
                 </>
               ) : null}
 
@@ -4091,7 +4249,7 @@ export default function App() {
                     ) : null}
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
-                        Ativo Melosa
+                        {melosaIsTransbordo ? "Melosa origem" : "Ativo Melosa"}
                       </Text>
                       <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
                         {melosaPlacaTexto.trim() || "—"}
@@ -4099,12 +4257,13 @@ export default function App() {
                     </View>
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
-                        Patrimônio Equipamento
+                        {melosaIsTransbordo ? "Melosa destino" : "Patrimônio Equipamento"}
                       </Text>
                       <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
                         {melosaFornecedorTexto.trim() || "—"}
                       </Text>
                     </View>
+                    {!melosaIsTransbordo ? (
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                         Descrição do equipamento
@@ -4113,6 +4272,8 @@ export default function App() {
                         {equipamentoDescricaoResumo}
                       </Text>
                     </View>
+                    ) : null}
+                    {!melosaIsTransbordo ? (
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                         Empresa do equipamento
@@ -4121,6 +4282,7 @@ export default function App() {
                         {labelEquipamentoEmpresa(melosaEquipamentoEmpresa)}
                       </Text>
                     </View>
+                    ) : null}
                     <View style={styles.melosaResumoRow}>
                       <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                         Motorista do equipamento

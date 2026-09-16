@@ -345,6 +345,48 @@ export async function vincularAbastecimentoAoCicloAberto(
   return ciclo.id;
 }
 
+/** Recalcula litros_abastecidos de um ciclo a partir das movimentações restantes. */
+export async function recalcularLitrosAbastecidosCiclo(
+  service: SupabaseClient,
+  cicloId: string,
+): Promise<number | null> {
+  const id = String(cicloId ?? "").trim();
+  if (!id) return null;
+
+  const { data: ciclo, error } = await service
+    .from("melosa_ciclos")
+    .select("id, ativo_melosa_texto, data_hora, ciclo_numero")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!ciclo) return null;
+
+  const ativo = normalizeAtivo(String(ciclo.ativo_melosa_texto ?? ""));
+  if (!ativo) return null;
+
+  const { data: proximoCiclo } = await service
+    .from("melosa_ciclos")
+    .select("data_hora")
+    .ilike("ativo_melosa_texto", ativo)
+    .gt("ciclo_numero", ciclo.ciclo_numero)
+    .order("ciclo_numero", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const abastRecalculado = await sumAbastecimentosEntre(
+    service,
+    ativo,
+    String(ciclo.data_hora),
+    proximoCiclo?.data_hora ?? null,
+  );
+  const { error: updErr } = await service
+    .from("melosa_ciclos")
+    .update({ litros_abastecidos: abastRecalculado })
+    .eq("id", id);
+  if (updErr) throw new Error(updErr.message);
+  return abastRecalculado;
+}
+
 export function litrosSobraAtualCiclo(
   ciclo: Pick<MelosaCicloRow, "litros_sobra_anterior" | "litros_retirada" | "litros_abastecidos">,
 ): number {

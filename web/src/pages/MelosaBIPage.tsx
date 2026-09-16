@@ -24,7 +24,7 @@ import {
 import { enrichMelosaTicketRowsWithSignatures, fetchMelosaPhotoSignedUrl } from "../lib/melosaPhotoUrl";
 import { labelEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { fmtEquipamentoTicketLabel, enrichMelosaRowsWithEquipamentoDescricao } from "../lib/equipamentoTicketLabel";
-import { biTableRowKey, resolveSelectedRows } from "../lib/biSelection";
+import { biMovementRowKey, resolveSelectedRows } from "../lib/biSelection";
 import {
   defaultPeriodoMesAtual,
   parseDateInputValue,
@@ -79,6 +79,13 @@ type LinhaMelosa = Record<string, unknown> & {
   usuario_full_name?: string | null;
   obs?: string | null;
 };
+
+function isTransbordoMelosa(m: LinhaMelosa): boolean {
+  return String(m.obs ?? "")
+    .trim()
+    .toUpperCase()
+    .includes("[TRANSFERENCIA_MELOSA]");
+}
 
 function toMelosaExcelInput(
   m: LinhaMelosa,
@@ -400,6 +407,7 @@ function municipioFromAddress(v: unknown): string {
 
 const PAGE_SIZE = 500;
 const TABLE_COL_COUNT = 17;
+const TRANSBORDO_COL_COUNT = 12;
 const TABLE_SCROLL_MAX_HEIGHT = "min(28.5rem, 52vh)";
 
 const labelCls =
@@ -595,8 +603,13 @@ export default function MelosaBIPage() {
     if (patrimonioFiltro) {
       const pat = patrimonioFiltro.trim().toUpperCase();
       rows = rows.filter((r) => {
-        const v = String(r.ativo_melosa_texto ?? r.placa_texto ?? "").trim().toUpperCase();
-        return v === pat;
+        const origem = String(r.ativo_melosa_texto ?? r.placa_texto ?? "").trim().toUpperCase();
+        if (origem === pat) return true;
+        if (!isTransbordoMelosa(r)) return false;
+        const destino = String(r.ativo_equipamento_texto ?? r.fornecedor_texto ?? "")
+          .trim()
+          .toUpperCase();
+        return destino === pat;
       });
     }
     const q = busca.trim().toLowerCase();
@@ -619,9 +632,18 @@ export default function MelosaBIPage() {
     return rows;
   }, [raw, busca, filtros, obraCodigosEmpresa, patrimonioFiltro, ticketFiltro]);
 
+  const abastecimentosFiltradas = useMemo(
+    () => filtradas.filter((r) => !isTransbordoMelosa(r)),
+    [filtradas],
+  );
+  const transbordosFiltradas = useMemo(
+    () => filtradas.filter((r) => isTransbordoMelosa(r)),
+    [filtradas],
+  );
+
   const naoCadastradosFiltrados = useMemo(
-    () => filtradas.filter(isEquipamentoNaoCadastrado),
-    [filtradas, isEquipamentoNaoCadastrado],
+    () => abastecimentosFiltradas.filter(isEquipamentoNaoCadastrado),
+    [abastecimentosFiltradas, isEquipamentoNaoCadastrado],
   );
 
   const naoCadastradosUnicos = useMemo(() => {
@@ -650,12 +672,22 @@ export default function MelosaBIPage() {
     return () => window.clearTimeout(timer);
   }, [highlightOp, loading, filtradas]);
 
-  const rowKey = useCallback((m: LinhaMelosa, idx: number) => biTableRowKey(m, idx), []);
+  const rowKey = useCallback((m: LinhaMelosa) => biMovementRowKey(m), []);
 
-  const visibleKeys = useMemo(() => filtradas.map((m, idx) => rowKey(m, idx)), [filtradas, rowKey]);
-  const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((k) => selectedKeys.includes(k));
+  const visibleKeysAbast = useMemo(
+    () => abastecimentosFiltradas.map((m) => rowKey(m)),
+    [abastecimentosFiltradas, rowKey],
+  );
+  const visibleKeysTransbordo = useMemo(
+    () => transbordosFiltradas.map((m) => rowKey(m)),
+    [transbordosFiltradas, rowKey],
+  );
+  const allAbastSelected =
+    visibleKeysAbast.length > 0 && visibleKeysAbast.every((k) => selectedKeys.includes(k));
+  const allTransbordoSelected =
+    visibleKeysTransbordo.length > 0 && visibleKeysTransbordo.every((k) => selectedKeys.includes(k));
   const selectedRows = useMemo(
-    () => resolveSelectedRows(filtradas, selectedKeys, rowKey),
+    () => resolveSelectedRows(filtradas, selectedKeys, (row) => rowKey(row)),
     [filtradas, selectedKeys, rowKey],
   );
   const selectedOperationIds = useMemo(() => {
@@ -917,8 +949,8 @@ export default function MelosaBIPage() {
   }, [apiBase, load, selectedOperationIds, token]);
 
   const handleExportExcelResumo = useCallback(async () => {
-    if (filtradas.length === 0) {
-      window.alert("Não há registros para exportar.");
+    if (abastecimentosFiltradas.length === 0) {
+      window.alert("Não há abastecimentos (sem transbordo) para exportar.");
       return;
     }
     if (!token?.trim()) {
@@ -926,8 +958,12 @@ export default function MelosaBIPage() {
       return;
     }
     try {
-      const baseRows = filtradas.map((m) => toMelosaBiResumoRow(m));
-      const rows = await enrichMelosaBiResumoRowsWithPhotoUrls(baseRows, filtradas, token);
+      const baseRows = abastecimentosFiltradas.map((m) => toMelosaBiResumoRow(m));
+      const rows = await enrichMelosaBiResumoRowsWithPhotoUrls(
+        baseRows,
+        abastecimentosFiltradas,
+        token,
+      );
       await downloadMelosaBiResumoExcel(rows, {
         periodoDe: dataDe,
         periodoAte: dataAte,
@@ -936,22 +972,22 @@ export default function MelosaBIPage() {
     } catch (err: unknown) {
       window.alert(err instanceof Error ? err.message : "Erro ao exportar Excel resumo");
     }
-  }, [dataAte, dataDe, filtradas, token]);
+  }, [abastecimentosFiltradas, dataAte, dataDe, token]);
 
   const handleExportExcel = useCallback(async () => {
-    if (filtradas.length === 0) {
-      window.alert("Não há registros para exportar.");
+    if (abastecimentosFiltradas.length === 0) {
+      window.alert("Não há abastecimentos (sem transbordo) para exportar.");
       return;
     }
     try {
       await downloadMelosaDescarbonizeExcel(
-        filtradas.map((m) => toMelosaExcelInput(m, mobilidadeByAtivo)),
+        abastecimentosFiltradas.map((m) => toMelosaExcelInput(m, mobilidadeByAtivo)),
         "bi-melosa",
       );
     } catch (err: unknown) {
       window.alert(err instanceof Error ? err.message : "Erro ao exportar Excel");
     }
-  }, [filtradas, mobilidadeByAtivo]);
+  }, [abastecimentosFiltradas, mobilidadeByAtivo]);
 
   const handleExportNaoCadastrados = useCallback(async () => {
     if (naoCadastradosFiltrados.length === 0) {
@@ -998,25 +1034,28 @@ export default function MelosaBIPage() {
         </div>
         {canAddBi ? (
           <div className="flex flex-col gap-1">
-            <span className={labelCls}>Movimentação</span>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={openAddForm}
-                disabled={loading}
-                className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
-              >
-                Adicionar movimentação
-              </button>
-              <button
-                type="button"
-                onClick={() => setTransfOpen(true)}
-                disabled={loading}
-                className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-700/20 transition hover:bg-sky-800 disabled:opacity-50"
-              >
-                Transferir melosa → melosa
-              </button>
-            </div>
+            <span className={labelCls}>Movimentação Melosa</span>
+            <button
+              type="button"
+              onClick={openAddForm}
+              disabled={loading}
+              className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition hover:bg-accent-hover disabled:opacity-50"
+            >
+              Adicionar movimentação
+            </button>
+          </div>
+        ) : null}
+        {canAddBi ? (
+          <div className="flex flex-col gap-1">
+            <span className={labelCls}>Transbordo Melosa</span>
+            <button
+              type="button"
+              onClick={() => setTransfOpen(true)}
+              disabled={loading}
+              className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-700/20 transition hover:bg-sky-800 disabled:opacity-50"
+            >
+              Registrar transbordo
+            </button>
           </div>
         ) : null}
         <div className="flex flex-col gap-1">
@@ -1123,6 +1162,10 @@ export default function MelosaBIPage() {
         Mostrando <strong className="text-slate-900 dark:text-white">{filtradas.length}</strong> de{" "}
         <strong className="text-slate-900 dark:text-white">{raw.length}</strong> linhas
         {filtroTextoAtivo ? " (filtrado)" : ""} ·{" "}
+        <strong className="text-slate-900 dark:text-white">{abastecimentosFiltradas.length}</strong> abastecimento
+        {abastecimentosFiltradas.length === 1 ? "" : "s"} ·{" "}
+        <strong className="text-slate-900 dark:text-white">{transbordosFiltradas.length}</strong> transbordo
+        {transbordosFiltradas.length === 1 ? "" : "s"} ·{" "}
         <strong className="text-slate-900 dark:text-white">{mapPoints.length}</strong> com coordenadas no mapa.
       </p>
 
@@ -1179,195 +1222,344 @@ export default function MelosaBIPage() {
         </div>
       </div>
 
+      <div className="flex flex-col gap-5">
       <div className={`flex min-w-0 flex-col overflow-hidden ${glassPanel} p-0`}>
         <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
           <h2 className="text-base font-bold text-slate-900 dark:text-white">Movimentações Melosa</h2>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            Retiradas registradas no app — role horizontalmente se necessário
+            Abastecimento de equipamentos — role horizontalmente se necessário
           </p>
-          {(() => {
-            const naoCadastrados = filtradas.filter(isEquipamentoNaoCadastrado).length;
-            if (naoCadastrados === 0) return null;
-            return (
-              <p className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-amber-200/80 px-2 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-500/25 dark:text-amber-100">
-                <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-500" aria-hidden />
-                {naoCadastrados} equipamento(s) com patrimônio não cadastrado no sistema (destacados em amarelo)
-              </p>
-            );
-          })()}
+          {naoCadastradosFiltrados.length > 0 ? (
+            <p className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-amber-200/80 px-2 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-500/25 dark:text-amber-100">
+              <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-500" aria-hidden />
+              {naoCadastradosFiltrados.length} equipamento(s) com patrimônio não cadastrado no sistema (destacados em
+              amarelo)
+            </p>
+          ) : null}
         </div>
         <div className="table-scroll" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
           <table className="w-full min-w-[1320px] border-collapse text-sm">
             <thead>
               <tr className="text-left align-middle">
                 <th className={`${thCls} w-10`}>
-                    <input
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setSelectedKeys((prev) => {
-                          if (checked) {
-                            const merged = new Set([...prev, ...visibleKeys]);
-                            return Array.from(merged);
-                          }
-                          const visibleSet = new Set(visibleKeys);
-                          return prev.filter((k) => !visibleSet.has(k));
-                        });
-                      }}
-                      aria-label="Selecionar todas as movimentações visíveis"
-                    />
-                  </th>
-                  <th className={`${thCls} min-w-[150px]`}>Obra</th>
-                  <th className={`${thCls} min-w-[120px]`}>Usuário</th>
-                  <th className={`${thCls} min-w-[96px]`}>Data início</th>
-                  <th className={`${thCls} min-w-[96px]`}>Data fim</th>
-                  <th className={`${thCls} min-w-[72px]`}>Horário</th>
-                  <th className={`${thCls} min-w-[110px]`}>Ativo Melosa</th>
-                  <th className={`${thCls} min-w-[120px]`}>Ativo equipamento</th>
-                  <th className={`${thCls} min-w-[88px]`}>Insumo</th>
-                  <th className={`${thCls} min-w-[100px]`}>Quantidade (L)</th>
-                  <th className={`${thCls} min-w-[100px]`}>Foto qtd. (L)</th>
-                  <th className={`${thCls} min-w-[88px]`}>Horímetro</th>
-                  <th className={`${thCls} min-w-[100px]`}>Foto horímetro</th>
-                  <th className={`${thCls} min-w-[88px]`}>Lubrificado</th>
-                  <th className={`${thCls} min-w-[120px]`}>Motorista</th>
-                  <th className={`${thCls} min-w-[100px]`}>Foto operador</th>
-                  <th className={`${thCls} min-w-[180px]`}>Local</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtradas.map((m, idx) => {
-                  const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
-                  const k = rowKey(m, idx);
-                  const checked = selectedKeys.includes(k);
-                  const dataRef = fmtDateOnly(m.data_hora);
-                  const opId = String(m.operation_id ?? "").trim();
-                  const destacada = Boolean(highlightOp) && opId === highlightOp;
+                  <input
+                    type="checkbox"
+                    checked={allAbastSelected}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSelectedKeys((prev) => {
+                        if (checked) {
+                          const merged = new Set([...prev, ...visibleKeysAbast]);
+                          return Array.from(merged);
+                        }
+                        const visibleSet = new Set(visibleKeysAbast);
+                        return prev.filter((k) => !visibleSet.has(k));
+                      });
+                    }}
+                    aria-label="Selecionar todas as movimentações melosa visíveis"
+                  />
+                </th>
+                <th className={`${thCls} min-w-[150px]`}>Obra</th>
+                <th className={`${thCls} min-w-[120px]`}>Usuário</th>
+                <th className={`${thCls} min-w-[96px]`}>Data início</th>
+                <th className={`${thCls} min-w-[96px]`}>Data fim</th>
+                <th className={`${thCls} min-w-[72px]`}>Horário</th>
+                <th className={`${thCls} min-w-[110px]`}>Ativo Melosa</th>
+                <th className={`${thCls} min-w-[120px]`}>Ativo equipamento</th>
+                <th className={`${thCls} min-w-[88px]`}>Insumo</th>
+                <th className={`${thCls} min-w-[100px]`}>Quantidade (L)</th>
+                <th className={`${thCls} min-w-[100px]`}>Foto qtd. (L)</th>
+                <th className={`${thCls} min-w-[88px]`}>Horímetro</th>
+                <th className={`${thCls} min-w-[100px]`}>Foto horímetro</th>
+                <th className={`${thCls} min-w-[88px]`}>Lubrificado</th>
+                <th className={`${thCls} min-w-[120px]`}>Motorista</th>
+                <th className={`${thCls} min-w-[100px]`}>Foto operador</th>
+                <th className={`${thCls} min-w-[180px]`}>Local</th>
+              </tr>
+            </thead>
+            <tbody>
+              {abastecimentosFiltradas.map((m, idx) => {
+                const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
+                const k = rowKey(m);
+                const checked = selectedKeys.includes(k);
+                const dataRef = fmtDateOnly(m.data_hora);
+                const opId = String(m.operation_id ?? "").trim();
+                const destacada = Boolean(highlightOp) && opId === highlightOp;
 
-                  const photo = (path: string | undefined, label: string) => (
-                    <StoragePhotoCell
-                      storagePath={path}
-                      token={authToken}
-                      onOpen={setLightboxSrc}
-                      api="melosa"
-                      shortLabel={label}
-                      onAddClick={() => openFotosForm(m)}
-                    />
-                  );
+                const photo = (path: string | undefined, label: string) => (
+                  <StoragePhotoCell
+                    storagePath={path}
+                    token={authToken}
+                    onOpen={setLightboxSrc}
+                    api="melosa"
+                    shortLabel={label}
+                    onAddClick={() => openFotosForm(m)}
+                  />
+                );
 
-                  return (
-                    <tr
-                      key={k}
-                      id={opId ? `mov-${opId}` : undefined}
-                      className={`${zebra} ${
-                        destacada
-                          ? "outline outline-2 -outline-offset-2 outline-sky-500 bg-sky-100/70 dark:bg-sky-900/40"
+                return (
+                  <tr
+                    key={k}
+                    id={opId ? `mov-${opId}` : undefined}
+                    className={`${zebra} ${
+                      destacada
+                        ? "outline outline-2 -outline-offset-2 outline-sky-500 bg-sky-100/70 dark:bg-sky-900/40"
+                        : ""
+                    }`}
+                  >
+                    <td className={`${tdCls} w-10`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const isChecked = e.target.checked;
+                          setSelectedKeys((prev) =>
+                            isChecked ? [...prev, k] : prev.filter((x) => x !== k),
+                          );
+                        }}
+                        aria-label="Selecionar movimentação"
+                      />
+                    </td>
+                    <td className={`${tdCls} max-w-[200px] truncate`} title={fmtObra(m)}>
+                      {fmtObra(m)}
+                    </td>
+                    <td className={`${tdCls} max-w-[140px] truncate`} title={fmtUsuarioMelosa(m)}>
+                      {fmtUsuarioMelosa(m)}
+                    </td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{fmtTimeOnly(m.data_hora)}</td>
+                    <td className={`${tdCls} max-w-[120px] truncate`} title={fmtAtivoPlaca(m)}>
+                      {fmtAtivoPlaca(m)}
+                    </td>
+                    <td
+                      className={`${tdCls} max-w-[140px] truncate ${
+                        isEquipamentoNaoCadastrado(m)
+                          ? "bg-amber-200/80 font-semibold text-amber-900 dark:bg-amber-500/30 dark:text-amber-100"
+                          : ""
+                      }`}
+                      title={
+                        isEquipamentoNaoCadastrado(m)
+                          ? `${fmtAtivoEquipamento(m)} — patrimônio não cadastrado. Clique para cadastrar.`
+                          : fmtAtivoEquipamento(m)
+                      }
+                    >
+                      {isEquipamentoNaoCadastrado(m) ? (
+                        <Link
+                          to={`/equipamentos?novo=${encodeURIComponent(ativoEquipamentoRaw(m))}`}
+                          className="underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:hover:text-white"
+                        >
+                          {fmtAtivoEquipamento(m)}
+                        </Link>
+                      ) : (
+                        fmtAtivoEquipamento(m)
+                      )}
+                    </td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{fmtInsumoMel(m)}</td>
+                    <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
+                    <td className={tdPhotoCls}>
+                      {photo(storagePath(m, "melosa_quantidade_abastecida_storage_path"), "Qtd. (L)")}
+                    </td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{fmtHorimetro(m)}</td>
+                    <td className={tdPhotoCls}>
+                      {photo(storagePath(m, "melosa_horimetro_equipamento_abastecido_storage_path"), "Horímetro")}
+                    </td>
+                    <td
+                      className={`${tdCls} whitespace-nowrap text-center ${
+                        m.melosa_lubrificado === true
+                          ? "font-semibold text-emerald-700 dark:text-emerald-400"
                           : ""
                       }`}
                     >
-                      <td className={`${tdCls} w-10`}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const isChecked = e.target.checked;
-                            setSelectedKeys((prev) =>
-                              isChecked ? [...prev, k] : prev.filter((x) => x !== k),
-                            );
-                          }}
-                          aria-label="Selecionar movimentação"
-                        />
-                      </td>
-                      <td className={`${tdCls} max-w-[200px] truncate`} title={fmtObra(m)}>
-                        {fmtObra(m)}
-                      </td>
-                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtUsuarioMelosa(m)}>
-                        {fmtUsuarioMelosa(m)}
-                      </td>
-                      <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
-                      <td className={`${tdCls} whitespace-nowrap`}>{dataRef}</td>
-                      <td className={`${tdCls} whitespace-nowrap`}>{fmtTimeOnly(m.data_hora)}</td>
-                      <td className={`${tdCls} max-w-[120px] truncate`} title={fmtAtivoPlaca(m)}>
-                        {fmtAtivoPlaca(m)}
-                      </td>
-                      <td
-                        className={`${tdCls} max-w-[140px] truncate ${
-                          isEquipamentoNaoCadastrado(m)
-                            ? "bg-amber-200/80 font-semibold text-amber-900 dark:bg-amber-500/30 dark:text-amber-100"
-                            : ""
-                        }`}
-                        title={
-                          isEquipamentoNaoCadastrado(m)
-                            ? `${fmtAtivoEquipamento(m)} — patrimônio não cadastrado. Clique para cadastrar.`
-                            : fmtAtivoEquipamento(m)
-                        }
-                      >
-                        {isEquipamentoNaoCadastrado(m) ? (
-                          <Link
-                            to={`/equipamentos?novo=${encodeURIComponent(ativoEquipamentoRaw(m))}`}
-                            className="underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:hover:text-white"
+                      {fmtLubrificado(m)}
+                    </td>
+                    <td className={`${tdCls} max-w-[140px] truncate`} title={fmtMotoristaMelosa(m)}>
+                      {fmtMotoristaMelosa(m)}
+                    </td>
+                    <td className={tdPhotoCls}>
+                      {photo(storagePath(m, "melosa_equipamento_operador_storage_path"), "Operador")}
+                    </td>
+                    <td className={`${tdCls} max-w-[220px] truncate`} title={fmtLocal(m)}>
+                      {(() => {
+                        const label = fmtLocal(m);
+                        const href = mapsUrlLocal(m);
+                        if (label === "—" || !href) return label;
+                        return (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent underline-offset-2 hover:underline"
+                            title={label}
                           >
-                            {fmtAtivoEquipamento(m)}
-                          </Link>
-                        ) : (
-                          fmtAtivoEquipamento(m)
-                        )}
-                      </td>
-                      <td className={`${tdCls} whitespace-nowrap`}>{fmtInsumoMel(m)}</td>
-                      <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
-                      <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "melosa_quantidade_abastecida_storage_path"), "Qtd. (L)")}
-                      </td>
-                      <td className={`${tdCls} whitespace-nowrap`}>{fmtHorimetro(m)}</td>
-                      <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "melosa_horimetro_equipamento_abastecido_storage_path"), "Horímetro")}
-                      </td>
-                      <td
-                        className={`${tdCls} whitespace-nowrap text-center ${
-                          m.melosa_lubrificado === true
-                            ? "font-semibold text-emerald-700 dark:text-emerald-400"
-                            : ""
-                        }`}
-                      >
-                        {fmtLubrificado(m)}
-                      </td>
-                      <td className={`${tdCls} max-w-[140px] truncate`} title={fmtMotoristaMelosa(m)}>
-                        {fmtMotoristaMelosa(m)}
-                      </td>
-                      <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "melosa_equipamento_operador_storage_path"), "Operador")}
-                      </td>
-                      <td className={`${tdCls} max-w-[220px] truncate`} title={fmtLocal(m)}>
-                        {(() => {
-                          const label = fmtLocal(m);
-                          const href = mapsUrlLocal(m);
-                          if (label === "—" || !href) return label;
-                          return (
-                            <a
-                              href={href}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-accent underline-offset-2 hover:underline"
-                              title={label}
-                            >
-                              {label}
-                            </a>
-                          );
-                        })()}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filtradas.length === 0 && !loading ? (
-                  <tr>
-                    <td colSpan={TABLE_COL_COUNT} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
-                      Nenhuma linha Melosa. Confirme se o app já sincronizou os registros.
+                            {label}
+                          </a>
+                        );
+                      })()}
                     </td>
                   </tr>
-                ) : null}
-              </tbody>
-            </table>
+                );
+              })}
+              {abastecimentosFiltradas.length === 0 && !loading ? (
+                <tr>
+                  <td colSpan={TABLE_COL_COUNT} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                    Nenhuma movimentação de abastecimento. Confirme se o app já sincronizou os registros.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className={`flex min-w-0 flex-col overflow-hidden ${glassPanel} p-0`}>
+        <div className="border-b border-white/40 px-4 py-3 dark:border-white/10">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Transbordo Melosa</h2>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Transferência de combustível entre melosas (ex.: CCL1405 → CCL1404)
+              </p>
+            </div>
+            {canAddBi ? (
+              <button
+                type="button"
+                onClick={() => setTransfOpen(true)}
+                disabled={loading}
+                className="rounded-lg bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-50"
+              >
+                Registrar transbordo
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <div className="table-scroll" style={{ maxHeight: TABLE_SCROLL_MAX_HEIGHT }}>
+          <table className="w-full min-w-[980px] border-collapse text-sm">
+            <thead>
+              <tr className="text-left align-middle">
+                <th className={`${thCls} w-10`}>
+                  <input
+                    type="checkbox"
+                    checked={allTransbordoSelected}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSelectedKeys((prev) => {
+                        if (checked) {
+                          const merged = new Set([...prev, ...visibleKeysTransbordo]);
+                          return Array.from(merged);
+                        }
+                        const visibleSet = new Set(visibleKeysTransbordo);
+                        return prev.filter((k) => !visibleSet.has(k));
+                      });
+                    }}
+                    aria-label="Selecionar todos os transbordos visíveis"
+                  />
+                </th>
+                <th className={`${thCls} min-w-[150px]`}>Obra</th>
+                <th className={`${thCls} min-w-[120px]`}>Usuário</th>
+                <th className={`${thCls} min-w-[96px]`}>Data</th>
+                <th className={`${thCls} min-w-[72px]`}>Horário</th>
+                <th className={`${thCls} min-w-[110px]`}>Melosa origem</th>
+                <th className={`${thCls} min-w-[110px]`}>Melosa destino</th>
+                <th className={`${thCls} min-w-[88px]`}>Insumo</th>
+                <th className={`${thCls} min-w-[100px]`}>Quantidade (L)</th>
+                <th className={`${thCls} min-w-[100px]`}>Foto qtd. (L)</th>
+                <th className={`${thCls} min-w-[120px]`}>Responsável</th>
+                <th className={`${thCls} min-w-[180px]`}>Local</th>
+              </tr>
+            </thead>
+            <tbody>
+              {transbordosFiltradas.map((m, idx) => {
+                const zebra = idx % 2 === 0 ? "bg-transparent" : "bg-white/30 dark:bg-white/[0.04]";
+                const k = rowKey(m);
+                const checked = selectedKeys.includes(k);
+                const opId = String(m.operation_id ?? "").trim();
+                const destacada = Boolean(highlightOp) && opId === highlightOp;
+                const origem = fmtAtivoPlaca(m);
+                const destino = fmtAtivoEquipamento(m);
+
+                return (
+                  <tr
+                    key={k}
+                    id={opId ? `mov-${opId}` : undefined}
+                    className={`${zebra} ${
+                      destacada
+                        ? "outline outline-2 -outline-offset-2 outline-sky-500 bg-sky-100/70 dark:bg-sky-900/40"
+                        : ""
+                    }`}
+                  >
+                    <td className={`${tdCls} w-10`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const isChecked = e.target.checked;
+                          setSelectedKeys((prev) =>
+                            isChecked ? [...prev, k] : prev.filter((x) => x !== k),
+                          );
+                        }}
+                        aria-label="Selecionar transbordo"
+                      />
+                    </td>
+                    <td className={`${tdCls} max-w-[200px] truncate`} title={fmtObra(m)}>
+                      {fmtObra(m)}
+                    </td>
+                    <td className={`${tdCls} max-w-[140px] truncate`} title={fmtUsuarioMelosa(m)}>
+                      {fmtUsuarioMelosa(m)}
+                    </td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{fmtDateOnly(m.data_hora)}</td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{fmtTimeOnly(m.data_hora)}</td>
+                    <td className={`${tdCls} max-w-[120px] truncate font-semibold`} title={origem}>
+                      {origem}
+                    </td>
+                    <td className={`${tdCls} max-w-[120px] truncate font-semibold text-sky-800 dark:text-sky-300`} title={destino}>
+                      {destino}
+                    </td>
+                    <td className={`${tdCls} whitespace-nowrap`}>{fmtInsumoMel(m)}</td>
+                    <td className={`${tdCls} whitespace-nowrap font-semibold`}>{fmtQuantidade(m)}</td>
+                    <td className={tdPhotoCls}>
+                      <StoragePhotoCell
+                        storagePath={storagePath(m, "melosa_quantidade_abastecida_storage_path")}
+                        token={authToken}
+                        onOpen={setLightboxSrc}
+                        api="melosa"
+                        shortLabel="Qtd. (L)"
+                        onAddClick={() => openFotosForm(m)}
+                      />
+                    </td>
+                    <td className={`${tdCls} max-w-[140px] truncate`} title={fmtMotoristaMelosa(m)}>
+                      {fmtMotoristaMelosa(m)}
+                    </td>
+                    <td className={`${tdCls} max-w-[220px] truncate`} title={fmtLocal(m)}>
+                      {(() => {
+                        const label = fmtLocal(m);
+                        const href = mapsUrlLocal(m);
+                        if (label === "—" || !href) return label;
+                        return (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent underline-offset-2 hover:underline"
+                            title={label}
+                          >
+                            {label}
+                          </a>
+                        );
+                      })()}
+                    </td>
+                  </tr>
+                );
+              })}
+              {transbordosFiltradas.length === 0 && !loading ? (
+                <tr>
+                  <td colSpan={TRANSBORDO_COL_COUNT} className="px-4 py-10 text-center text-slate-500 dark:text-slate-400">
+                    Nenhum transbordo no período filtrado.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1381,6 +1573,7 @@ export default function MelosaBIPage() {
         <div className="relative min-h-[360px] overflow-hidden rounded-b-2xl md:min-h-[420px]">
           <MovementsMap points={mapPoints} focusKey={focusOperationId} />
         </div>
+      </div>
       </div>
 
       {confirmDeleteOpen ? (

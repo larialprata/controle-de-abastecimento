@@ -25,6 +25,7 @@ export type MelosaFlowCheckpoint = {
   melosaWdrCombustivelTipo: string;
   melosaAssinaturaOperadorDataUrl: string | null;
   melosaAssinaturaMotoristaDataUrl: string | null;
+  melosaIsTransbordo?: boolean;
   localLatitude: number | null;
   localLongitude: number | null;
   localAddress: string | null;

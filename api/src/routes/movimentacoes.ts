@@ -3,7 +3,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
 import { criarCicloRetiradaTanque, vincularAbastecimentoAoCicloAberto } from "../lib/melosaCiclo";
-import { registrarTransferenciaMelosa } from "../lib/melosaTransferencia";
+import {
+  isTransferenciaMelosaObs,
+  transferDestinoOperationId,
+  registrarTransferenciaMelosa,
+  reverterTransferenciaMelosaAoExcluir,
+  recalcularCicloOrigemAposExcluirMovimentacao,
+} from "../lib/melosaTransferencia";
 import { parseMedidorNumero } from "../lib/melosaMedidorContinuidade";
 import { envValidated } from "../config";
 import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
@@ -1145,8 +1151,42 @@ router.delete("/melosa/movimentacoes/:operationId", requireAuth, async (req: Aut
     const canDelete = await assertCanEditMelosaMov(service, req.userId, current, "delete");
     if (!canDelete.ok) return res.status(canDelete.status).json({ error: canDelete.error });
 
+    const cicloOrigemId =
+      typeof current.ciclo_id === "string" && current.ciclo_id.trim()
+        ? current.ciclo_id.trim()
+        : null;
+
+    // Transbordo: remove ciclo de entrada no destino antes de apagar a saída.
+    if (isTransferenciaMelosaObs(current.obs as string | null)) {
+      try {
+        await reverterTransferenciaMelosaAoExcluir(service, {
+          operation_id: operationId,
+          obs: current.obs as string | null,
+          ativo_melosa_texto: current.ativo_melosa_texto as string | null,
+          ativo_equipamento_texto: current.ativo_equipamento_texto as string | null,
+          litros: current.litros as number | null,
+          data_hora: current.data_hora as string | null,
+        });
+      } catch (revErr: unknown) {
+        console.warn("[melosa_transferencia] reverter ao excluir:", revErr);
+        return res.status(400).json({
+          error:
+            revErr instanceof Error
+              ? `Não foi possível reverter o transbordo: ${revErr.message}`
+              : "Não foi possível reverter o transbordo no destino",
+        });
+      }
+    }
+
     const { error: deleteError } = await service.from("melosa_movimentacoes").delete().eq("operation_id", operationId);
     if (deleteError) return res.status(400).json({ error: deleteError.message });
+
+    // Devolve o combustível à origem: recalcula litros_abastecidos do ciclo.
+    try {
+      await recalcularCicloOrigemAposExcluirMovimentacao(service, cicloOrigemId);
+    } catch (recalcErr: unknown) {
+      console.warn("[melosa_ciclo] recalcular após exclusão:", recalcErr);
+    }
 
     await logMovimentacaoAudit(service, {
       entity: "melosa",
@@ -1982,6 +2022,22 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         });
       } catch (cicloErr: unknown) {
         console.warn("[melosa_ciclo] vincular abastecimento:", cicloErr);
+      }
+
+      // Transbordo melosa → melosa: abre ciclo na melosa de destino (mesmo efeito do endpoint /transferencias).
+      // operationId determinístico evita ciclo duplicado em retry/sync do outbox.
+      if (isTransferenciaMelosaObs(payload.obs) && placaNorm && fornecedorNorm) {
+        try {
+          await criarCicloRetiradaTanque(service, {
+            operationId: transferDestinoOperationId(payload.operation_id),
+            ativoMelosa: fornecedorNorm,
+            obraCodigo: payload.obra_codigo,
+            dataHora: insertRowMelosa.data_hora as string,
+            litrosRetirada: litrosMelosaCalculados,
+          });
+        } catch (cicloDestinoErr: unknown) {
+          console.warn("[melosa_ciclo] ciclo destino (transbordo mobile):", cicloDestinoErr);
+        }
       }
 
       return res.json({

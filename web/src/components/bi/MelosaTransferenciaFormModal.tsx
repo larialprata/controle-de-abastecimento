@@ -166,7 +166,7 @@ export default function MelosaTransferenciaFormModal({
       <div className={`max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl p-6 shadow-xl ${glassPanel}`}>
         <div className="flex items-start justify-between gap-3">
           <h2 id="melosa-transf-form-title" className="text-lg font-bold text-slate-900 dark:text-white">
-            Transferência entre melosas
+            Transbordo entre melosas
           </h2>
           <button
             type="button"
