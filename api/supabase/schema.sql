@@ -8,11 +8,11 @@ create extension if not exists pgcrypto;
 do $$
 begin
   if not exists (select 1 from pg_type where typname = 'obra_empresa') then
-    create type public.obra_empresa as enum ('DIMENSIONAL', 'DELURB');
+    create type public.obra_empresa as enum ('DIMENSIONAL', 'DELURB', 'SPE_IGARATA');
   end if;
 end $$;
 
--- Obras (pré-cadastradas)
+-- Obras (prÃ©-cadastradas)
 create table if not exists public.obras (
   codigo int primary key,
   nome text not null,
@@ -56,7 +56,7 @@ create table if not exists public.equipamentos (
   )
 );
 
--- Tipo de movimentação (MVP)
+-- Tipo de movimentaÃ§Ã£o (MVP)
 do $$
 begin
   if not exists (select 1 from pg_type where typname = 'movimentacao_tipo') then
@@ -68,13 +68,13 @@ begin
   end if;
 end $$;
 
--- Movimentações (histórico)
+-- MovimentaÃ§Ãµes (histÃ³rico)
 create table if not exists public.movimentacoes (
   id uuid primary key default gen_random_uuid(),
-  -- Idempotência: mesma operação não deve gerar duplicata
+  -- IdempotÃªncia: mesma operaÃ§Ã£o nÃ£o deve gerar duplicata
   operation_id uuid not null unique,
 
-  -- Supabase Auth: a linha pertence ao usuário que inseriu
+  -- Supabase Auth: a linha pertence ao usuÃ¡rio que inseriu
   usuario_id uuid not null,
 
   tipo public.movimentacao_tipo not null,
@@ -130,7 +130,7 @@ create table if not exists public.movimentacoes (
   created_at timestamptz not null default now()
 );
 
--- Idempotência: caso a tabela já exista, garante colunas novas
+-- IdempotÃªncia: caso a tabela jÃ¡ exista, garante colunas novas
 alter table public.movimentacoes add column if not exists combustivel_tipo text;
 alter table public.movimentacoes add column if not exists nota_numero text;
 alter table public.movimentacoes add column if not exists placa_caminhao text;
@@ -251,10 +251,10 @@ begin
   end if;
 end $$;
 
--- Remove user_roles (políticas somem em cascade)
+-- Remove user_roles (polÃ­ticas somem em cascade)
 drop table if exists public.user_roles cascade;
 
--- Evita recursão na RLS de profiles ao checar admin
+-- Evita recursÃ£o na RLS de profiles ao checar admin
 create or replace function public.is_admin()
 returns boolean
 language sql
@@ -341,7 +341,7 @@ using (usuario_id = auth.uid() or public.is_admin());
 grant select on public.obras to authenticated;
 grant select, insert on public.movimentacoes to authenticated;
 
--- Movimentações da Melosa (fluxo separado)
+-- MovimentaÃ§Ãµes da Melosa (fluxo separado)
 create table if not exists public.melosa_movimentacoes (
   id uuid primary key default gen_random_uuid(),
   operation_id uuid not null unique,
@@ -451,7 +451,7 @@ insert into storage.buckets (id, name, public) values
   ('confirmacao_abastecimento', 'confirmacao_abastecimento', false)
 on conflict (id) do nothing;
 
--- Policies de Storage: cada usuário só mexe nos próprios arquivos (prefixo = auth.uid())
+-- Policies de Storage: cada usuÃ¡rio sÃ³ mexe nos prÃ³prios arquivos (prefixo = auth.uid())
 drop policy if exists storage_objects_select_own on storage.objects;
 create policy storage_objects_select_own
 on storage.objects
@@ -497,7 +497,7 @@ using (
 );
 
 
--- Auditoria de movimenta��es (BI tanque / melosa)
+-- Auditoria de movimentações (BI tanque / melosa)
 create table if not exists public.movimentacao_audit (
   id uuid primary key default gen_random_uuid(),
   entity text not null check (entity in ('melosa', 'tanque')),

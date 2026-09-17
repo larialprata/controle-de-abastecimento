@@ -4,7 +4,7 @@
 do $$
 begin
   if not exists (select 1 from pg_type where typname = 'obra_empresa') then
-    create type public.obra_empresa as enum ('DIMENSIONAL', 'DELURB');
+    create type public.obra_empresa as enum ('DIMENSIONAL', 'DELURB', 'SPE_IGARATA');
   end if;
 end $$;
 

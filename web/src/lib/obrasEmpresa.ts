@@ -1,9 +1,10 @@
-export const OBRA_EMPRESAS = ["DIMENSIONAL", "DELURB"] as const;
+export const OBRA_EMPRESAS = ["DIMENSIONAL", "DELURB", "SPE_IGARATA"] as const;
 export type ObraEmpresa = (typeof OBRA_EMPRESAS)[number];
 
 export const EMPRESA_LABEL: Record<ObraEmpresa, string> = {
   DIMENSIONAL: "Dimensional",
   DELURB: "Delurb",
+  SPE_IGARATA: "SPE Igarata Ltda",
 };
 
 export type ObraComEmpresa = {

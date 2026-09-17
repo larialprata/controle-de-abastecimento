@@ -8,7 +8,7 @@ import { assertCanWriteWebPage, loadWebWriteProfile, WebWriteAccessError } from 
 
 const router = Router();
 
-export const OBRA_EMPRESAS = ["DIMENSIONAL", "DELURB"] as const;
+export const OBRA_EMPRESAS = ["DIMENSIONAL", "DELURB", "SPE_IGARATA"] as const;
 export type ObraEmpresa = (typeof OBRA_EMPRESAS)[number];
 
 const obraEmpresaSchema = z.enum(OBRA_EMPRESAS);

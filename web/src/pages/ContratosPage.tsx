@@ -198,7 +198,7 @@ export default function ContratosPage() {
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">Contratos</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
           Obras cadastradas em <code className="rounded bg-black/5 px-1 text-xs dark:bg-black/20">public.obras</code>{" "}
-          (código, nome e empresa — Dimensional ou Delurb).
+          (código, nome e empresa — Dimensional, Delurb ou SPE Igarata Ltda).
         </p>
       </header>
 
@@ -432,7 +432,7 @@ export default function ContratosPage() {
             </div>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
               {formMode === "add"
-                ? "O código deve ser único. Vincule o contrato a Dimensional ou Delurb."
+                ? "O código deve ser único. Vincule o contrato a Dimensional, Delurb ou SPE Igarata Ltda."
                 : "Altere o nome e a empresa. O código não pode ser mudado."}
             </p>
 
