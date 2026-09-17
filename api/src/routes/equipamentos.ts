@@ -597,11 +597,51 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
 
   const { data: existing } = await service
     .from("equipamentos")
-    .select("ativo")
+    .select("ativo, tipo")
     .ilike("ativo", ativo)
     .maybeSingle();
+
   if (existing) {
-    return res.status(409).json({ error: `Já existe um equipamento com o ativo ${existing.ativo}.` });
+    const existingTipo = String(existing.tipo ?? "").toUpperCase();
+    // Ativo é PK única: permitir promover EQUIPAMENTO → MELOSA no cadastro de melosas.
+    if (tipo === "MELOSA" && existingTipo === "EQUIPAMENTO") {
+      const { data, error } = await service
+        .from("equipamentos")
+        .update({
+          nome,
+          tipo: "MELOSA",
+          obra_codigo: null,
+          tanque_numero: null,
+          capacidade_litros: capacidade_litros ?? null,
+          saldo_inicial_litros: saldo_inicial_litros ?? null,
+          saldo_inicial_em: saldoEmResolved.value,
+          mobilidade: null,
+          empresa: null,
+          placa: null,
+        })
+        .eq("ativo", existing.ativo)
+        .select(EQUIPAMENTO_SELECT)
+        .single();
+      if (error) {
+        const formatted = formatEquipamentoDbError(error.message);
+        const status = formatted.includes("Já existe um equipamento com essa placa") ? 409 : 500;
+        return res.status(status).json({ error: formatted });
+      }
+      return res.status(200).json({
+        equipamento: data,
+        convertido_de: "EQUIPAMENTO",
+        message: `O ativo ${existing.ativo} era equipamento e foi convertido em melosa.`,
+      });
+    }
+
+    return res.status(409).json({
+      error:
+        existingTipo === "MELOSA"
+          ? `Já existe uma melosa com o ativo ${existing.ativo}.`
+          : existingTipo === "TANQUE"
+            ? `Já existe um tanque com o ativo ${existing.ativo}.`
+            : `Já existe um equipamento com o ativo ${existing.ativo}.`,
+    });
   }
 
   if (tipo === "TANQUE" && obraCodigoNormalizado != null && tanqueNumeroFinal != null) {
