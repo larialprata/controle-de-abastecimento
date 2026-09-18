@@ -9,6 +9,7 @@ type TanqueRow = {
   ativo: string;
   nome: string | null;
   obra_codigo: number | null;
+  obra_codigos?: number[];
   tanque_numero: number | null;
   capacidade_litros: number | null;
   saldo_inicial_litros: number | null;
@@ -16,13 +17,25 @@ type TanqueRow = {
 
 type ObraRow = { codigo: number; nome: string };
 
-function labelTanque(row: TanqueRow, obraNome?: string | null): string {
+function obrasDoTanque(row: TanqueRow): number[] {
+  if (Array.isArray(row.obra_codigos) && row.obra_codigos.length > 0) {
+    return row.obra_codigos;
+  }
+  return row.obra_codigo != null ? [row.obra_codigo] : [];
+}
+
+function labelTanque(row: TanqueRow, obrasPorCodigo: Map<number, string>): string {
   const titulo = row.nome?.trim() || (row.tanque_numero != null ? `Tanque ${row.tanque_numero}` : "Tanque");
-  const obra =
-    row.obra_codigo != null
-      ? `${row.obra_codigo}${obraNome ? ` - ${obraNome}` : ""}`
-      : (obraNome ?? "—");
-  return `${titulo} - (${obra})`;
+  const obras = obrasDoTanque(row)
+    .map((c) => `${c}${obrasPorCodigo.get(c) ? ` - ${obrasPorCodigo.get(c)}` : ""}`)
+    .join(", ");
+  return `${titulo} - (${obras || "—"})`;
+}
+
+function fmtObrasCell(row: TanqueRow, obrasPorCodigo: Map<number, string>): string {
+  const obras = obrasDoTanque(row);
+  if (obras.length === 0) return "—";
+  return obras.map((c) => `${c} — ${obrasPorCodigo.get(c) ?? ""}`.trim()).join("; ");
 }
 
 function parseCapacidadeInput(value: string): number | null | "invalid" {
@@ -55,7 +68,7 @@ export default function TanquesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<TanqueRow | null>(null);
   const [formTanqueNumero, setFormTanqueNumero] = useState("");
-  const [formObraCodigo, setFormObraCodigo] = useState("");
+  const [formObraCodigos, setFormObraCodigos] = useState<number[]>([]);
   const [formDescricao, setFormDescricao] = useState("");
   const [formCapacidade, setFormCapacidade] = useState("");
   const [formSaldo, setFormSaldo] = useState("");
@@ -94,14 +107,14 @@ export default function TanquesPage() {
     const q = busca.trim().toLowerCase();
     const obraFiltro = filtroObra.trim() ? Number(filtroObra) : null;
     return tanques.filter((t) => {
-      if (obraFiltro != null && Number.isFinite(obraFiltro) && t.obra_codigo !== obraFiltro) return false;
+      const obrasT = obrasDoTanque(t);
+      if (obraFiltro != null && Number.isFinite(obraFiltro) && !obrasT.includes(obraFiltro)) return false;
       if (!q) return true;
-      const obraNome = t.obra_codigo != null ? obrasPorCodigo.get(t.obra_codigo) ?? "" : "";
+      const obraTexto = obrasT.map((c) => `${c} ${obrasPorCodigo.get(c) ?? ""}`).join(" ").toLowerCase();
       return (
         String(t.tanque_numero ?? "").includes(q) ||
         (t.nome ?? "").toLowerCase().includes(q) ||
-        obraNome.toLowerCase().includes(q) ||
-        String(t.obra_codigo ?? "").includes(q) ||
+        obraTexto.includes(q) ||
         String(t.capacidade_litros ?? "").includes(q) ||
         String(t.saldo_inicial_litros ?? "").includes(q)
       );
@@ -111,7 +124,7 @@ export default function TanquesPage() {
   function openCreateForm() {
     setEditTarget(null);
     setFormTanqueNumero("");
-    setFormObraCodigo(obras[0] ? String(obras[0].codigo) : "");
+    setFormObraCodigos(obras[0] ? [obras[0].codigo] : []);
     setFormDescricao("");
     setFormCapacidade("");
     setFormSaldo("");
@@ -122,7 +135,7 @@ export default function TanquesPage() {
   function openEditForm(tanque: TanqueRow) {
     setEditTarget(tanque);
     setFormTanqueNumero(tanque.tanque_numero != null ? String(tanque.tanque_numero) : "");
-    setFormObraCodigo(tanque.obra_codigo != null ? String(tanque.obra_codigo) : "");
+    setFormObraCodigos(obrasDoTanque(tanque));
     setFormDescricao(tanque.nome?.trim() ?? "");
     setFormCapacidade(
       tanque.capacidade_litros != null && Number.isFinite(tanque.capacidade_litros)
@@ -138,6 +151,15 @@ export default function TanquesPage() {
     setFormOpen(true);
   }
 
+  function toggleFormObra(codigo: number, checked: boolean) {
+    setFormObraCodigos((prev) => {
+      const set = new Set(prev);
+      if (checked) set.add(codigo);
+      else set.delete(codigo);
+      return Array.from(set).sort((a, b) => a - b);
+    });
+  }
+
   function closeForm() {
     setFormOpen(false);
     setEditTarget(null);
@@ -149,7 +171,7 @@ export default function TanquesPage() {
     if (!token || !canWrite) return;
 
     const tanqueNumero = Number(formTanqueNumero.trim());
-    const obraCodigo = Number(formObraCodigo);
+    const obraCodigos = formObraCodigos;
     const descricao = formDescricao.trim();
     const capacidade = parseCapacidadeInput(formCapacidade);
     const saldo = parseSaldoInput(formSaldo);
@@ -158,8 +180,8 @@ export default function TanquesPage() {
       setFormError("Informe um número de tanque válido (ex.: 1, 2, 3).");
       return;
     }
-    if (!Number.isFinite(obraCodigo) || obraCodigo <= 0) {
-      setFormError("Selecione a obra.");
+    if (obraCodigos.length === 0) {
+      setFormError("Selecione ao menos uma obra.");
       return;
     }
     if (!descricao) {
@@ -181,7 +203,8 @@ export default function TanquesPage() {
       const payload = {
         nome: descricao,
         tanque_numero: tanqueNumero,
-        obra_codigo: obraCodigo,
+        obra_codigo: obraCodigos[0],
+        obra_codigos: obraCodigos,
         capacidade_litros: capacidade,
         saldo_inicial_litros: saldo,
       };
@@ -224,8 +247,8 @@ export default function TanquesPage() {
       <header>
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">Tanques</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
-          Cadastre os <strong>tanques por obra</strong> com capacidade e quantidade atual em litros. Na dashboard,
-          entradas somam e retiradas descontam dessa quantidade. No mobile aparecem para todos os usuários.
+          Cadastre os <strong>tanques</strong> com uma ou mais obras, capacidade e quantidade atual em litros. O saldo é
+          compartilhado entre as obras vinculadas. Entradas somam e retiradas descontam na dashboard.
         </p>
       </header>
 
@@ -280,7 +303,7 @@ export default function TanquesPage() {
               <thead>
                 <tr className="border-b border-slate-200/80 text-xs uppercase tracking-wide text-slate-500 dark:border-white/10">
                   <th className="px-2 py-2 font-semibold">Tanque</th>
-                  <th className="px-2 py-2 font-semibold">Obra</th>
+                  <th className="px-2 py-2 font-semibold">Obras</th>
                   <th className="px-2 py-2 font-semibold">Descrição</th>
                   <th className="px-2 py-2 font-semibold">Capacidade (L)</th>
                   <th className="px-2 py-2 font-semibold">Qtd. no tanque (L)</th>
@@ -297,9 +320,7 @@ export default function TanquesPage() {
                       {t.tanque_numero ?? "—"}
                     </td>
                     <td className="px-2 py-2.5 text-slate-700 dark:text-slate-300">
-                      {t.obra_codigo != null
-                        ? `${t.obra_codigo} — ${obrasPorCodigo.get(t.obra_codigo) ?? ""}`
-                        : "—"}
+                      {fmtObrasCell(t, obrasPorCodigo)}
                     </td>
                     <td className="px-2 py-2.5 text-slate-700 dark:text-slate-300">{t.nome ?? "—"}</td>
                     <td className="px-2 py-2.5 tabular-nums text-slate-700 dark:text-slate-300">
@@ -315,7 +336,7 @@ export default function TanquesPage() {
                             type="button"
                             onClick={() => openEditForm(t)}
                             className="rounded-lg p-1.5 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
-                            title={`Editar ${labelTanque(t, obrasPorCodigo.get(t.obra_codigo ?? 0))}`}
+                            title={`Editar ${labelTanque(t, obrasPorCodigo)}`}
                           >
                             <Pencil className="h-4 w-4" aria-hidden />
                           </button>
@@ -326,7 +347,7 @@ export default function TanquesPage() {
                               setDeleteTarget(t);
                             }}
                             className="rounded-lg p-1.5 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                            title={`Excluir ${labelTanque(t, obrasPorCodigo.get(t.obra_codigo ?? 0))}`}
+                            title={`Excluir ${labelTanque(t, obrasPorCodigo)}`}
                           >
                             <Trash2 className="h-4 w-4" aria-hidden />
                           </button>
@@ -372,20 +393,32 @@ export default function TanquesPage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-400">Obra</label>
-                <select
-                  value={formObraCodigo}
-                  onChange={(e) => setFormObraCodigo(e.target.value)}
-                  className={glassField}
-                  required
-                >
-                  <option value="">Selecione…</option>
-                  {obras.map((o) => (
-                    <option key={o.codigo} value={o.codigo}>
-                      {o.codigo} — {o.nome}
-                    </option>
-                  ))}
-                </select>
+                <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-400">
+                  Obras (pode selecionar mais de uma)
+                </label>
+                <div className="max-h-40 space-y-1.5 overflow-y-auto rounded-xl border border-slate-200/80 bg-white/50 p-2 dark:border-white/10 dark:bg-black/20">
+                  {obras.length === 0 ? (
+                    <p className="text-xs text-slate-500">Nenhuma obra cadastrada.</p>
+                  ) : (
+                    obras.map((o) => (
+                      <label key={o.codigo} className="flex cursor-pointer items-center gap-2 px-1 py-0.5">
+                        <input
+                          type="checkbox"
+                          checked={formObraCodigos.includes(o.codigo)}
+                          disabled={formSaving}
+                          onChange={(e) => toggleFormObra(o.codigo, e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-accent focus:ring-accent"
+                        />
+                        <span className="text-sm text-slate-700 dark:text-slate-300">
+                          {o.codigo} — {o.nome}
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  O saldo do tanque é único e compartilhado entre todas as obras marcadas.
+                </p>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-400">

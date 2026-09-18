@@ -88,14 +88,27 @@ type TanqueCadastrado = {
   ativo: string;
   nome: string | null;
   obra_codigo: number | null;
+  obra_codigos?: number[];
   tanque_numero: number | null;
 };
 
+function obraCodigosTanqueMobile(t: TanqueCadastrado): number[] {
+  if (Array.isArray(t.obra_codigos) && t.obra_codigos.length > 0) {
+    return t.obra_codigos.map(Number).filter((c) => Number.isFinite(c));
+  }
+  return t.obra_codigo != null ? [t.obra_codigo] : [];
+}
+
+function tanquePertenceObraMobile(t: TanqueCadastrado, obra: number): boolean {
+  return obraCodigosTanqueMobile(t).includes(obra);
+}
+
 function labelTanqueComObra(t: TanqueCadastrado, obraNome?: string | null): string {
   const tanque = t.tanque_numero != null ? `Tanque ${t.tanque_numero}` : "Tanque";
+  const obras = obraCodigosTanqueMobile(t);
   const obra =
-    t.obra_codigo != null
-      ? `${t.obra_codigo}${obraNome ? ` - ${obraNome}` : ""}`
+    obras.length > 0
+      ? obras.map((c) => `${c}${obraNome && c === t.obra_codigo ? ` - ${obraNome}` : ""}`).join(", ")
       : (obraNome ?? "—");
   const descricao = t.nome?.trim() || "—";
   return `${tanque} - (${obra}) - (${descricao})`;
@@ -815,7 +828,10 @@ export default function App() {
     [obrasDisponiveis],
   );
   const tanquesDisponiveis = useMemo(
-    () => tanquesCadastrados.filter((t) => t.tanque_numero != null && t.obra_codigo != null),
+    () =>
+      tanquesCadastrados.filter(
+        (t) => t.tanque_numero != null && obraCodigosTanqueMobile(t).length > 0,
+      ),
     [tanquesCadastrados],
   );
   const [melosaObraCodigo, setMelosaObraCodigo] = useState<number>(OBRAS[0]?.codigo ?? 229);
@@ -1122,12 +1138,24 @@ export default function App() {
     apiGet<{ equipamentos: TanqueCadastrado[] }>("/v1/equipamentos?tipo=TANQUE", session.access_token)
       .then((json) => {
         const list = (json.equipamentos ?? [])
-          .map((t) => ({
-            ...t,
-            obra_codigo: t.obra_codigo != null ? Number(t.obra_codigo) : null,
-            tanque_numero: t.tanque_numero != null ? Number(t.tanque_numero) : null,
-          }))
-          .filter((t) => t.tanque_numero != null && t.obra_codigo != null);
+          .map((t) => {
+            const obra_codigos = Array.isArray((t as TanqueCadastrado).obra_codigos)
+              ? (t as TanqueCadastrado).obra_codigos!.map(Number).filter((c) => Number.isFinite(c))
+              : undefined;
+            const obra_codigo = t.obra_codigo != null ? Number(t.obra_codigo) : null;
+            return {
+              ...t,
+              obra_codigo,
+              obra_codigos:
+                obra_codigos && obra_codigos.length > 0
+                  ? obra_codigos
+                  : obra_codigo != null
+                    ? [obra_codigo]
+                    : [],
+              tanque_numero: t.tanque_numero != null ? Number(t.tanque_numero) : null,
+            };
+          })
+          .filter((t) => t.tanque_numero != null && obraCodigosTanqueMobile(t).length > 0);
         setTanquesCadastrados(list);
       })
       .catch(() => {
@@ -1150,15 +1178,18 @@ export default function App() {
   useEffect(() => {
     const tanque = tanquesCadastrados.find((t) => t.ativo === tanqueAtivo) ?? null;
     setTanqueNumero(tanque?.tanque_numero ?? null);
-    if (tanque?.obra_codigo != null) {
-      setObraCodigo(tanque.obra_codigo);
+    if (tanque) {
+      const obrasT = obraCodigosTanqueMobile(tanque);
+      if (obrasT.length > 0 && !obrasT.includes(obraCodigo)) {
+        setObraCodigo(obrasT[0]);
+      }
     }
   }, [tanqueAtivo, tanquesCadastrados]);
 
   useEffect(() => {
     if (!tanqueAtivo) return;
     const tanque = tanquesCadastrados.find((t) => t.ativo === tanqueAtivo);
-    if (tanque?.obra_codigo != null && tanque.obra_codigo !== obraCodigo) {
+    if (tanque && !tanquePertenceObraMobile(tanque, obraCodigo)) {
       setTanqueAtivo(null);
       setTanqueNumero(null);
     }

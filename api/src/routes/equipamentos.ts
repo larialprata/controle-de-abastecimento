@@ -17,6 +17,11 @@ import { assertEmpresaCadastradaAtiva } from "../lib/empresasCadastro";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
 import {
+  assertTanqueNumeroLivreNasObras,
+  listTanqueObrasForAtivos,
+  setTanqueObras,
+} from "../lib/tanqueObras";
+import {
   assertCanWriteWebPage,
   loadWebWriteProfile,
   WebWriteAccessError,
@@ -27,6 +32,28 @@ const router = Router();
 
 function buildTanqueAtivo(obraCodigo: number, tanqueNumero: number): string {
   return `T${obraCodigo}-${tanqueNumero}`;
+}
+
+function normalizeObraCodigosList(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  return Array.from(
+    new Set(
+      raw
+        .map((v) => (typeof v === "number" ? v : Number(v)))
+        .filter((c) => Number.isFinite(c) && c > 0)
+        .map((c) => Math.trunc(c)),
+    ),
+  ).sort((a, b) => a - b);
+}
+
+function resolveTanqueObraCodigos(input: {
+  obra_codigo?: number | null;
+  obra_codigos?: number[] | null;
+}): number[] {
+  const fromList = normalizeObraCodigosList(input.obra_codigos);
+  if (fromList.length > 0) return fromList;
+  const single = parseObraCodigoInput(input.obra_codigo ?? null);
+  return single != null ? [single] : [];
 }
 
 /** Aceita ISO completo ou só a data (YYYY-MM-DD → fim do dia em America/Sao_Paulo). */
@@ -71,6 +98,7 @@ const createEquipamentoSchema = z
     nome: z.string().trim().max(300).optional(),
     tipo: equipamentoTipoSchema,
     obra_codigo: z.number().int().positive().nullable().optional(),
+    obra_codigos: z.array(z.number().int().positive()).optional(),
     tanque_numero: z.number().int().positive().optional(),
     capacidade_litros: z.number().positive().nullable().optional(),
     saldo_inicial_litros: z.number().nonnegative().nullable().optional(),
@@ -88,11 +116,12 @@ const createEquipamentoSchema = z
       });
     }
     if (data.tipo === "TANQUE") {
-      if (data.obra_codigo == null) {
+      const obrasTanque = resolveTanqueObraCodigos(data);
+      if (obrasTanque.length === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Informe a obra do tanque.",
-          path: ["obra_codigo"],
+          message: "Informe ao menos uma obra do tanque.",
+          path: ["obra_codigos"],
         });
       }
       if (data.tanque_numero == null) {
@@ -396,8 +425,10 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   if (tipoRaw === "TANQUE" || tipoRaw === "MELOSA" || tipoRaw === "EQUIPAMENTO") {
     query = query.eq("tipo", tipoRaw);
   }
+
+  // Filtro de obra para TANQUE usa tanque_obras (não só obra principal).
   const obraCodigoFiltro = obraRaw ? parseObraCodigoInput(obraRaw) : undefined;
-  if (obraCodigoFiltro != null) {
+  if (obraCodigoFiltro != null && tipoRaw !== "TANQUE") {
     query = query.eq("obra_codigo", obraCodigoFiltro);
   }
   if (mobilidadeRaw === "ESTACIONARIO" || mobilidadeRaw === "MOVEL") {
@@ -406,6 +437,37 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: formatEquipamentoDbError(error.message) });
   let equipamentos = data ?? [];
+
+  if (tipoRaw === "TANQUE") {
+    const ativos = equipamentos.map((e) => String(e.ativo ?? "")).filter(Boolean);
+    const obrasByAtivo = await listTanqueObrasForAtivos(service, ativos);
+    equipamentos = equipamentos.map((e) => {
+      const ativo = String(e.ativo ?? "");
+      const linked = obrasByAtivo.get(ativo) ?? [];
+      const principal = e.obra_codigo != null ? Number(e.obra_codigo) : null;
+      const obra_codigos =
+        linked.length > 0
+          ? linked
+          : principal != null && Number.isFinite(principal)
+            ? [principal]
+            : [];
+      return { ...e, obra_codigos };
+    });
+
+    if (obraCodigoFiltro != null) {
+      equipamentos = equipamentos.filter((e) =>
+        Array.isArray((e as { obra_codigos?: number[] }).obra_codigos) &&
+        (e as { obra_codigos: number[] }).obra_codigos.includes(obraCodigoFiltro),
+      );
+    } else if (obraScope?.length) {
+      const allowed = new Set(obraScope);
+      equipamentos = equipamentos.filter((e) =>
+        Array.isArray((e as { obra_codigos?: number[] }).obra_codigos) &&
+        (e as { obra_codigos: number[] }).obra_codigos.some((c) => allowed.has(c)),
+      );
+    }
+  }
+
   if (empresaRaw) {
     const empresaNeedle = empresaRaw.toLowerCase();
     equipamentos = equipamentos.filter((e) =>
@@ -514,6 +576,7 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   const {
     tipo,
     obra_codigo,
+    obra_codigos,
     capacidade_litros,
     saldo_inicial_litros,
     saldo_inicial_em,
@@ -532,11 +595,22 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     throw e;
   }
 
+  const tanqueObraCodigos = tipo === "TANQUE" ? resolveTanqueObraCodigos({ obra_codigo, obra_codigos }) : [];
   const obraCodigoNormalizado =
-    tipo === "MELOSA" ? null : parseObraCodigoInput(obra_codigo ?? null);
+    tipo === "MELOSA"
+      ? null
+      : tipo === "TANQUE"
+        ? (tanqueObraCodigos[0] ?? null)
+        : parseObraCodigoInput(obra_codigo ?? null);
 
-  const obraErr = await validateObraCodigo(service, obraCodigoNormalizado);
-  if (obraErr) return res.status(400).json({ error: obraErr });
+  if (tipo === "TANQUE" && tanqueObraCodigos.length === 0) {
+    return res.status(400).json({ error: "Informe ao menos uma obra do tanque." });
+  }
+
+  for (const cod of tipo === "TANQUE" ? tanqueObraCodigos : obraCodigoNormalizado != null ? [obraCodigoNormalizado] : []) {
+    const obraErr = await validateObraCodigo(service, cod);
+    if (obraErr) return res.status(400).json({ error: obraErr });
+  }
 
   let ativo = parsed.data.ativo?.trim() ?? "";
   let tanqueNumeroFinal: number | null = null;
@@ -586,12 +660,15 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: saldoEmResolved.error });
   }
 
-  if (obraCodigoNormalizado != null && req.userId) {
-    try {
-      await assertUserObraAccess(service, req.userId, obraCodigoNormalizado);
-    } catch (e) {
-      if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
-      throw e;
+  const obrasParaAcesso = tipo === "TANQUE" ? tanqueObraCodigos : obraCodigoNormalizado != null ? [obraCodigoNormalizado] : [];
+  if (req.userId) {
+    for (const cod of obrasParaAcesso) {
+      try {
+        await assertUserObraAccess(service, req.userId, cod);
+      } catch (e) {
+        if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
     }
   }
 
@@ -644,18 +721,11 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     });
   }
 
-  if (tipo === "TANQUE" && obraCodigoNormalizado != null && tanqueNumeroFinal != null) {
-    const { data: tanqueDup } = await service
-      .from("equipamentos")
-      .select("ativo")
-      .eq("tipo", "TANQUE")
-      .eq("obra_codigo", obraCodigoNormalizado)
-      .eq("tanque_numero", tanqueNumeroFinal)
-      .maybeSingle();
-    if (tanqueDup) {
-      return res.status(409).json({
-        error: `Já existe o tanque ${tanqueNumeroFinal} na obra ${obraCodigoNormalizado}.`,
-      });
+  if (tipo === "TANQUE" && tanqueNumeroFinal != null) {
+    try {
+      await assertTanqueNumeroLivreNasObras(service, tanqueNumeroFinal, tanqueObraCodigos);
+    } catch (e) {
+      return res.status(409).json({ error: e instanceof Error ? e.message : "Tanque já cadastrado." });
     }
   }
 
@@ -684,6 +754,17 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     const status = formatted.includes("Já existe um equipamento com essa placa") ? 409 : 500;
     return res.status(status).json({ error: formatted });
   }
+
+  if (tipo === "TANQUE") {
+    try {
+      const synced = await setTanqueObras(service, String(data.ativo), tanqueObraCodigos);
+      return res.status(201).json({ equipamento: { ...data, obra_codigos: synced } });
+    } catch (e) {
+      await service.from("equipamentos").delete().eq("ativo", data.ativo);
+      return res.status(400).json({ error: e instanceof Error ? e.message : "Erro ao vincular obras" });
+    }
+  }
+
   return res.status(201).json({ equipamento: data });
 });
 
@@ -847,6 +928,7 @@ const updateEquipamentoSchema = z
     nome: z.string().trim().max(300).optional(),
     tipo: equipamentoTipoSchema.optional(),
     obra_codigo: z.number().int().positive().nullable().optional(),
+    obra_codigos: z.array(z.number().int().positive()).optional(),
     tanque_numero: z.number().int().positive().optional(),
     capacidade_litros: z.number().positive().nullable().optional(),
     saldo_inicial_litros: z.number().nonnegative().nullable().optional(),
@@ -981,24 +1063,55 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
   }
 
   let obra_codigo: number | null;
+  let tanqueObraCodigos: number[] | null = null;
   if (tipo === "MELOSA") {
     obra_codigo = null;
+  } else if (tipo === "TANQUE") {
+    if (parsed.data.obra_codigos !== undefined || parsed.data.obra_codigo !== undefined) {
+      tanqueObraCodigos = resolveTanqueObraCodigos({
+        obra_codigo: parsed.data.obra_codigo,
+        obra_codigos: parsed.data.obra_codigos,
+      });
+    } else {
+      const currentLinks = await listTanqueObrasForAtivos(service, [ativoAtual]);
+      const linked = currentLinks.get(ativoAtual) ?? [];
+      tanqueObraCodigos =
+        linked.length > 0
+          ? linked
+          : existing.obra_codigo != null
+            ? [Number(existing.obra_codigo)]
+            : [];
+    }
+    if (tanqueObraCodigos.length === 0) {
+      return res.status(400).json({ error: "Informe ao menos uma obra do tanque." });
+    }
+    obra_codigo = tanqueObraCodigos[0];
   } else if (parsed.data.obra_codigo !== undefined) {
     obra_codigo = parseObraCodigoInput(parsed.data.obra_codigo);
   } else {
     obra_codigo = existing.obra_codigo;
   }
 
-  const obraErr = await validateObraCodigo(service, tipo === "MELOSA" ? null : obra_codigo);
-  if (obraErr) return res.status(400).json({ error: obraErr });
+  if (tipo === "TANQUE" && tanqueObraCodigos) {
+    for (const cod of tanqueObraCodigos) {
+      const obraErr = await validateObraCodigo(service, cod);
+      if (obraErr) return res.status(400).json({ error: obraErr });
+    }
+  } else {
+    const obraErr = await validateObraCodigo(service, tipo === "MELOSA" ? null : obra_codigo);
+    if (obraErr) return res.status(400).json({ error: obraErr });
+  }
 
   if (req.userId) {
     try {
       if (existing.obra_codigo != null) {
         await assertUserObraAccess(service, req.userId, existing.obra_codigo);
       }
-      if (obra_codigo != null && obra_codigo !== existing.obra_codigo) {
-        await assertUserObraAccess(service, req.userId, obra_codigo);
+      const novas = tipo === "TANQUE" && tanqueObraCodigos ? tanqueObraCodigos : obra_codigo != null ? [obra_codigo] : [];
+      for (const cod of novas) {
+        if (cod !== existing.obra_codigo) {
+          await assertUserObraAccess(service, req.userId, cod);
+        }
       }
     } catch (e) {
       if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
@@ -1044,22 +1157,19 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
   if (tipo === "TANQUE") {
     tanqueNumeroAtualizado =
       parsed.data.tanque_numero ?? (existing.tanque_numero as number | null | undefined) ?? null;
-    if (obra_codigo == null || tanqueNumeroAtualizado == null) {
+    if (obra_codigo == null || tanqueNumeroAtualizado == null || !tanqueObraCodigos?.length) {
       return res.status(400).json({ error: "Obra e número do tanque são obrigatórios." });
     }
     ativoFinal = buildTanqueAtivo(obra_codigo, tanqueNumeroAtualizado);
-    const { data: tanqueDup } = await service
-      .from("equipamentos")
-      .select("ativo")
-      .eq("tipo", "TANQUE")
-      .eq("obra_codigo", obra_codigo)
-      .eq("tanque_numero", tanqueNumeroAtualizado)
-      .neq("ativo", ativoAtual)
-      .maybeSingle();
-    if (tanqueDup) {
-      return res.status(409).json({
-        error: `Já existe o tanque ${tanqueNumeroAtualizado} na obra ${obra_codigo}.`,
-      });
+    try {
+      await assertTanqueNumeroLivreNasObras(
+        service,
+        tanqueNumeroAtualizado,
+        tanqueObraCodigos,
+        ativoAtual,
+      );
+    } catch (e) {
+      return res.status(409).json({ error: e instanceof Error ? e.message : "Tanque já cadastrado." });
     }
   }
 
@@ -1071,6 +1181,9 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
       .maybeSingle();
     if (duplicate) {
       return res.status(409).json({ error: `Já existe um equipamento com o ativo ${duplicate.ativo}.` });
+    }
+    if (tipo === "TANQUE") {
+      await service.from("tanque_obras").delete().eq("ativo", ativoAtual);
     }
   }
 
@@ -1101,6 +1214,16 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
     const status = formatted.includes("Já existe um equipamento com essa placa") ? 409 : 500;
     return res.status(status).json({ error: formatted });
   }
+
+  if (tipo === "TANQUE" && tanqueObraCodigos) {
+    try {
+      const synced = await setTanqueObras(service, String(data.ativo), tanqueObraCodigos);
+      return res.json({ equipamento: { ...data, obra_codigos: synced } });
+    } catch (e) {
+      return res.status(400).json({ error: e instanceof Error ? e.message : "Erro ao vincular obras" });
+    }
+  }
+
   return res.json({ equipamento: data });
 });
 

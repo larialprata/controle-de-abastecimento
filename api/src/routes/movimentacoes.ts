@@ -15,6 +15,7 @@ import { envValidated } from "../config";
 import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
+import { findTanqueCadastradoNaObra } from "../lib/tanqueObras";
 import { logMovimentacaoAudit } from "../lib/movimentacaoAudit";
 import { denyWebBiWriteIfNeeded, loadWebWriteProfile } from "../lib/webWriteAccess";
 import { canWriteBiAction } from "../lib/webPermissions";
@@ -388,6 +389,7 @@ function parseImageBase64Payload(raw: string, contentTypeHint?: string): {
 
 const tanqueUpdateSchema = z
   .object({
+    obra_codigo: z.number().int().positive().optional(),
     litros: z.number().min(0).optional(),
     combustivel_tipo: z.string().optional().nullable(),
     nota_numero: z.string().optional().nullable(),
@@ -1231,9 +1233,50 @@ router.patch("/tanque/movimentacoes/:operationId", requireAuth, async (req: Auth
       return res.status(400).json({ error: "Esta rota edita apenas movimentações de tanque" });
     }
 
+    const updatePayload = { ...parsedBody.data } as Record<string, unknown>;
+    const nextObra =
+      updatePayload.obra_codigo != null
+        ? Number(updatePayload.obra_codigo)
+        : Number(current.obra_codigo);
+    const nextTanque =
+      updatePayload.tanque_numero !== undefined
+        ? (updatePayload.tanque_numero as number | null)
+        : (current.tanque_numero as number | null);
+
+    if (updatePayload.obra_codigo != null) {
+      try {
+        await assertUserObraAccess(service, req.userId, Number(updatePayload.obra_codigo));
+      } catch (e) {
+        if (e instanceof ObraAccessError) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
+      const { data: obraOk } = await service
+        .from("obras")
+        .select("codigo")
+        .eq("codigo", Number(updatePayload.obra_codigo))
+        .maybeSingle();
+      if (!obraOk) {
+        return res.status(400).json({ error: `Obra ${updatePayload.obra_codigo} não encontrada.` });
+      }
+    }
+
+    if (
+      Number.isFinite(nextObra) &&
+      nextObra > 0 &&
+      (nextTanque === 1 || nextTanque === 2) &&
+      (updatePayload.obra_codigo != null || updatePayload.tanque_numero !== undefined)
+    ) {
+      const tanqueCadastrado = await findTanqueCadastradoNaObra(service, nextObra, nextTanque);
+      if (!tanqueCadastrado) {
+        return res.status(400).json({
+          error: `Tanque ${nextTanque} não cadastrado para a obra ${nextObra}.`,
+        });
+      }
+    }
+
     const { data: updated, error: updateError } = await service
       .from("movimentacoes")
-      .update(parsedBody.data as any)
+      .update(updatePayload as any)
       .eq("operation_id", operationId)
       .select("*")
       .maybeSingle();
@@ -1406,13 +1449,11 @@ router.post("/tanque/movimentacoes/entrada", requireAuth, async (req: AuthedRequ
       throw e;
     }
 
-    const { data: tanqueCadastrado } = await service
-      .from("equipamentos")
-      .select("ativo")
-      .eq("tipo", "TANQUE")
-      .eq("obra_codigo", payload.obra_codigo)
-      .eq("tanque_numero", payload.tanque_numero)
-      .maybeSingle();
+    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+      service,
+      payload.obra_codigo,
+      payload.tanque_numero,
+    );
     if (!tanqueCadastrado) {
       return res.status(400).json({
         error: `Tanque ${payload.tanque_numero} não cadastrado para a obra ${payload.obra_codigo}.`,
@@ -1485,13 +1526,11 @@ router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res
       throw e;
     }
 
-    const { data: tanqueCadastrado } = await service
-      .from("equipamentos")
-      .select("ativo")
-      .eq("tipo", "TANQUE")
-      .eq("obra_codigo", payload.obra_codigo)
-      .eq("tanque_numero", payload.tanque_numero)
-      .maybeSingle();
+    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+      service,
+      payload.obra_codigo,
+      payload.tanque_numero,
+    );
     if (!tanqueCadastrado) {
       return res.status(400).json({
         error: `Tanque ${payload.tanque_numero} não cadastrado para a obra ${payload.obra_codigo}.`,
@@ -1562,13 +1601,11 @@ router.post("/tanque/movimentacoes/melosa", requireAuth, async (req: AuthedReque
       throw e;
     }
 
-    const { data: tanqueCadastrado } = await service
-      .from("equipamentos")
-      .select("ativo")
-      .eq("tipo", "TANQUE")
-      .eq("obra_codigo", payload.obra_codigo)
-      .eq("tanque_numero", payload.tanque_numero)
-      .maybeSingle();
+    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+      service,
+      payload.obra_codigo,
+      payload.tanque_numero,
+    );
     if (!tanqueCadastrado) {
       return res.status(400).json({
         error: `Tanque ${payload.tanque_numero} não cadastrado para a obra ${payload.obra_codigo}.`,
@@ -1692,13 +1729,11 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       } else if (!tanqueNum || !Number.isInteger(tanqueNum) || tanqueNum <= 0) {
         return res.status(400).json({ error: "tanque_numero é obrigatório" });
       } else {
-        const { data: tanqueCadastrado } = await service
-          .from("equipamentos")
-          .select("ativo")
-          .eq("tipo", "TANQUE")
-          .eq("obra_codigo", payload.obra_codigo)
-          .eq("tanque_numero", tanqueNum)
-          .maybeSingle();
+        const tanqueCadastrado = await findTanqueCadastradoNaObra(
+          service,
+          payload.obra_codigo,
+          tanqueNum,
+        );
         if (!tanqueCadastrado) {
           return res.status(400).json({
             error: `Tanque ${tanqueNum} não cadastrado para a obra ${payload.obra_codigo}.`,

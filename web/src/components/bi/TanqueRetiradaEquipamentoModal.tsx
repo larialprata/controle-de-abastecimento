@@ -2,10 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { apiGet } from "../../lib/api";
 import { glassField, glassPanel, glassSelect } from "../../lib/glass";
+import { tanquePertenceAObra } from "../../lib/tanqueObras";
 
 type ObraOption = { codigo: number; nome: string };
 
-type TanqueEquip = { ativo?: string; obra_codigo?: number | null; tanque_numero?: number | null; nome?: string | null };
+type TanqueEquip = {
+  ativo?: string;
+  obra_codigo?: number | null;
+  obra_codigos?: number[];
+  tanque_numero?: number | null;
+  nome?: string | null;
+};
 
 type Props = {
   open: boolean;
@@ -79,7 +86,7 @@ export default function TanqueRetiradaEquipamentoModal({
     const cod = Number(obraCodigo);
     if (!Number.isFinite(cod) || cod <= 0) return [];
     return tanques
-      .filter((t) => Number(t.obra_codigo) === cod && t.tanque_numero != null)
+      .filter((t) => tanquePertenceAObra(t, cod) && t.tanque_numero != null)
       .sort((a, b) => Number(a.tanque_numero) - Number(b.tanque_numero));
   }, [tanques, obraCodigo]);
 

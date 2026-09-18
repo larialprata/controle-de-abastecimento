@@ -26,6 +26,7 @@ export type EstoqueTanqueRegistradoItem = {
   ativo: string;
   nome: string | null;
   obra_codigo: number;
+  obra_codigos: number[];
   obra_nome: string | null;
   tanque_numero: number;
   label: string;
@@ -308,18 +309,48 @@ async function buildTanquesRegistrados(
     .order("obra_codigo")
     .order("tanque_numero");
 
-  if (params.obraCodigo != null) {
-    eqQuery = eqQuery.eq("obra_codigo", params.obraCodigo);
-  } else if (params.obraScope?.length) {
-    eqQuery = eqQuery.in("obra_codigo", params.obraScope);
+  const { data: equipamentos } = await eqQuery;
+  let rows = equipamentos ?? [];
+  if (rows.length === 0) return [];
+
+  const ativos = rows.map((eq) => String(eq.ativo ?? "")).filter(Boolean);
+  const { data: linksData } = await service
+    .from("tanque_obras")
+    .select("ativo, obra_codigo")
+    .in("ativo", ativos);
+  const obrasByAtivo = new Map<string, number[]>();
+  for (const link of linksData ?? []) {
+    const ativo = String(link.ativo ?? "").trim();
+    const codigo = Number(link.obra_codigo);
+    if (!ativo || !Number.isFinite(codigo)) continue;
+    const list = obrasByAtivo.get(ativo) ?? [];
+    list.push(codigo);
+    obrasByAtivo.set(ativo, list);
   }
 
-  const { data: equipamentos } = await eqQuery;
-  const rows = equipamentos ?? [];
+  // Compatibilidade: se ainda não houver vínculo, usa obra principal.
+  rows = rows.map((eq) => {
+    const ativo = String(eq.ativo ?? "");
+    if ((obrasByAtivo.get(ativo) ?? []).length === 0 && eq.obra_codigo != null) {
+      obrasByAtivo.set(ativo, [Number(eq.obra_codigo)]);
+    }
+    return eq;
+  });
+
+  if (params.obraCodigo != null) {
+    rows = rows.filter((eq) => (obrasByAtivo.get(String(eq.ativo ?? "")) ?? []).includes(params.obraCodigo!));
+  } else if (params.obraScope?.length) {
+    const allowed = new Set(params.obraScope);
+    rows = rows.filter((eq) =>
+      (obrasByAtivo.get(String(eq.ativo ?? "")) ?? []).some((c) => allowed.has(c)),
+    );
+  }
   if (rows.length === 0) return [];
 
   const obraCodigos = Array.from(
-    new Set(rows.map((eq) => Number(eq.obra_codigo)).filter((c) => Number.isFinite(c))),
+    new Set(
+      rows.flatMap((eq) => obrasByAtivo.get(String(eq.ativo ?? "")) ?? []).filter((c) => Number.isFinite(c)),
+    ),
   );
   const obraNomes = new Map<number, string>();
   if (obraCodigos.length > 0) {
@@ -329,31 +360,57 @@ async function buildTanquesRegistrados(
     });
   }
 
-  const cutoffPorTanque = new Map<string, Date>();
+  // Pares (obra, número) → ativo do tanque (saldo compartilhado).
+  const ativoPorPar = new Map<string, string>();
+  const cutoffPorAtivo = new Map<string, Date>();
   rows.forEach((eq) => {
-    const obra = Number(eq.obra_codigo);
+    const ativo = String(eq.ativo ?? "");
     const tanque = Number(eq.tanque_numero);
-    if (!Number.isFinite(obra) || !Number.isFinite(tanque) || tanque <= 0) return;
+    if (!ativo || !Number.isFinite(tanque) || tanque <= 0) return;
+    const obras = obrasByAtivo.get(ativo) ?? [];
+    for (const obra of obras) {
+      ativoPorPar.set(tanqueRegistradoKey(obra, tanque), ativo);
+    }
     const hasSaldo =
       eq.saldo_inicial_litros != null && Number.isFinite(toNum(eq.saldo_inicial_litros));
     if (!hasSaldo) return;
     const em = parseDataHoraMov(eq.saldo_inicial_em);
-    cutoffPorTanque.set(tanqueRegistradoKey(obra, tanque), em ?? SALDO_INICIAL_CUTOFF_PADRAO);
+    cutoffPorAtivo.set(ativo, em ?? SALDO_INICIAL_CUTOFF_PADRAO);
   });
 
+  // Saldo compartilhado: carregar movimentos de TODAS as obras vinculadas ao tanque,
+  // mesmo quando a dashboard está filtrada por uma obra só.
+  let movsSaldo = movs;
+  if (obraCodigos.length > 0) {
+    const precisaExpandir =
+      params.obraCodigo != null ||
+      (params.obraScope?.length != null &&
+        obraCodigos.some((c) => !(params.obraScope ?? []).includes(c)));
+    if (precisaExpandir) {
+      const { data: movExtra } = await service
+        .from("movimentacoes")
+        .select("*")
+        .in("tipo", ["ENTRADA_TANQUE_OBRA", "RETIRADA_TANQUE"])
+        .in("obra_codigo", obraCodigos)
+        .order("data_hora", { ascending: true });
+      movsSaldo = (movExtra ?? []) as Record<string, unknown>[];
+    }
+  }
+
   const saldos = new Map<string, { entrada: number; retirada: number }>();
-  movs.forEach((m) => {
+  movsSaldo.forEach((m) => {
     const obra = Number(m.obra_codigo);
     const tanque = Number(m.tanque_numero);
     if (!Number.isFinite(obra) || !Number.isFinite(tanque) || tanque <= 0) return;
-    const key = tanqueRegistradoKey(obra, tanque);
-    const cutoff = cutoffPorTanque.get(key);
+    const ativo = ativoPorPar.get(tanqueRegistradoKey(obra, tanque));
+    if (!ativo) return;
+    const cutoff = cutoffPorAtivo.get(ativo);
     if (cutoff) {
       const dataHora = parseDataHoraMov(m.data_hora);
       if (!dataHora || dataHora < cutoff) return;
     }
-    if (!saldos.has(key)) saldos.set(key, { entrada: 0, retirada: 0 });
-    const bucket = saldos.get(key)!;
+    if (!saldos.has(ativo)) saldos.set(ativo, { entrada: 0, retirada: 0 });
+    const bucket = saldos.get(ativo)!;
     const tipo = String(m.tipo ?? "");
     if (tipo === "ENTRADA_TANQUE_OBRA") {
       const litros = toNum(m.litros);
@@ -368,11 +425,16 @@ async function buildTanquesRegistrados(
 
   return rows
     .map((eq) => {
-      const obra = Number(eq.obra_codigo);
+      const ativo = String(eq.ativo ?? "");
       const tanque = Number(eq.tanque_numero);
-      if (!Number.isFinite(obra) || !Number.isFinite(tanque) || tanque <= 0) return null;
+      const obrasTanque = (obrasByAtivo.get(ativo) ?? []).slice().sort((a, b) => a - b);
+      const obraPrincipal =
+        params.obraCodigo != null && obrasTanque.includes(params.obraCodigo)
+          ? params.obraCodigo
+          : Number(eq.obra_codigo) || obrasTanque[0];
+      if (!ativo || !Number.isFinite(obraPrincipal) || !Number.isFinite(tanque) || tanque <= 0) return null;
 
-      const { entrada = 0, retirada = 0 } = saldos.get(tanqueRegistradoKey(obra, tanque)) ?? {};
+      const { entrada = 0, retirada = 0 } = saldos.get(ativo) ?? {};
       const saldoInicial =
         eq.saldo_inicial_litros != null && Number.isFinite(toNum(eq.saldo_inicial_litros))
           ? toNum(eq.saldo_inicial_litros)
@@ -385,12 +447,13 @@ async function buildTanquesRegistrados(
       const ponto = cap * 0.4;
       const ocupacao = cap > 0 ? (saldo / cap) * 100 : 0;
       const nome = typeof eq.nome === "string" ? eq.nome.trim() : "";
-      const obraNome = obraNomes.get(obra) ?? null;
+      const obraNome = obraNomes.get(obraPrincipal) ?? null;
 
       return {
-        ativo: String(eq.ativo ?? ""),
+        ativo,
         nome: nome || null,
-        obra_codigo: obra,
+        obra_codigo: obraPrincipal,
+        obra_codigos: obrasTanque,
         obra_nome: obraNome,
         tanque_numero: tanque,
         label: nome ? `Tanque ${tanque} — ${nome}` : `Tanque ${tanque}`,

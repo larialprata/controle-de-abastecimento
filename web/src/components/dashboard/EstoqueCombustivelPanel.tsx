@@ -22,6 +22,7 @@ export type EstoqueTanqueRegistradoItem = {
   ativo: string;
   nome: string | null;
   obra_codigo: number;
+  obra_codigos?: number[];
   obra_nome: string | null;
   tanque_numero: number;
   label: string;

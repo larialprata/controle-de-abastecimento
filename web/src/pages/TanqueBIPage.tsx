@@ -806,7 +806,20 @@ export default function TanqueBIPage() {
     const fornecedorCurrent = fmtFornecedorRow(row) === "—" ? "" : fmtFornecedorRow(row);
     const tanqueCurrent = fmtTanqueNumRow(row);
     const obsCurrent = row.obs != null ? String(row.obs) : "";
+    const obraCurrent = row.obra_codigo != null ? String(row.obra_codigo) : "";
+    const obrasHint =
+      obras.length > 0
+        ? obras
+            .slice(0, 12)
+            .map((o) => `${o.codigo} (${o.nome})`)
+            .join(", ") + (obras.length > 12 ? "…" : "")
+        : "nenhuma obra carregada";
 
+    const obraInput = window.prompt(
+      `Editar código da obra/contrato:\nDisponíveis: ${obrasHint}`,
+      obraCurrent,
+    );
+    if (obraInput === null) return;
     const litrosInput = window.prompt("Editar litros:", litrosCurrent);
     if (litrosInput === null) return;
     const combustivelInput = window.prompt("Editar insumo/combustível (vazio para limpar):", combustivelCurrent);
@@ -832,7 +845,16 @@ export default function TanqueBIPage() {
     };
     const litros = parseNullableNumber(litrosInput);
     const valorUnitario = parseNullableNumber(valorInput);
+    const obraCodigo = Number(obraInput.trim());
 
+    if (!Number.isFinite(obraCodigo) || obraCodigo <= 0 || !Number.isInteger(obraCodigo)) {
+      window.alert("Código da obra inválido.");
+      return;
+    }
+    if (!obras.some((o) => o.codigo === obraCodigo)) {
+      window.alert(`Obra ${obraCodigo} não encontrada na lista de contratos.`);
+      return;
+    }
     if (litros === null || Number.isNaN(litros)) {
       window.alert("Litros inválido.");
       return;
@@ -854,6 +876,7 @@ export default function TanqueBIPage() {
     try {
       setLoading(true);
       const payload: Record<string, unknown> = {
+        obra_codigo: obraCodigo,
         litros,
         combustivel_tipo: combustivelInput.trim() ? combustivelInput.trim() : null,
         nota_numero: notaInput.trim() ? notaInput.trim() : null,
@@ -882,7 +905,7 @@ export default function TanqueBIPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiBase, load, selectedOperationIds, selectedRows, token]);
+  }, [apiBase, load, obras, selectedOperationIds, selectedRows, token]);
 
   const handleExportExcel = useCallback(async () => {
     const rows = retiradasFiltradas;

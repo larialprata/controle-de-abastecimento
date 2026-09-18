@@ -39,20 +39,30 @@ export default function ContratosResumoPanel({ token, obraCodigo }: Props) {
       const map = new Map<number, ObraResumo>();
 
       for (const t of json.tanques_registrados ?? []) {
-        const codigo = Number(t.obra_codigo);
-        if (!Number.isFinite(codigo)) continue;
-        const cur = map.get(codigo) ?? {
-          codigo,
-          nome: String(t.obra_nome ?? "").trim() || `Obra ${codigo}`,
-          saldo_tanques: 0,
-          tanques_baixo: 0,
-          melosas: 0,
-          melosas_baixo: 0,
-        };
-        cur.saldo_tanques += Number(t.saldo_litros) || 0;
-        if (t.abaixo_ponto_pedido) cur.tanques_baixo += 1;
-        if (t.obra_nome) cur.nome = String(t.obra_nome).trim();
-        map.set(codigo, cur);
+        const obrasVinculadas =
+          Array.isArray(t.obra_codigos) && t.obra_codigos.length > 0
+            ? t.obra_codigos.map((c) => Number(c)).filter((c) => Number.isFinite(c))
+            : [Number(t.obra_codigo)].filter((c) => Number.isFinite(c));
+        // Tanque compartilhado: mesmo saldo em cada obra vinculada (não divide o estoque).
+        for (const codigo of obrasVinculadas) {
+          const cur = map.get(codigo) ?? {
+            codigo,
+            nome:
+              codigo === Number(t.obra_codigo)
+                ? String(t.obra_nome ?? "").trim() || `Obra ${codigo}`
+                : `Obra ${codigo}`,
+            saldo_tanques: 0,
+            tanques_baixo: 0,
+            melosas: 0,
+            melosas_baixo: 0,
+          };
+          cur.saldo_tanques += Number(t.saldo_litros) || 0;
+          if (t.abaixo_ponto_pedido) cur.tanques_baixo += 1;
+          if (codigo === Number(t.obra_codigo) && t.obra_nome) {
+            cur.nome = String(t.obra_nome).trim();
+          }
+          map.set(codigo, cur);
+        }
       }
 
       for (const m of json.melosas ?? []) {
