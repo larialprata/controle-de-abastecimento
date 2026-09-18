@@ -455,16 +455,16 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     });
 
     if (obraCodigoFiltro != null) {
-      equipamentos = equipamentos.filter((e) =>
-        Array.isArray((e as { obra_codigos?: number[] }).obra_codigos) &&
-        (e as { obra_codigos: number[] }).obra_codigos.includes(obraCodigoFiltro),
-      );
+      equipamentos = equipamentos.filter((e) => {
+        const obras = (e as { obra_codigos?: number[] }).obra_codigos ?? [];
+        return obras.includes(obraCodigoFiltro);
+      });
     } else if (obraScope?.length) {
       const allowed = new Set(obraScope);
-      equipamentos = equipamentos.filter((e) =>
-        Array.isArray((e as { obra_codigos?: number[] }).obra_codigos) &&
-        (e as { obra_codigos: number[] }).obra_codigos.some((c) => allowed.has(c)),
-      );
+      equipamentos = equipamentos.filter((e) => {
+        const obras = (e as { obra_codigos?: number[] }).obra_codigos ?? [];
+        return obras.some((c) => allowed.has(c));
+      });
     }
   }
 

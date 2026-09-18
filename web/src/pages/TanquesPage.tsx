@@ -500,7 +500,7 @@ export default function TanquesPage() {
           <div className={`w-full max-w-sm rounded-2xl p-6 shadow-xl ${glassPanel}`}>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Excluir tanque?</h2>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-              {labelTanque(deleteTarget, obrasPorCodigo.get(deleteTarget.obra_codigo ?? 0))}
+              {labelTanque(deleteTarget, obrasPorCodigo)}
             </p>
             {deleteError ? <p className="mt-2 text-sm text-red-600">{deleteError}</p> : null}
             <div className="mt-4 flex gap-2">
