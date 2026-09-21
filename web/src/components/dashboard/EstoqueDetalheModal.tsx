@@ -30,6 +30,7 @@ type Movimentacao = Record<string, unknown> & {
   obra_codigo?: number;
   obra_nome?: string | null;
   tanque_numero?: number | string | null;
+  tanque_quantidade_abastecida?: string | null;
   combustivel_tipo?: string | null;
   fornecedor_texto?: string | null;
   placa_texto?: string | null;
@@ -86,6 +87,12 @@ function fmtDataHora(v: unknown): string {
 
 function litrosMelosa(m: Movimentacao): number {
   const q = parseNumero(m.melosa_quantidade_abastecida);
+  if (q != null && q > 0) return q;
+  return parseNumero(m.litros) ?? 0;
+}
+
+function litrosRetiradaTanque(m: Movimentacao): number {
+  const q = parseNumero(m.tanque_quantidade_abastecida);
   if (q != null && q > 0) return q;
   return parseNumero(m.litros) ?? 0;
 }
@@ -209,12 +216,26 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
         return placa === ativo;
       });
     }
-    const obra = alvo.item.obra_codigo;
+    const obrasTanque = new Set(
+      (alvo.item.obra_codigos?.length ? alvo.item.obra_codigos : [alvo.item.obra_codigo]).filter(
+        (c): c is number => typeof c === "number" && Number.isFinite(c),
+      ),
+    );
     const tanqueNum = alvo.item.tanque_numero;
+    const cutoffRaw = alvo.item.saldo_inicial_em;
+    const cutoffMs = cutoffRaw ? new Date(cutoffRaw).getTime() : null;
+    const cutoffOk = cutoffMs != null && Number.isFinite(cutoffMs);
+
     return movimentacoes.filter((m) => {
-      if (m.obra_codigo !== obra) return false;
+      if (typeof m.obra_codigo !== "number" || !obrasTanque.has(m.obra_codigo)) return false;
       const num = parseNumero(m.tanque_numero);
-      return num === tanqueNum;
+      if (num !== tanqueNum) return false;
+      // Alinha com o estoque: só movimentos na/após a data da quantidade cadastrada.
+      if (cutoffOk) {
+        const dh = m.data_hora ? new Date(String(m.data_hora)).getTime() : NaN;
+        if (!Number.isFinite(dh) || dh < cutoffMs!) return false;
+      }
+      return true;
     });
   }, [alvo, isMelosa, movimentacoes]);
 
@@ -226,12 +247,12 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
     let entrada = 0;
     let retirada = 0;
     filtradas.forEach((m) => {
-      const l = parseNumero(m.litros) ?? 0;
-      if (m.tipo === "ENTRADA_TANQUE_OBRA") entrada += l;
-      else if (m.tipo === "RETIRADA_TANQUE") retirada += l;
+      if (m.tipo === "ENTRADA_TANQUE_OBRA") entrada += parseNumero(m.litros) ?? 0;
+      else if (m.tipo === "RETIRADA_TANQUE") retirada += litrosRetiradaTanque(m);
     });
-    return { entrada, retirada, count: filtradas.length };
-  }, [filtradas, isMelosa]);
+    const saldoInicial = Number(alvo.kind === "tanque" ? alvo.item.saldo_inicial_litros ?? 0 : 0);
+    return { entrada, retirada, saldoInicial, count: filtradas.length };
+  }, [alvo, filtradas, isMelosa]);
 
   return (
     <div
@@ -302,15 +323,30 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
             </>
           ) : (
             <>
-              <ResumoBox label="Total de entradas" valor={`${fmtLitrosDashboard(totais.entrada ?? 0)} L`} destaque="verde" />
-              <ResumoBox label="Total retirado" valor={`${fmtLitrosDashboard(totais.retirada ?? 0)} L`} destaque="ambar" />
-              <ResumoBox label="Nº de movimentações" valor={String(totais.count)} />
+              <ResumoBox
+                label="Qtd. cadastrada (base)"
+                valor={`${fmtLitrosDashboard(totais.saldoInicial ?? 0)} L`}
+              />
+              <ResumoBox label="Entradas (após base)" valor={`${fmtLitrosDashboard(totais.entrada ?? 0)} L`} destaque="verde" />
+              <ResumoBox label="Retiradas (após base)" valor={`${fmtLitrosDashboard(totais.retirada ?? 0)} L`} destaque="ambar" />
             </>
           )}
         </div>
 
+        {!isMelosa ? (
+          <p className="mb-3 text-xs text-slate-600 dark:text-slate-400">
+            O saldo do tanque é: quantidade cadastrada + entradas − retiradas{" "}
+            <strong>depois</strong> da data/hora da quantidade. Abastecimentos feitos pela melosa (saída da melosa para
+            equipamento) não baixam o estoque do tanque — só a <strong>retirada do tanque</strong> (para melosa ou
+            equipamento) abate.
+            {alvo.kind === "tanque" && alvo.item.saldo_inicial_em
+              ? ` Base desde ${fmtDataHora(alvo.item.saldo_inicial_em)}.`
+              : ""}
+          </p>
+        ) : null}
+
         <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-slate-300">
-          {isMelosa ? "Abastecimentos" : "Movimentações do tanque"}
+          {isMelosa ? "Abastecimentos" : "Movimentações que alteram o estoque"}
         </h3>
 
         {error ? (
@@ -417,7 +453,12 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
                         </span>
                       </td>
                       <td className={`${tdCls} whitespace-nowrap font-semibold tabular-nums`}>
-                        {fmtLitrosDashboard(parseNumero(m.litros) ?? 0)} L
+                        {fmtLitrosDashboard(
+                          m.tipo === "RETIRADA_TANQUE"
+                            ? litrosRetiradaTanque(m)
+                            : parseNumero(m.litros) ?? 0,
+                        )}{" "}
+                        L
                       </td>
                       <td className={tdCls}>{fmt(m.combustivel_tipo)}</td>
                       <td className={tdCls}>{fmt(m.placa_texto ?? m.placa_caminhao ?? m.fornecedor_texto)}</td>

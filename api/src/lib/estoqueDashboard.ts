@@ -35,6 +35,10 @@ export type EstoqueTanqueRegistradoItem = {
   ocupacao_pct: number;
   ponto_pedido_litros: number;
   abaixo_ponto_pedido: boolean;
+  /** Quantidade de referência usada no cálculo do estoque. */
+  saldo_inicial_litros: number;
+  /** Só movimentos com data/hora >= este instante entram no saldo. */
+  saldo_inicial_em: string | null;
 };
 
 export type EstoqueMelosaItem = {
@@ -462,6 +466,8 @@ async function buildTanquesRegistrados(
         ocupacao_pct: Math.min(100, Math.max(0, ocupacao)),
         ponto_pedido_litros: ponto,
         abaixo_ponto_pedido: saldo < ponto,
+        saldo_inicial_litros: saldoInicial,
+        saldo_inicial_em: eq.saldo_inicial_em ? String(eq.saldo_inicial_em) : null,
       };
     })
     .filter((item): item is EstoqueTanqueRegistradoItem => item != null);

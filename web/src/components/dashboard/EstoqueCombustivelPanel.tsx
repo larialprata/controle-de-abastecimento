@@ -31,6 +31,8 @@ export type EstoqueTanqueRegistradoItem = {
   ocupacao_pct: number;
   ponto_pedido_litros: number;
   abaixo_ponto_pedido: boolean;
+  saldo_inicial_litros?: number;
+  saldo_inicial_em?: string | null;
 };
 
 export type EstoqueMelosaItem = {
