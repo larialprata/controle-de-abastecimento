@@ -1009,7 +1009,9 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
   const service = createSupabaseServiceRole();
   const { data: existing, error: findErr } = await service
     .from("equipamentos")
-    .select("ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, mobilidade, empresa, placa")
+    .select(
+      "ativo, nome, tipo, obra_codigo, tanque_numero, capacidade_litros, mobilidade, empresa, placa, saldo_inicial_litros, saldo_inicial_em",
+    )
     .eq("ativo", ativoAtual)
     .maybeSingle();
   if (findErr) return res.status(500).json({ error: findErr.message });
@@ -1052,14 +1054,28 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
   if (parsed.data.saldo_inicial_litros !== undefined) {
     const aplicarSaldo = tipo === "TANQUE" || tipo === "MELOSA";
     const litros = aplicarSaldo ? parsed.data.saldo_inicial_litros : null;
-    const emResolved = resolveSaldoInicialEm(parsed.data.saldo_inicial_em, litros != null);
-    if (!emResolved.ok) {
-      return res.status(400).json({ error: emResolved.error });
+    if (litros == null) {
+      saldoInicialPatch = { saldo_inicial_litros: null, saldo_inicial_em: null };
+    } else if (parsed.data.saldo_inicial_em != null && String(parsed.data.saldo_inicial_em).trim()) {
+      const emResolved = resolveSaldoInicialEm(parsed.data.saldo_inicial_em, true);
+      if (!emResolved.ok) {
+        return res.status(400).json({ error: emResolved.error });
+      }
+      saldoInicialPatch = {
+        saldo_inicial_litros: litros,
+        saldo_inicial_em: emResolved.value,
+      };
+    } else {
+      // Mantém a data de referência já cadastrada; só troca os litros.
+      const emExistente =
+        typeof existing.saldo_inicial_em === "string" && existing.saldo_inicial_em.trim()
+          ? existing.saldo_inicial_em
+          : null;
+      saldoInicialPatch = {
+        saldo_inicial_litros: litros,
+        saldo_inicial_em: emExistente ?? new Date().toISOString(),
+      };
     }
-    saldoInicialPatch = {
-      saldo_inicial_litros: litros,
-      saldo_inicial_em: emResolved.value,
-    };
   }
 
   let obra_codigo: number | null;

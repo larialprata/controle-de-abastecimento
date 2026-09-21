@@ -1877,7 +1877,7 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       if (categoria != null && categoria !== "ESTACIONARIA" && categoria !== "MOVEL") {
         return res.status(400).json({ error: "melosa_categoria inválido (use ESTACIONARIA ou MOVEL)" });
       }
-      const isUsina = Number(payload.obra_codigo) === 9020;
+      const isUsina = Number(payload.obra_codigo) === 9036;
       const encerranteInicial = payload.melosa_encerrante_inicial_numero?.trim() ?? "";
       const encerranteFinal = payload.melosa_encerrante_final_numero?.trim() ?? "";
       if (isUsina) {
@@ -1897,7 +1897,7 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         }
       } else if (encerranteInicial || encerranteFinal) {
         return res.status(400).json({
-          error: "Encerrante inicial/final só é permitido na obra Usina (9020)",
+          error: "Encerrante inicial/final só é permitido na obra Usina (9036)",
         });
       }
       if (!payload.melosa_quantidade_abastecida?.trim()) {
