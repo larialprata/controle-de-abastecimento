@@ -38,6 +38,8 @@ export const env = {
   RESEND_API_KEY: process.env.RESEND_API_KEY as string | undefined,
   RESEND_FROM: process.env.RESEND_FROM as string | undefined,
   CRON_SECRET: process.env.CRON_SECRET as string | undefined,
+  /** Chave para o app externo consultar ativos e horímetro (header X-Api-Key). */
+  INTEGRACAO_API_KEY: process.env.INTEGRACAO_API_KEY as string | undefined,
   /** Hora local América/São Paulo (0–23) para disparo automático; vazio = desligado */
   DAILY_REPORT_HOUR: process.env.DAILY_REPORT_HOUR
     ? Number(process.env.DAILY_REPORT_HOUR)
@@ -104,6 +106,7 @@ export const envValidated = {
   RESEND_API_KEY: env.RESEND_API_KEY,
   RESEND_FROM: env.RESEND_FROM,
   CRON_SECRET: env.CRON_SECRET,
+  INTEGRACAO_API_KEY: env.INTEGRACAO_API_KEY,
   DAILY_REPORT_HOUR: env.DAILY_REPORT_HOUR,
   STORAGE_PROVIDER: storageProvider as "supabase" | "sharepoint",
   SHAREPOINT_TENANT_ID: (env.SHAREPOINT_TENANT_ID ?? "") as string,

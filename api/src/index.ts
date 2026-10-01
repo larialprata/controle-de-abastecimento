@@ -16,6 +16,7 @@ import empresasRouter from "./routes/empresas";
 import reportEmailRouter, { startDailyReportScheduler } from "./routes/reportEmail";
 import alertasRouter from "./routes/alertas";
 import mediaRouter from "./routes/media";
+import integracaoAtivosRouter from "./routes/integracaoAtivos";
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use("/v1", equipamentoConsumoRouter);
 app.use("/v1", alertasRouter);
 app.use("/v1", mediaRouter);
 app.use("/v1", mobileErrorsRouter);
+app.use("/v1", integracaoAtivosRouter);
 
 // Tratador global de erros (caso algum erro escape de try/catch).
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
