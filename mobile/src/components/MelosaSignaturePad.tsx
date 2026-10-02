@@ -170,7 +170,7 @@ export default function MelosaSignaturePad({
       <View style={[styles.padShell, styles.padShellPaper]} collapsable={false}>
         <WebView
           ref={webRef}
-          source={{ html }}
+          source={{ html, baseUrl: "https://localhost" }}
           onMessage={onMessage}
           scrollEnabled={false}
           bounces={false}

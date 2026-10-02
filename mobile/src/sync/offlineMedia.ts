@@ -2,9 +2,6 @@ import * as FileSystem from "expo-file-system/legacy";
 import { insertPendingMedia } from "../db/sqlite";
 import { parseBase64DataUrl } from "../lib/signatureImage";
 
-const OFFLINE_ROOT = `${FileSystem.documentDirectory ?? ""}pending-media/`;
-const CAPTURE_ROOT = `${FileSystem.documentDirectory ?? ""}captured-photos/`;
-
 function safeLocalName(storagePath: string): string {
   return storagePath.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
@@ -19,6 +16,14 @@ function contentTypeFromExt(ext: string): string {
   return ext === "png" ? "image/png" : "image/jpeg";
 }
 
+function requireDocumentDir(): string {
+  const dir = FileSystem.documentDirectory;
+  if (!dir) {
+    throw new Error("Armazenamento local indisponível neste dispositivo.");
+  }
+  return dir.endsWith("/") ? dir : `${dir}/`;
+}
+
 async function ensureDir(dir: string): Promise<void> {
   const info = await FileSystem.getInfoAsync(dir);
   if (!info.exists) {
@@ -26,44 +31,57 @@ async function ensureDir(dir: string): Promise<void> {
   }
 }
 
-async function ensureOperationDir(operationId: string): Promise<string> {
-  const dir = `${OFFLINE_ROOT}${operationId}/`;
-  await ensureDir(dir);
-  return dir;
+async function fileExists(uri: string): Promise<boolean> {
+  const info = await FileSystem.getInfoAsync(uri);
+  return Boolean(info.exists);
+}
+
+async function writeBase64File(dest: string, base64: string): Promise<void> {
+  await FileSystem.writeAsStringAsync(dest, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  if (!(await fileExists(dest))) {
+    throw new Error("Não foi possível guardar a foto no celular. Tente tirar a foto novamente.");
+  }
 }
 
 /**
  * Copia a foto da câmera/galeria para o armazenamento interno do app.
  * URIs de cache/content:// somem ou não leem bem offline — por isso persistimos na hora.
+ * O base64 (quando a câmera devolve) grava direto, sem depender de rede nem de content://.
  */
-export async function persistCapturedPhoto(sourceUri: string): Promise<string> {
-  if (!sourceUri?.trim()) throw new Error("URI da foto inválida.");
-  if (!FileSystem.documentDirectory) {
-    throw new Error("Armazenamento local indisponível neste dispositivo.");
+export async function persistCapturedPhoto(sourceUri: string, base64?: string | null): Promise<string> {
+  const trimmedUri = sourceUri?.trim() ?? "";
+  const trimmedBase64 = base64?.trim() ?? "";
+  if (!trimmedUri && !trimmedBase64) throw new Error("URI da foto inválida.");
+
+  const root = requireDocumentDir();
+  if (trimmedUri.startsWith(root) && !trimmedBase64) {
+    return trimmedUri;
   }
 
-  // Já está no armazenamento interno do app
-  if (sourceUri.startsWith(FileSystem.documentDirectory)) {
-    return sourceUri;
-  }
+  const captureRoot = `${root}captured-photos/`;
+  await ensureDir(captureRoot);
+  const ext = trimmedBase64 ? "jpg" : extFromUri(trimmedUri || "foto.jpg");
+  const dest = `${captureRoot}${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
 
-  await ensureDir(CAPTURE_ROOT);
-  const ext = extFromUri(sourceUri);
-  const dest = `${CAPTURE_ROOT}${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  if (trimmedBase64) {
+    await writeBase64File(dest, trimmedBase64);
+    return dest;
+  }
 
   try {
-    await FileSystem.copyAsync({ from: sourceUri, to: dest });
-    return dest;
+    await FileSystem.copyAsync({ from: trimmedUri, to: dest });
+    if (await fileExists(dest)) return dest;
   } catch {
-    // Fallback: lê e regrava (necessário em alguns content:// do Android)
-    const base64 = await FileSystem.readAsStringAsync(sourceUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    await FileSystem.writeAsStringAsync(dest, base64, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    return dest;
+    // content:// do Android nem sempre copia; tenta ler os bytes.
   }
+
+  const read = await FileSystem.readAsStringAsync(trimmedUri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  await writeBase64File(dest, read);
+  return dest;
 }
 
 export async function stageImageFromUri(
@@ -75,7 +93,9 @@ export async function stageImageFromUri(
   const durableUri = await persistCapturedPhoto(sourceUri);
   const ext = extFromUri(durableUri);
   const contentType = contentTypeFromExt(ext);
-  const dir = await ensureOperationDir(operationId);
+  const root = requireDocumentDir();
+  const dir = `${root}pending-media/${operationId}/`;
+  await ensureDir(dir);
   const localUri = `${dir}${safeLocalName(storagePath)}.${ext}`;
 
   try {
@@ -84,14 +104,10 @@ export async function stageImageFromUri(
     const base64 = await FileSystem.readAsStringAsync(durableUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
-    await FileSystem.writeAsStringAsync(localUri, base64, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    await writeBase64File(localUri, base64);
   }
 
-  // Confirma que o arquivo local existe antes de enfileirar
-  const info = await FileSystem.getInfoAsync(localUri);
-  if (!info.exists) {
+  if (!(await fileExists(localUri))) {
     throw new Error("Não foi possível guardar a foto no celular. Tente tirar a foto novamente.");
   }
 
@@ -111,11 +127,14 @@ export async function stageImageFromDataUrl(
   dataUrl: string,
 ): Promise<void> {
   const { base64, contentType } = parseBase64DataUrl(dataUrl);
-  const dir = await ensureOperationDir(operationId);
+  if (!base64.trim()) {
+    throw new Error("Não foi possível guardar a assinatura no celular. Assine novamente.");
+  }
+  const root = requireDocumentDir();
+  const dir = `${root}pending-media/${operationId}/`;
+  await ensureDir(dir);
   const localUri = `${dir}${safeLocalName(storagePath)}.png`;
-  await FileSystem.writeAsStringAsync(localUri, base64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  await writeBase64File(localUri, base64);
   insertPendingMedia({
     operation_id: operationId,
     bucket,

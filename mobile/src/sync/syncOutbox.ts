@@ -1,5 +1,11 @@
 import { apiPost } from "../lib/api";
-import { deletePendingMedia, getOutboxPending, deleteOutbox, getPendingMedia } from "../db/sqlite";
+import {
+  deletePendingMedia,
+  getOutboxPending,
+  deleteOutbox,
+  getPendingMedia,
+  updateOutboxPayload,
+} from "../db/sqlite";
 import * as FileSystem from "expo-file-system/legacy";
 import type { MovimentacaoPayload } from "../types/movimentacao";
 
@@ -67,6 +73,50 @@ function explainSyncError(message: string): string {
   return message;
 }
 
+function isTransbordoMelosa(obs: string | null | undefined): boolean {
+  return String(obs ?? "")
+    .trim()
+    .toUpperCase()
+    .startsWith("[TRANSFERENCIA_MELOSA]");
+}
+
+/** Preenche empresa/descrição que o celular não tinha no save offline. */
+async function fillEquipamentoCadastro(payload: MovimentacaoPayload, token: string): Promise<boolean> {
+  if (payload.tipo !== "RETIRADA_MELOSA") return false;
+  if (isTransbordoMelosa(payload.obs)) return false;
+  const ativo = String(payload.fornecedor_texto ?? "").trim();
+  if (!ativo) return false;
+  const faltaEmpresa = !String(payload.ativo_equipamento_empresa ?? "").trim();
+  const faltaNome = !String(payload.ativo_equipamento_nome ?? "").trim();
+  if (!faltaEmpresa && !faltaNome) return false;
+
+  try {
+    const { equipamento } = await apiPost<{
+      equipamento?: { ativo?: string; nome?: string | null; empresa?: string | null } | null;
+    }>(
+      "/v1/equipamentos/qr/lookup",
+      token,
+      { qr: ativo, obra_codigo: payload.obra_codigo },
+      { operation_id: payload.operation_id, action: "equipamento_lookup" },
+      20000,
+    );
+    if (!equipamento) return false;
+    let changed = false;
+    if (faltaEmpresa && equipamento.empresa?.trim()) {
+      payload.ativo_equipamento_empresa = equipamento.empresa.trim();
+      changed = true;
+    }
+    if (faltaNome && equipamento.nome?.trim()) {
+      payload.ativo_equipamento_nome = equipamento.nome.trim();
+      changed = true;
+    }
+    return changed;
+  } catch {
+    // A API também resolve a empresa na hora de gravar. Não bloqueia a fila.
+    return false;
+  }
+}
+
 async function uploadPendingMediaForOperation(operationId: string, token: string): Promise<void> {
   const rows = getPendingMedia(operationId);
   if (rows.length === 0) return;
@@ -129,6 +179,9 @@ export async function syncOutbox(token: string) {
       // Sempre sobe com a data/hora gravada no celular no momento do save offline.
       if (!payload.data_hora) {
         payload.data_hora = new Date().toISOString();
+      }
+      if (await fillEquipamentoCadastro(payload, token)) {
+        updateOutboxPayload(row.operation_id, payload);
       }
       await uploadPendingMediaForOperation(row.operation_id, token);
       const resp = await apiPost<{

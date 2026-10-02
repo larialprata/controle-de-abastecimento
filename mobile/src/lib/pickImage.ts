@@ -8,6 +8,8 @@ const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = {
   // Qualidade menor reduz memória e a chance do Android matar o app na câmera
   quality: 0.55,
   exif: false,
+  // Bytes na hora: a foto fica no celular mesmo sem internet e sem URI content://.
+  base64: true,
 };
 
 async function ensureCameraPermission(deniedMessage: string): Promise<boolean> {
@@ -32,10 +34,10 @@ async function ensureLibraryPermission(deniedMessage: string): Promise<boolean> 
   return false;
 }
 
-async function hardenPickedUri(uri: string | null | undefined): Promise<string | null> {
-  if (!uri) return null;
+async function hardenPickedAsset(asset: ImagePicker.ImagePickerAsset | undefined): Promise<string | null> {
+  if (!asset?.uri && !asset?.base64) return null;
   try {
-    return await persistCapturedPhoto(uri);
+    return await persistCapturedPhoto(asset.uri ?? "", asset.base64);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     Alert.alert(
@@ -62,7 +64,7 @@ export async function pickImageFromCamera(deniedMessage: string): Promise<string
 
     const result = await ImagePicker.launchCameraAsync(PICKER_OPTIONS);
     if (result.canceled) return null;
-    return hardenPickedUri(result.assets?.[0]?.uri);
+    return hardenPickedAsset(result.assets?.[0]);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     Alert.alert(
@@ -80,7 +82,7 @@ export async function pickImageFromLibrary(deniedMessage: string): Promise<strin
 
     const result = await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
     if (result.canceled) return null;
-    return hardenPickedUri(result.assets?.[0]?.uri);
+    return hardenPickedAsset(result.assets?.[0]);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     Alert.alert("Galeria", `Não foi possível abrir a galeria.\n\n${msg}`);

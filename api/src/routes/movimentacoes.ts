@@ -12,6 +12,7 @@ import {
 } from "../lib/melosaTransferencia";
 import { parseMedidorNumero } from "../lib/melosaMedidorContinuidade";
 import { envValidated } from "../config";
+import { resolveEquipamentoCadastro } from "../lib/equipamentoAbastLookup";
 import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
@@ -1706,9 +1707,34 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       (payload.ativo_melosa_texto?.trim() || payload.placa_texto?.trim() || "").trim() || null;
     const fornecedorNorm =
       (payload.ativo_equipamento_texto?.trim() || payload.fornecedor_texto?.trim() || "").trim() || null;
-    const equipamentoEmpresaNorm = payload.ativo_equipamento_empresa
+    let equipamentoEmpresaNorm = payload.ativo_equipamento_empresa
       ? normalizeEquipamentoEmpresa(payload.ativo_equipamento_empresa)
       : null;
+    let equipamentoNomeNorm = payload.ativo_equipamento_nome?.trim() || null;
+
+    // Lançamento offline grava sem empresa quando o celular não conseguiu consultar o cadastro.
+    // Na subida, preenche empresa e descrição a partir do cadastro (Abast ou Controle de Equipamentos).
+    if (
+      payload.tipo === "RETIRADA_MELOSA" &&
+      fornecedorNorm &&
+      !isTransferenciaMelosaObs(payload.obs) &&
+      (!equipamentoEmpresaNorm || !equipamentoNomeNorm)
+    ) {
+      try {
+        const cadastro = await resolveEquipamentoCadastro(fornecedorNorm, payload.obra_codigo);
+        if (!equipamentoEmpresaNorm && cadastro?.empresa) {
+          equipamentoEmpresaNorm = normalizeEquipamentoEmpresa(cadastro.empresa);
+        }
+        if (!equipamentoNomeNorm && cadastro?.nome?.trim()) {
+          const nome = cadastro.nome.trim();
+          const nomeKey = nome.toUpperCase().replace(/\s+/g, "");
+          const ativoKey = fornecedorNorm.toUpperCase().replace(/\s+/g, "");
+          if (nomeKey !== ativoKey) equipamentoNomeNorm = nome;
+        }
+      } catch (lookupErr) {
+        console.warn("[movimentacoes] cadastro do equipamento:", lookupErr);
+      }
+    }
     const tanqueNum = payload.tanque_numero;
 
     const needsVeiculoMeta =
@@ -2019,7 +2045,7 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         ativo_melosa_texto: placaNorm,
         ativo_equipamento_texto: fornecedorNorm,
         ativo_equipamento_empresa: equipamentoEmpresaNorm,
-        ativo_equipamento_nome: payload.ativo_equipamento_nome?.trim() || null,
+        ativo_equipamento_nome: equipamentoNomeNorm,
         melosa_operador_nome: payload.melosa_operador_nome?.trim() || null,
         melosa_assinatura_operador_storage_path: payload.melosa_assinatura_operador_storage_path ?? null,
         melosa_assinatura_motorista_storage_path: payload.melosa_assinatura_motorista_storage_path ?? null,

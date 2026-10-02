@@ -85,3 +85,10 @@ export function deleteOutbox(operationId: string) {
   db.runSync(`DELETE FROM outbox WHERE operation_id = ?`, [operationId]);
 }
 
+export function updateOutboxPayload(operationId: string, payload: unknown) {
+  db.runSync(`UPDATE outbox SET payload_json = ? WHERE operation_id = ?`, [
+    JSON.stringify(payload),
+    operationId,
+  ]);
+}
+

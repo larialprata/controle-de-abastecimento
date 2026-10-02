@@ -1,5 +1,5 @@
 import { BlurView } from "expo-blur";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { StatusBar } from "expo-status-bar";
 import { forwardRef, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -54,6 +54,19 @@ import {
   parseEquipamentoQrContent,
 } from "./src/lib/equipamentoQr";
 import { normalizeAtivoPatrimonio } from "./src/lib/equipamentoAtivo";
+import {
+  findCachedEquipamento,
+  loadEquipamentoCatalog,
+  loadJsonCache,
+  MELOSAS_CACHE_KEY,
+  mergeCatalogFromApi,
+  OBRAS_CACHE_KEY,
+  saveEquipamentoCatalog,
+  saveJsonCache,
+  TANQUES_CACHE_KEY,
+  upsertCachedEquipamento,
+  type CachedEquipamento,
+} from "./src/lib/offlineCatalog";
 import { base64ToArrayBuffer, parseBase64DataUrl } from "./src/lib/signatureImage";
 import { extFromUri, stageImageFromDataUrl, stageImageFromUri } from "./src/sync/offlineMedia";
 import { APP_VERSION } from "./src/lib/appVersion";
@@ -847,6 +860,7 @@ export default function App() {
   const melosaAtivoLookupSeqRef = useRef(0);
   const skipMelosaAtivoLookupRef = useRef(false);
   const skipMelosaPlacaLookupRef = useRef(false);
+  const equipamentoCatalogRef = useRef<CachedEquipamento[]>([]);
   const [melosaTanqueNumero, setMelosaTanqueNumero] = useState<1 | 2>(1);
   const [melosaRegKmText, setMelosaRegKmText] = useState("");
   const [melosaRegLitrosText, setMelosaRegLitrosText] = useState("");
@@ -1120,13 +1134,28 @@ export default function App() {
       setMelosasCadastradas([]);
       return;
     }
-    apiGet<{ equipamentos: { ativo: string; nome: string | null }[] }>(
-      "/v1/equipamentos?tipo=MELOSA",
-      session.access_token
-    )
-      .then((json) => setMelosasCadastradas(json.equipamentos ?? []))
-      .catch(() => setMelosasCadastradas([]));
-  }, [session?.access_token]);
+    let cancelled = false;
+    const token = session.access_token;
+    void (async () => {
+      const cached = await loadJsonCache<{ ativo: string; nome: string | null }[]>(MELOSAS_CACHE_KEY);
+      if (!cancelled && cached?.length) setMelosasCadastradas(cached);
+      if (!isOnline) return;
+      try {
+        const json = await apiGet<{ equipamentos: { ativo: string; nome: string | null }[] }>(
+          "/v1/equipamentos?tipo=MELOSA",
+          token,
+        );
+        const list = json.equipamentos ?? [];
+        if (!cancelled) setMelosasCadastradas(list);
+        await saveJsonCache(MELOSAS_CACHE_KEY, list);
+      } catch {
+        // Mantém a lista já salva no celular.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, isOnline]);
 
   useEffect(() => {
     if (!session?.access_token) {
@@ -1135,8 +1164,14 @@ export default function App() {
       setTanqueNumero(null);
       return;
     }
-    apiGet<{ equipamentos: TanqueCadastrado[] }>("/v1/equipamentos?tipo=TANQUE", session.access_token)
-      .then((json) => {
+    let cancelled = false;
+    const token = session.access_token;
+    void (async () => {
+      const cached = await loadJsonCache<TanqueCadastrado[]>(TANQUES_CACHE_KEY);
+      if (!cancelled && cached?.length) setTanquesCadastrados(cached);
+      if (!isOnline) return;
+      try {
+        const json = await apiGet<{ equipamentos: TanqueCadastrado[] }>("/v1/equipamentos?tipo=TANQUE", token);
         const list = (json.equipamentos ?? [])
           .map((t) => {
             const obra_codigos = Array.isArray((t as TanqueCadastrado).obra_codigos)
@@ -1156,12 +1191,16 @@ export default function App() {
             };
           })
           .filter((t) => t.tanque_numero != null && obraCodigosTanqueMobile(t).length > 0);
-        setTanquesCadastrados(list);
-      })
-      .catch(() => {
-        setTanquesCadastrados([]);
-      });
-  }, [session?.access_token]);
+        if (!cancelled) setTanquesCadastrados(list);
+        await saveJsonCache(TANQUES_CACHE_KEY, list);
+      } catch {
+        // Mantém os tanques já salvos no celular.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, isOnline]);
 
   useEffect(() => {
     if (tanquesDisponiveis.length === 0) {
@@ -1207,10 +1246,53 @@ export default function App() {
       setObrasCadastradas([]);
       return;
     }
-    apiGet<{ obras: { codigo: number; nome: string }[] }>("/v1/obras", session.access_token)
-      .then((json) => setObrasCadastradas(json.obras ?? []))
-      .catch(() => setObrasCadastradas([]));
-  }, [session?.access_token, melosaRegisterAberta]);
+    let cancelled = false;
+    const token = session.access_token;
+    void (async () => {
+      const cached = await loadJsonCache<{ codigo: number; nome: string }[]>(OBRAS_CACHE_KEY);
+      if (!cancelled && cached?.length) setObrasCadastradas(cached);
+      if (!isOnline) return;
+      try {
+        const json = await apiGet<{ obras: { codigo: number; nome: string }[] }>("/v1/obras", token);
+        const list = json.obras ?? [];
+        if (!cancelled) setObrasCadastradas(list);
+        await saveJsonCache(OBRAS_CACHE_KEY, list);
+      } catch {
+        // Mantém as obras já salvas no celular.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, isOnline, melosaRegisterAberta]);
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      equipamentoCatalogRef.current = [];
+      return;
+    }
+    let cancelled = false;
+    const token = session.access_token;
+    void (async () => {
+      const cached = await loadEquipamentoCatalog();
+      if (!cancelled && cached.length) equipamentoCatalogRef.current = cached;
+      if (!isOnline) return;
+      try {
+        const json = await apiGet<{
+          equipamentos: { ativo: string; nome: string | null; empresa: string | null; placa: string | null }[];
+        }>("/v1/equipamentos?tipo=EQUIPAMENTO", token);
+        if (cancelled) return;
+        const merged = mergeCatalogFromApi(equipamentoCatalogRef.current, json.equipamentos ?? []);
+        equipamentoCatalogRef.current = merged;
+        await saveEquipamentoCatalog(merged);
+      } catch {
+        // Mantém o cadastro já salvo no celular.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, isOnline]);
 
   useEffect(() => {
     if (screen.name !== "melosa" || screen.step !== "register") return;
@@ -1230,7 +1312,13 @@ export default function App() {
       return;
     }
 
-    if (!session?.access_token || !isOnline) return;
+    if (!session?.access_token || !isOnline) {
+      if (!applyEquipamentoFromLocalCatalog(ativo)) {
+        setMelosaEquipamentoNomeTexto("");
+        setMelosaEquipamentoEmpresa("");
+      }
+      return;
+    }
 
     const seq = ++melosaAtivoLookupSeqRef.current;
     const timer = setTimeout(() => {
@@ -1239,6 +1327,7 @@ export default function App() {
         .then((equipamento) => {
           if (seq !== melosaAtivoLookupSeqRef.current) return;
           if (equipamento) {
+            rememberEquipamentoLocal(equipamento, ativo);
             applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
           } else {
             setMelosaEquipamentoNomeTexto("");
@@ -1248,7 +1337,7 @@ export default function App() {
           }
         })
         .catch(() => {
-          if (seq === melosaAtivoLookupSeqRef.current) {
+          if (seq === melosaAtivoLookupSeqRef.current && !applyEquipamentoFromLocalCatalog(ativo)) {
             setMelosaEquipamentoNomeTexto("");
             setMelosaEquipamentoEmpresa("");
           }
@@ -1390,6 +1479,33 @@ export default function App() {
     setMelosaEquipamentoEmpresa(equipamento.empresa ?? "");
   }
 
+  function rememberEquipamentoLocal(
+    equipamento: { ativo: string; nome?: string | null; empresa?: string | null; placa?: string | null },
+    extraAlias?: string | null,
+  ) {
+    const next = upsertCachedEquipamento(equipamentoCatalogRef.current, equipamento, extraAlias);
+    equipamentoCatalogRef.current = next;
+    void saveEquipamentoCatalog(next);
+  }
+
+  function applyEquipamentoFromLocalCatalog(query: string): boolean {
+    const found = findCachedEquipamento(equipamentoCatalogRef.current, query);
+    if (!found?.ativo?.trim()) return false;
+    applyMelosaEquipamentoFromLookup(found, { updateAtivo: true, updatePlaca: true });
+    return true;
+  }
+
+  function equipamentoLocalParaSalvar(ativo: string): { empresa: string; nome: string } {
+    const empresa = melosaEquipamentoEmpresa.trim();
+    const nome = melosaEquipamentoNomeTexto.trim();
+    if (empresa && nome) return { empresa, nome };
+    const found = findCachedEquipamento(equipamentoCatalogRef.current, ativo);
+    return {
+      empresa: empresa || found?.empresa?.trim() || "",
+      nome: nome || found?.nome?.trim() || "",
+    };
+  }
+
   async function fetchMelosaEquipamentoByQr(qr: string): Promise<MelosaEquipamentoLookup | null> {
     if (!session?.access_token || !qr.trim()) return null;
     const { equipamento } = await apiPost<{ equipamento: MelosaEquipamentoLookup }>(
@@ -1440,14 +1556,15 @@ export default function App() {
       const equipamento = await fetchMelosaEquipamentoByAtivo(ativo.trim());
       if (seq !== melosaAtivoLookupSeqRef.current) return;
       if (equipamento) {
+        rememberEquipamentoLocal(equipamento, ativo.trim());
         applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
       } else {
         setMelosaEquipamentoNomeTexto("");
         setMelosaEquipamentoEmpresa("");
       }
     } catch {
-      // Patrimônio não cadastrado (404) ou erro de rede: não bloqueia o registro.
-      if (seq === melosaAtivoLookupSeqRef.current) {
+      // Patrimônio não cadastrado (404) ou erro de rede: usa a cópia local, se houver.
+      if (seq === melosaAtivoLookupSeqRef.current && !applyEquipamentoFromLocalCatalog(ativo.trim())) {
         setMelosaEquipamentoNomeTexto("");
         setMelosaEquipamentoEmpresa("");
       }
@@ -1465,7 +1582,23 @@ export default function App() {
       return;
     }
     if (!isOnline) {
-      Alert.alert("Sem internet", "A leitura do QR code precisa de conexão para buscar os dados do equipamento.");
+      const parsed = parseEquipamentoQrContent(qrData);
+      const ativoLocal =
+        (parsed?.kind === "abast" ? parsed.ativo : null) ||
+        parseAbastEquipamentoQrAtivo(qrData) ||
+        (parsed?.kind === "token" ? parsed.token : "");
+      if (ativoLocal && applyEquipamentoFromLocalCatalog(ativoLocal)) {
+        setMelosaEquipamentoQrOpen(false);
+        Alert.alert(
+          "Equipamento identificado",
+          "Dados carregados da cópia salva no celular. O lançamento será enviado quando houver internet.",
+        );
+        return;
+      }
+      Alert.alert(
+        "Sem internet",
+        "Este QR ainda não está na cópia do celular. Informe o patrimônio, ou conecte uma vez para atualizar o cadastro. O lançamento fica salvo no celular e sobe depois.",
+      );
       setMelosaEquipamentoQrOpen(false);
       return;
     }
@@ -1476,6 +1609,7 @@ export default function App() {
       skipMelosaAtivoLookupRef.current = true;
       skipMelosaPlacaLookupRef.current = true;
       setMelosaFornecedorTexto(equipamento.ativo);
+      rememberEquipamentoLocal(equipamento, qrData);
       applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
       setMelosaEquipamentoQrOpen(false);
       const origem =
@@ -1501,6 +1635,7 @@ export default function App() {
         skipMelosaPlacaLookupRef.current = true;
         setMelosaFornecedorTexto(equipamento?.ativo ?? ativoLocal);
         if (equipamento) {
+          rememberEquipamentoLocal(equipamento, qrData);
           applyMelosaEquipamentoFromLookup(equipamento, { updateAtivo: true, updatePlaca: true });
         } else {
           setMelosaEquipamentoNomeTexto("");
@@ -1678,10 +1813,14 @@ export default function App() {
       };
     } catch (e: unknown) {
       setPending(outboxCount());
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isNetworkFailureMessage(msg)) {
+        return { ...base, status: "pending" };
+      }
       return {
         ...base,
         status: "error",
-        erro: e instanceof Error ? e.message : String(e),
+        erro: msg,
       };
     }
   }
@@ -2822,6 +2961,9 @@ export default function App() {
 
     const origemMelosa = melosaPlacaTexto.trim().toUpperCase();
     const destinoOuEquipamento = melosaFornecedorTexto.trim().toUpperCase();
+    const cadastroEquipamento = melosaIsTransbordo
+      ? { empresa: "", nome: melosaEquipamentoNomeTexto.trim() }
+      : equipamentoLocalParaSalvar(melosaFornecedorTexto);
     const obsTransferencia = melosaIsTransbordo
       ? `[TRANSFERENCIA_MELOSA] ${origemMelosa} → ${destinoOuEquipamento}`
       : null;
@@ -2834,10 +2976,10 @@ export default function App() {
       litros: litrosMelosa,
       placa_texto: melosaPlacaTexto.trim(),
       fornecedor_texto: melosaFornecedorTexto.trim(),
-      ativo_equipamento_empresa: melosaIsTransbordo ? null : melosaEquipamentoEmpresa || null,
+      ativo_equipamento_empresa: melosaIsTransbordo ? null : cadastroEquipamento.empresa || null,
       ativo_equipamento_nome: melosaIsTransbordo
         ? melosaEquipamentoNomeTexto.trim() || melosaFornecedorTexto.trim() || null
-        : melosaEquipamentoNomeTexto.trim() || null,
+        : cadastroEquipamento.nome || null,
       melosa_operador_nome: driverFullName.trim() || null,
       melosa_categoria: null,
       tanque_numero: melosaTanqueNumero,
@@ -2926,6 +3068,8 @@ export default function App() {
       }
     } else if (isOnline && session?.access_token) {
       void lookupMelosaEquipamentoPatrimonio(ativo);
+    } else {
+      applyEquipamentoFromLocalCatalog(ativo);
     }
 
     setMessage(null);
@@ -3884,7 +4028,9 @@ export default function App() {
                   ) : null}
                   {equipamentoDadosVisiveis && !isOnline ? (
                     <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
-                      Sem internet — a descrição e a empresa serão buscadas ao continuar, se estiver online.
+                      {melosaEquipamentoEmpresa.trim()
+                        ? "Sem internet — empresa carregada da cópia do celular. O lançamento sobe quando houver conexão."
+                        : "Sem internet — o lançamento fica no celular. A empresa do cadastro entra na hora de enviar, se o equipamento estiver cadastrado."}
                     </Text>
                   ) : null}
                     </>
