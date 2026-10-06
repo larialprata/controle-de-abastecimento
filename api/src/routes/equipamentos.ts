@@ -55,6 +55,14 @@ function resolveTanqueObraCodigos(input: {
   return single != null ? [single] : [];
 }
 
+function litrosIguais(atual: unknown, proximo: number | null | undefined): boolean {
+  const left = atual == null || atual === "" ? null : Number(atual);
+  const right = proximo == null ? null : Number(proximo);
+  if (left == null && right == null) return true;
+  if (left == null || right == null || !Number.isFinite(left) || !Number.isFinite(right)) return false;
+  return Math.abs(left - right) < 0.0001;
+}
+
 /** Aceita ISO completo ou só a data (YYYY-MM-DD → fim do dia em America/Sao_Paulo). */
 function resolveSaldoInicialEm(
   input: string | null | undefined,
@@ -953,6 +961,12 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
     const litros = aplicarSaldo ? parsed.data.saldo_inicial_litros : null;
     if (litros == null) {
       saldoInicialPatch = { saldo_inicial_litros: null, saldo_inicial_em: null };
+    } else if (!litrosIguais(existing.saldo_inicial_litros, litros)) {
+      // Quantidade nova é o estoque deste instante. O BI anterior não entra de novo na dashboard.
+      saldoInicialPatch = {
+        saldo_inicial_litros: litros,
+        saldo_inicial_em: new Date().toISOString(),
+      };
     } else if (parsed.data.saldo_inicial_em != null && String(parsed.data.saldo_inicial_em).trim()) {
       const emResolved = resolveSaldoInicialEm(parsed.data.saldo_inicial_em, true);
       if (!emResolved.ok) {
@@ -963,7 +977,6 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
         saldo_inicial_em: emResolved.value,
       };
     } else {
-      // Mantém a data de referência já cadastrada; só troca os litros.
       const emExistente =
         typeof existing.saldo_inicial_em === "string" && existing.saldo_inicial_em.trim()
           ? existing.saldo_inicial_em

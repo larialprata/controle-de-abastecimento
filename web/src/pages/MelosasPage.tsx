@@ -8,7 +8,8 @@ export default function MelosasPage() {
       description={
         <>
           Cadastro das <strong>melosas</strong> utilizadas no abastecimento. Os ativos cadastrados aparecem no app
-          mobile para seleção da melosa e a capacidade em litros alimenta o controle de ciclos no dashboard.
+          mobile para seleção da melosa e a capacidade em litros alimenta o controle de ciclos no dashboard. A
+          quantidade salva vira o saldo na dashboard naquele instante. O BI posterior altera esse saldo.
         </>
       }
       ativoPlaceholder="Ex.: ABC1D23"

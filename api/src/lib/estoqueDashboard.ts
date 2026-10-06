@@ -298,8 +298,13 @@ function parseDataHoraMov(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** Início de 06/07/2026 (BRT) para tanques com saldo cadastrado antes de saldo_inicial_em existir. */
-const SALDO_INICIAL_CUTOFF_PADRAO = new Date("2026-07-06T03:00:00.000Z");
+/** Movimento entra no saldo só depois da quantidade cadastrada. Sem data, a quantidade vale sozinha. */
+function movimentoDepoisDaQuantidade(dataHora: unknown, cutoff: Date | null | undefined): boolean {
+  if (cutoff === undefined) return true;
+  if (cutoff == null) return false;
+  const dh = parseDataHoraMov(dataHora);
+  return dh != null && dh.getTime() > cutoff.getTime();
+}
 
 async function buildTanquesRegistrados(
   service: SupabaseClient,
@@ -366,7 +371,7 @@ async function buildTanquesRegistrados(
 
   // Pares (obra, número) → ativo do tanque (saldo compartilhado).
   const ativoPorPar = new Map<string, string>();
-  const cutoffPorAtivo = new Map<string, Date>();
+  const cutoffPorAtivo = new Map<string, Date | null>();
   rows.forEach((eq) => {
     const ativo = String(eq.ativo ?? "");
     const tanque = Number(eq.tanque_numero);
@@ -375,11 +380,19 @@ async function buildTanquesRegistrados(
     for (const obra of obras) {
       ativoPorPar.set(tanqueRegistradoKey(obra, tanque), ativo);
     }
-    const hasSaldo =
+    const temQuantidade =
       eq.saldo_inicial_litros != null && Number.isFinite(toNum(eq.saldo_inicial_litros));
-    if (!hasSaldo) return;
-    const em = parseDataHoraMov(eq.saldo_inicial_em);
-    cutoffPorAtivo.set(ativo, em ?? SALDO_INICIAL_CUTOFF_PADRAO);
+    if (!temQuantidade) return;
+    cutoffPorAtivo.set(ativo, parseDataHoraMov(eq.saldo_inicial_em));
+  });
+
+  const ativosPorObra = new Map<number, string[]>();
+  ativoPorPar.forEach((ativo, key) => {
+    const obra = Number(key.split(":")[0]);
+    if (!Number.isFinite(obra)) return;
+    const list = ativosPorObra.get(obra) ?? [];
+    if (!list.includes(ativo)) list.push(ativo);
+    ativosPorObra.set(obra, list);
   });
 
   // Saldo compartilhado: carregar movimentos de TODAS as obras vinculadas ao tanque,
@@ -404,14 +417,15 @@ async function buildTanquesRegistrados(
   const saldos = new Map<string, { entrada: number; retirada: number }>();
   movsSaldo.forEach((m) => {
     const obra = Number(m.obra_codigo);
+    if (!Number.isFinite(obra)) return;
     const tanque = Number(m.tanque_numero);
-    if (!Number.isFinite(obra) || !Number.isFinite(tanque) || tanque <= 0) return;
-    const ativo = ativoPorPar.get(tanqueRegistradoKey(obra, tanque));
+    const ativo =
+      Number.isFinite(tanque) && tanque > 0
+        ? ativoPorPar.get(tanqueRegistradoKey(obra, tanque))
+        : (ativosPorObra.get(obra)?.length === 1 ? ativosPorObra.get(obra)?.[0] : undefined);
     if (!ativo) return;
-    const cutoff = cutoffPorAtivo.get(ativo);
-    if (cutoff) {
-      const dataHora = parseDataHoraMov(m.data_hora);
-      if (!dataHora || dataHora < cutoff) return;
+    if (cutoffPorAtivo.has(ativo) && !movimentoDepoisDaQuantidade(m.data_hora, cutoffPorAtivo.get(ativo))) {
+      return;
     }
     if (!saldos.has(ativo)) saldos.set(ativo, { entrada: 0, retirada: 0 });
     const bucket = saldos.get(ativo)!;
@@ -515,43 +529,34 @@ async function buildMelosasEstoque(
     if (ativo) eqPorAtivo.set(ativo, eq as MelosaEq);
   });
 
-  const cutoffPorAtivo = new Map<string, Date>();
   const saldoInicialPorAtivo = new Map<string, number>();
+  const cutoffPorAtivo = new Map<string, Date | null>();
   eqPorAtivo.forEach((eq, ativo) => {
     if (eq.saldo_inicial_litros == null || !Number.isFinite(toNum(eq.saldo_inicial_litros))) return;
     saldoInicialPorAtivo.set(ativo, Math.max(0, toNum(eq.saldo_inicial_litros)));
-    const em = parseDataHoraMov(eq.saldo_inicial_em);
-    cutoffPorAtivo.set(ativo, em ?? SALDO_INICIAL_CUTOFF_PADRAO);
+    cutoffPorAtivo.set(ativo, parseDataHoraMov(eq.saldo_inicial_em));
   });
 
   const enchimentosApos = new Map<string, number>();
   ciclos.forEach((c) => {
     const ativo = normPlaca(c.ativo_melosa_texto);
-    const cutoff = cutoffPorAtivo.get(ativo);
-    if (!cutoff) return;
-    const dh = parseDataHoraMov(c.data_hora);
-    if (!dh || dh.getTime() <= cutoff.getTime()) return;
+    if (!saldoInicialPorAtivo.has(ativo)) return;
+    if (!movimentoDepoisDaQuantidade(c.data_hora, cutoffPorAtivo.get(ativo))) return;
     enchimentosApos.set(ativo, (enchimentosApos.get(ativo) ?? 0) + toNum(c.litros_retirada));
   });
 
   const abastApos = new Map<string, number>();
   if (saldoInicialPorAtivo.size > 0) {
     const ativosComSaldo = Array.from(saldoInicialPorAtivo.keys());
-    const cutoffs = Array.from(cutoffPorAtivo.values());
-    const minCutoff = cutoffs.reduce((min, d) => (d.getTime() < min.getTime() ? d : min), cutoffs[0]!);
     const { data: movMelosa } = await service
       .from("melosa_movimentacoes")
       .select("ativo_melosa_texto, litros, data_hora")
-      .in("ativo_melosa_texto", ativosComSaldo)
-      .gt("data_hora", minCutoff.toISOString())
-      .order("data_hora", { ascending: true });
+      .in("ativo_melosa_texto", ativosComSaldo);
 
     (movMelosa ?? []).forEach((row) => {
       const ativo = normPlaca(row.ativo_melosa_texto);
-      const cutoff = cutoffPorAtivo.get(ativo);
-      if (!cutoff) return;
-      const dh = parseDataHoraMov(row.data_hora);
-      if (!dh || dh.getTime() <= cutoff.getTime()) return;
+      if (!saldoInicialPorAtivo.has(ativo)) return;
+      if (!movimentoDepoisDaQuantidade(row.data_hora, cutoffPorAtivo.get(ativo))) return;
       abastApos.set(ativo, (abastApos.get(ativo) ?? 0) + toNum(row.litros));
     });
   }

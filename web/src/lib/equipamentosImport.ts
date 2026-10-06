@@ -247,6 +247,52 @@ export async function parseEquipamentosImportFile(
   return { rows, errors };
 }
 
+export type EquipamentoPlanilhaRow = {
+  ativo: string;
+  descricao: string;
+  placa: string;
+  obraCodigo: number | "";
+  mobilidade: string;
+  empresa: string;
+};
+
+/** Planilha só com o cadastro dos equipamentos, no mesmo formato do modelo de importação. */
+export function downloadEquipamentosCadastroExcel(
+  rows: EquipamentoPlanilhaRow[],
+  filenamePrefix = "equipamentos",
+): void {
+  if (rows.length === 0) {
+    throw new Error("Não há equipamentos para exportar.");
+  }
+
+  const data: (string | number)[][] = [
+    ["ativo", "descricao", "placa", "obra_codigo", "mobilidade", "empresa"],
+    ...rows.map((row) => [
+      row.ativo,
+      row.descricao,
+      row.placa,
+      row.obraCodigo,
+      row.mobilidade,
+      row.empresa,
+    ]),
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet(data);
+  sheet["!cols"] = [
+    { wch: 16 },
+    { wch: 36 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
+    { wch: 28 },
+  ];
+  XLSX.utils.book_append_sheet(wb, sheet, "Equipamentos");
+
+  const dataTag = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  XLSX.writeFile(wb, `${filenamePrefix}-${dataTag}.xlsx`);
+}
+
 export function downloadEquipamentosImportTemplate(): void {
   const wb = XLSX.utils.book_new();
   const data = [

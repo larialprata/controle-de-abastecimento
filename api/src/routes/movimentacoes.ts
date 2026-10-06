@@ -1275,6 +1275,10 @@ router.patch("/tanque/movimentacoes/:operationId", requireAuth, async (req: Auth
       }
     }
 
+    if (typeof updatePayload.litros === "number" && current.tipo === "RETIRADA_TANQUE") {
+      updatePayload.tanque_quantidade_abastecida = String(updatePayload.litros);
+    }
+
     const { data: updated, error: updateError } = await service
       .from("movimentacoes")
       .update(updatePayload as any)

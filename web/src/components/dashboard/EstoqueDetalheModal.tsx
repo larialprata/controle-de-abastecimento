@@ -222,18 +222,16 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
       ),
     );
     const tanqueNum = alvo.item.tanque_numero;
-    const cutoffRaw = alvo.item.saldo_inicial_em;
-    const cutoffMs = cutoffRaw ? new Date(cutoffRaw).getTime() : null;
+    const cutoffMs = alvo.item.saldo_inicial_em ? new Date(alvo.item.saldo_inicial_em).getTime() : null;
     const cutoffOk = cutoffMs != null && Number.isFinite(cutoffMs);
 
     return movimentacoes.filter((m) => {
       if (typeof m.obra_codigo !== "number" || !obrasTanque.has(m.obra_codigo)) return false;
       const num = parseNumero(m.tanque_numero);
-      if (num !== tanqueNum) return false;
-      // Alinha com o estoque: só movimentos na/após a data da quantidade cadastrada.
+      if (num != null && num !== tanqueNum) return false;
       if (cutoffOk) {
         const dh = m.data_hora ? new Date(String(m.data_hora)).getTime() : NaN;
-        if (!Number.isFinite(dh) || dh < cutoffMs!) return false;
+        if (!Number.isFinite(dh) || dh <= cutoffMs!) return false;
       }
       return true;
     });
@@ -327,21 +325,17 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
                 label="Qtd. cadastrada (base)"
                 valor={`${fmtLitrosDashboard(totais.saldoInicial ?? 0)} L`}
               />
-              <ResumoBox label="Entradas (após base)" valor={`${fmtLitrosDashboard(totais.entrada ?? 0)} L`} destaque="verde" />
-              <ResumoBox label="Retiradas (após base)" valor={`${fmtLitrosDashboard(totais.retirada ?? 0)} L`} destaque="ambar" />
+              <ResumoBox label="Entradas depois da quantidade" valor={`${fmtLitrosDashboard(totais.entrada ?? 0)} L`} destaque="verde" />
+              <ResumoBox label="Retiradas depois da quantidade" valor={`${fmtLitrosDashboard(totais.retirada ?? 0)} L`} destaque="ambar" />
             </>
           )}
         </div>
 
         {!isMelosa ? (
           <p className="mb-3 text-xs text-slate-600 dark:text-slate-400">
-            O saldo do tanque é: quantidade cadastrada + entradas − retiradas{" "}
-            <strong>depois</strong> da data/hora da quantidade. Abastecimentos feitos pela melosa (saída da melosa para
-            equipamento) não baixam o estoque do tanque — só a <strong>retirada do tanque</strong> (para melosa ou
-            equipamento) abate.
-            {alvo.kind === "tanque" && alvo.item.saldo_inicial_em
-              ? ` Base desde ${fmtDataHora(alvo.item.saldo_inicial_em)}.`
-              : ""}
+            O saldo do tanque é a quantidade cadastrada. Entradas e retiradas do BI feitas depois desse lançamento
+            alteram o saldo. Abastecimentos feitos pela melosa não baixam o estoque do tanque — só a{" "}
+            <strong>retirada do tanque</strong> abate.
           </p>
         ) : null}
 

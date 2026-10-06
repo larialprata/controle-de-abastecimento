@@ -11,6 +11,7 @@ import {
 } from "../../lib/equipamentoEmpresa";
 import {
   chunkImportRows,
+  downloadEquipamentosCadastroExcel,
   downloadEquipamentosImportTemplate,
   parseEquipamentosImportFile,
   type EquipamentoImportRow,
@@ -427,6 +428,34 @@ export default function CadastroAtivosPage({
     selectedAtivos.size > 0
       ? filtradas.filter((e) => selectedAtivos.has(e.ativo)).length
       : filtradas.length;
+
+  const handleExportPlanilha = useCallback(() => {
+    if (fixedTipo !== "EQUIPAMENTO") return;
+    if (filtradas.length === 0) {
+      window.alert("Não há equipamentos para exportar com o filtro atual.");
+      return;
+    }
+    const obraFiltro = filtroObraCodigo.trim();
+    const filenamePrefix =
+      obraFiltro && obraFiltro !== "0" ? `equipamentos-obra-${obraFiltro}` : "equipamentos";
+    try {
+      downloadEquipamentosCadastroExcel(
+        [...filtradas]
+          .sort((a, b) => a.ativo.localeCompare(b.ativo, "pt-BR", { sensitivity: "base" }))
+          .map((e) => ({
+            ativo: e.ativo,
+            descricao: e.nome && e.nome !== e.ativo ? e.nome : "",
+            placa: e.placa?.trim() ?? "",
+            obraCodigo: e.obra_codigo ?? "",
+            mobilidade: e.mobilidade ? MOBILIDADE_LABEL[e.mobilidade] : "",
+            empresa: normalizeEquipamentoEmpresa(e.empresa) ?? "",
+          })),
+        filenamePrefix,
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Erro ao exportar planilha.");
+    }
+  }, [filtradas, filtroObraCodigo, fixedTipo]);
 
   const isEditing = editingAtivoOriginal != null;
 
@@ -861,27 +890,45 @@ export default function CadastroAtivosPage({
           </div>
         ) : null}
 
-        {canWrite && enableImport ? (
+        {enableImport ? (
           <div className="flex flex-col gap-1">
             <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Planilha
             </span>
             <div className="flex flex-wrap gap-2">
+              {canWrite ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={openImportModal}
+                    className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-slate-600 dark:hover:bg-slate-500"
+                  >
+                    <Upload className="h-4 w-4" aria-hidden />
+                    Importar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadEquipamentosImportTemplate()}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+                  >
+                    <Download className="h-4 w-4" aria-hidden />
+                    Modelo
+                  </button>
+                </>
+              ) : null}
               <button
                 type="button"
-                onClick={openImportModal}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-slate-600 dark:hover:bg-slate-500"
-              >
-                <Upload className="h-4 w-4" aria-hidden />
-                Importar
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadEquipamentosImportTemplate()}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
+                onClick={handleExportPlanilha}
+                disabled={loading || filtradas.length === 0}
+                title={
+                  filtroObraCodigo.trim() && filtroObraCodigo.trim() !== "0"
+                    ? `Baixar planilha só com os equipamentos da obra ${filtroObraCodigo.trim()}`
+                    : "Baixar planilha com os equipamentos da lista atual"
+                }
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 disabled:opacity-50 dark:border-white/20 dark:bg-black/20 dark:text-slate-100"
               >
                 <Download className="h-4 w-4" aria-hidden />
-                Modelo
+                Exportar planilha
               </button>
             </div>
           </div>
@@ -1452,8 +1499,8 @@ export default function CadastroAtivosPage({
                       disabled={formSaving}
                     />
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Use a quantidade conhecida do <strong>fim do dia</strong> de referência (não
-                      precisa ser o valor deste instante).
+                      Ao salvar, essa quantidade vira o saldo da dashboard naquele instante. Enchimentos,
+                      abastecimentos e exclusões do BI feitos depois disso alteram o saldo.
                     </p>
                   </div>
                   <div>

@@ -247,9 +247,9 @@ export default function TanquesPage() {
       <header>
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl dark:text-white">Tanques</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
-          Cadastre os <strong>tanques</strong> com uma ou mais obras, capacidade e quantidade atual em litros. O saldo é
-          compartilhado entre as obras vinculadas. Entradas e retiradas{" "}
-          <strong>depois</strong> da data/hora da quantidade cadastrada alteram o saldo na dashboard.
+          Cadastre os <strong>tanques</strong> com uma ou mais obras, capacidade e quantidade atual em litros. A
+          quantidade salva passa a ser o saldo na dashboard naquele instante. Entradas, retiradas e exclusões do BI
+          feitas <strong>depois</strong> disso alteram o valor. O estoque é compartilhado entre as obras vinculadas.
         </p>
       </header>
 
