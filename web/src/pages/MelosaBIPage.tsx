@@ -25,6 +25,7 @@ import { enrichMelosaTicketRowsWithSignatures, fetchMelosaPhotoSignedUrl } from 
 import { labelEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { fmtEquipamentoTicketLabel, enrichMelosaRowsWithEquipamentoDescricao } from "../lib/equipamentoTicketLabel";
 import { biMovementRowKey, resolveSelectedRows } from "../lib/biSelection";
+import { labelInsumo } from "../lib/insumos";
 import {
   defaultPeriodoMesAtual,
   parseDateInputValue,
@@ -193,11 +194,7 @@ function fmt(v: unknown): string {
 function fmtCombustivelCurto(v: unknown): string {
   const raw = fmt(v);
   if (raw === "—") return raw;
-  const upper = raw.trim().toUpperCase();
-  if (upper === "DIESEL" || upper === "DIESEL_S10") return "Diesel";
-  if (upper === "GASOLINA") return "Gasolina";
-  if (upper === "ALCOOL" || upper === "ÁLCOOL") return "Álcool";
-  return raw.replaceAll("_", " ");
+  return labelInsumo(raw);
 }
 
 function parseMedidorNumero(v: unknown): number | null {

@@ -39,6 +39,7 @@ import {
 import { clearOutbox, enqueueOutbox, initDb, outboxCount } from "./src/db/sqlite";
 import { syncOutbox } from "./src/sync/syncOutbox";
 import { OBRAS, OBRA_USINA_CODIGO } from "./src/constants/obras";
+import { INSUMOS_MELOSA, INSUMOS_TANQUE, labelInsumo } from "./src/constants/insumos";
 import type { MovimentoTipo, MovimentacaoPayload } from "./src/types/movimentacao";
 import { v4 as uuidv4 } from "uuid";
 import { apiGet, apiPost, registerCredentials } from "./src/lib/api";
@@ -2947,7 +2948,7 @@ export default function App() {
       return;
     }
     if (!melosaWdrCombustivelTipo.trim()) {
-      Alert.alert("Insumo obrigatório", "Selecione o insumo (Diesel ou Gasolina).");
+      Alert.alert("Insumo obrigatório", "Selecione o insumo.");
       return;
     }
     if (isMelosaObraUsina()) {
@@ -3195,7 +3196,7 @@ export default function App() {
 
   function continueMelosaQuantidadeAbastecida() {
     if (!melosaWdrCombustivelTipo.trim()) {
-      Alert.alert("Insumo obrigatório", "Selecione o insumo (Diesel ou Gasolina).");
+      Alert.alert("Insumo obrigatório", "Selecione o insumo.");
       return;
     }
     if (isMelosaObraUsina()) {
@@ -3809,7 +3810,7 @@ export default function App() {
           : "—"
       : melosaHorimetroEquipamentoNumero.trim() || "—";
     const quantidadeResumoValor = melosaQuantidadeAbastecidaTexto.trim() || "—";
-    const insumoResumoLabel = melosaWdrCombustivelTipo === "GASOLINA" ? "Gasolina" : "Diesel";
+    const insumoResumoLabel = labelInsumo(melosaWdrCombustivelTipo);
     const patrimonioPreenchido = melosaFornecedorTexto.trim().length > 0;
     const equipamentoDadosVisiveis =
       isRegister &&
@@ -4164,8 +4165,9 @@ export default function App() {
                       onValueChange={(v) => setMelosaWdrCombustivelTipo(String(v))}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
-                      <Picker.Item label="Diesel" value="DIESEL" />
-                      <Picker.Item label="Gasolina" value="GASOLINA" />
+                      {INSUMOS_MELOSA.map((item) => (
+                        <Picker.Item key={item.value} label={item.label} value={item.value} />
+                      ))}
                     </Picker>
                   </View>
 
@@ -4670,12 +4672,7 @@ export default function App() {
     const isRetiradaResumo = isRetiradaTanque && retiradaStep === "resumo";
     const obraTanqueResumo = obrasDisponiveis.find((o) => o.codigo === obraCodigo);
     const obraTanqueResumoLabel = obraTanqueResumo ? `${obraTanqueResumo.codigo} - ${obraTanqueResumo.nome}` : String(obraCodigo);
-    const insumoTanqueResumoLabel =
-      obraCombustivelTipo === "GASOLINA"
-        ? "Gasolina"
-        : obraCombustivelTipo === "ALCOOL"
-          ? "Álcool"
-          : "Diesel/S10 Aditivado";
+    const insumoTanqueResumoLabel = labelInsumo(obraCombustivelTipo);
     const title = isEntradaTanqueObra
       ? "Entrada no tanque da obra"
       : retiradaDestino === "EQUIPAMENTO"
@@ -4874,9 +4871,9 @@ export default function App() {
                       onValueChange={(v) => setObraCombustivelTipo(String(v))}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
-                      <Picker.Item label="Diesel/S10 Aditivado" value="DIESEL_S10" />
-                      <Picker.Item label="Gasolina" value="GASOLINA" />
-                      <Picker.Item label="Álcool" value="ALCOOL" />
+                      {INSUMOS_TANQUE.map((item) => (
+                        <Picker.Item key={item.value} label={item.label} value={item.value} />
+                      ))}
                     </Picker>
                   </View>
 
@@ -5098,9 +5095,9 @@ export default function App() {
                       onValueChange={(v) => setObraCombustivelTipo(String(v))}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
-                      <Picker.Item label="Diesel/S10 Aditivado" value="DIESEL_S10" />
-                      <Picker.Item label="Gasolina" value="GASOLINA" />
-                      <Picker.Item label="Álcool" value="ALCOOL" />
+                      {INSUMOS_TANQUE.map((item) => (
+                        <Picker.Item key={item.value} label={item.label} value={item.value} />
+                      ))}
                     </Picker>
                   </View>
                 </>

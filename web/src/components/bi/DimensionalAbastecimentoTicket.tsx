@@ -123,7 +123,9 @@ function TicketSheet({
             <td className="border border-black px-2 py-1 text-center">{litrosAlcool}</td>
           </tr>
           <tr className="h-7">
-            <td className="border border-black px-2 py-1 font-semibold">DIESEL</td>
+            <td className="border border-black px-2 py-1 font-semibold">
+              {litrosOutro ? row.insumo : "DIESEL"}
+            </td>
             <td className="border border-black px-2 py-1 text-center font-semibold">
               {litrosDiesel || litrosOutro}
             </td>

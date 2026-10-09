@@ -22,6 +22,7 @@ import {
   toDateInputValue,
 } from "../lib/aggregateCombustivelDashboard";
 import { glassField, glassPanel, glassSelect } from "../lib/glass";
+import { labelInsumo } from "../lib/insumos";
 import {
   EMPRESA_LABEL,
   OBRA_EMPRESAS,
@@ -143,11 +144,7 @@ function fmtDateBr(v: unknown): string {
 function fmtCombustivelCurto(v: unknown): string {
   const raw = fmt(v);
   if (raw === "—") return raw;
-  const upper = raw.trim().toUpperCase();
-  if (upper === "DIESEL" || upper === "DIESEL_S10") return "Diesel";
-  if (upper === "GASOLINA") return "Gasolina";
-  if (upper === "ALCOOL" || upper === "ÁLCOOL") return "Álcool";
-  return raw.replaceAll("_", " ");
+  return labelInsumo(raw);
 }
 
 function fmtInsumoTicket(m: LinhaTanque): string {

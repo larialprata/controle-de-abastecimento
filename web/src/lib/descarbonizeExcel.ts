@@ -175,6 +175,10 @@ export function fmtFatorEmissao(insumo: unknown): string {
   if (upper === "DIESEL" || upper === "DIESEL_S10") return "Diesel";
   if (upper === "GASOLINA") return "Gasolina";
   if (upper === "ALCOOL" || upper === "ÁLCOOL") return "Álcool";
+  if (upper === "XP_68") return "XP 68";
+  if (upper === "10W30") return "10W 30";
+  if (upper === "140_MINERAL") return "140 Mineral";
+  if (upper === "ARLA_32" || upper === "ARLA32" || upper === "ARLA 32") return "Arla 32";
   return String(insumo).replaceAll("_", " ");
 }
 

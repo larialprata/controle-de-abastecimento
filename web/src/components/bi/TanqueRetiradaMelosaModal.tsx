@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { apiGet } from "../../lib/api";
 import { glassField, glassPanel, glassSelect } from "../../lib/glass";
 import { tanquePertenceAObra } from "../../lib/tanqueObras";
+import { INSUMO_OPCOES } from "../../lib/insumos";
 
 type ObraOption = { codigo: number; nome: string };
 
@@ -24,12 +25,6 @@ type Props = {
   onClose: () => void;
   onSaved: () => void;
 };
-
-const INSUMO_OPCOES = [
-  { value: "DIESEL_S10", label: "Diesel S10" },
-  { value: "GASOLINA", label: "Gasolina" },
-  { value: "ALCOOL", label: "Álcool" },
-] as const;
 
 function toDatetimeLocalValue(iso?: string): string {
   if (!iso) return "";

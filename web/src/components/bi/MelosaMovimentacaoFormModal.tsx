@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { glassField, glassPanel, glassSelect } from "../../lib/glass";
+import { INSUMO_OPCOES } from "../../lib/insumos";
 
 export type MelosaMovimentacaoFormRow = {
   operation_id?: string;
@@ -36,12 +37,6 @@ type Props = {
   onClose: () => void;
   onSaved: () => void;
 };
-
-const INSUMO_OPCOES = [
-  { value: "DIESEL_S10", label: "Diesel S10" },
-  { value: "GASOLINA", label: "Gasolina" },
-  { value: "ALCOOL", label: "Álcool" },
-] as const;
 
 type HorimetroTipo = "" | "valor" | "quebrado" | "inexistente";
 
