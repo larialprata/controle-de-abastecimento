@@ -896,6 +896,10 @@ export default function App() {
   const [obraCombustivelTipo, setObraCombustivelTipo] = useState<string>("DIESEL_S10");
   const [notaNumero, setNotaNumero] = useState<string>("");
   const [placaTexto, setPlacaTexto] = useState("");
+  const [retiradaDestino, setRetiradaDestino] = useState<"MELOSA" | "EQUIPAMENTO">("MELOSA");
+  const [tanqueEquipamentoQrOpen, setTanqueEquipamentoQrOpen] = useState(false);
+  const [tanqueEquipamentoNome, setTanqueEquipamentoNome] = useState("");
+  const [tanqueEquipamentoEmpresa, setTanqueEquipamentoEmpresa] = useState("");
   const [fornecedorTexto, setFornecedorTexto] = useState("");
   const [equipamentoTexto, setEquipamentoTexto] = useState("");
   const [retiradaMotoristaMelosaTexto, setRetiradaMotoristaMelosaTexto] = useState("");
@@ -1375,6 +1379,10 @@ export default function App() {
     setObraCombustivelTipo("DIESEL_S10");
     setNotaNumero("");
     setPlacaTexto("");
+    setRetiradaDestino("MELOSA");
+    setTanqueEquipamentoQrOpen(false);
+    setTanqueEquipamentoNome("");
+    setTanqueEquipamentoEmpresa("");
     setFornecedorTexto("");
     setEquipamentoTexto("");
     setRetiradaMotoristaMelosaTexto("");
@@ -1661,6 +1669,68 @@ export default function App() {
       Alert.alert("QR não reconhecido", `${e instanceof Error ? e.message : "Não foi possível identificar o equipamento."}${apiHint}`);
     } finally {
       setMelosaEquipamentoQrLoading(false);
+    }
+  }
+
+  function aplicarEquipamentoNoTanque(equipamento: {
+    ativo: string;
+    nome?: string | null;
+    empresa?: string | null;
+  }) {
+    setPlacaTexto(equipamento.ativo.trim().toUpperCase());
+    setTanqueEquipamentoNome(equipamento.nome?.trim() || "");
+    setTanqueEquipamentoEmpresa(equipamento.empresa?.trim() || "");
+  }
+
+  async function handleTanqueEquipamentoQrScanned(qrData: string) {
+    setTanqueEquipamentoQrOpen(false);
+    const parsed = parseEquipamentoQrContent(qrData);
+    const ativoLocal =
+      (parsed?.kind === "abast" ? parsed.ativo : null) ||
+      parseAbastEquipamentoQrAtivo(qrData) ||
+      (parsed?.kind === "token" ? parsed.token : "");
+
+    if (!isOnline || !session?.access_token) {
+      const found = findCachedEquipamento(equipamentoCatalogRef.current, ativoLocal || qrData);
+      if (found?.ativo) {
+        aplicarEquipamentoNoTanque(found);
+        return;
+      }
+      if (ativoLocal && parsed?.kind !== "token") {
+        setPlacaTexto(ativoLocal.trim().toUpperCase());
+        setTanqueEquipamentoNome("");
+        setTanqueEquipamentoEmpresa("");
+        return;
+      }
+      Alert.alert(
+        "Sem internet",
+        "Este QR ainda não está na cópia do celular. Informe o patrimônio do equipamento.",
+      );
+      return;
+    }
+
+    try {
+      const { equipamento } = await apiPost<{
+        equipamento?: { ativo: string; nome?: string | null; empresa?: string | null } | null;
+      }>("/v1/equipamentos/qr/lookup", session.access_token, {
+        qr: buildEquipamentoQrLookupPayload(qrData) || qrData.trim(),
+        obra_codigo: obraCodigo,
+      });
+      if (!equipamento?.ativo?.trim()) {
+        throw new Error("Equipamento não encontrado.");
+      }
+      rememberEquipamentoLocal(equipamento, qrData);
+      aplicarEquipamentoNoTanque(equipamento);
+    } catch (e: unknown) {
+      const found = findCachedEquipamento(equipamentoCatalogRef.current, ativoLocal || qrData);
+      if (found?.ativo) {
+        aplicarEquipamentoNoTanque(found);
+        return;
+      }
+      Alert.alert(
+        "QR não reconhecido",
+        e instanceof Error ? e.message : "Não foi possível identificar o equipamento.",
+      );
     }
   }
 
@@ -2384,6 +2454,7 @@ export default function App() {
   }
 
   function continueRetiradaTanqueDados() {
+    const paraEquipamento = retiradaDestino === "EQUIPAMENTO";
     if (!tanqueNumero) {
       Alert.alert(
         "Tanque obrigatório",
@@ -2394,7 +2465,10 @@ export default function App() {
       return;
     }
     if (!placaTexto.trim()) {
-      Alert.alert("Patrimônio obrigatório", "Selecione o patrimônio (melosa).");
+      Alert.alert(
+        "Patrimônio obrigatório",
+        paraEquipamento ? "Informe o patrimônio do equipamento." : "Selecione o patrimônio (melosa).",
+      );
       return;
     }
     if (!obraCombustivelTipo.trim()) {
@@ -2402,7 +2476,10 @@ export default function App() {
       return;
     }
     if (!retiradaMotoristaMelosaTexto.trim()) {
-      Alert.alert("Motorista obrigatório", "Informe o nome do motorista da melosa.");
+      Alert.alert(
+        "Nome obrigatório",
+        paraEquipamento ? "Informe o operador do equipamento." : "Informe o nome do motorista da melosa.",
+      );
       return;
     }
     setMessage(null);
@@ -2410,6 +2487,7 @@ export default function App() {
   }
 
   function continueRetiradaTanqueDetalhes() {
+    const paraEquipamento = retiradaDestino === "EQUIPAMENTO";
     if (!numeroLacreTanque.trim()) {
       Alert.alert("Lacre obrigatório", "Informe o número do lacre do tanque.");
       return;
@@ -2418,13 +2496,15 @@ export default function App() {
       Alert.alert("Foto obrigatória", "Selecione a foto do lacre do tanque.");
       return;
     }
-    if (!numeroLacreMelosa.trim()) {
-      Alert.alert("Lacre obrigatório", "Informe o número do lacre da melosa.");
-      return;
-    }
-    if (!lacreMelosaFotoUri) {
-      Alert.alert("Foto obrigatória", "Selecione a foto do lacre da melosa.");
-      return;
+    if (!paraEquipamento) {
+      if (!numeroLacreMelosa.trim()) {
+        Alert.alert("Lacre obrigatório", "Informe o número do lacre da melosa.");
+        return;
+      }
+      if (!lacreMelosaFotoUri) {
+        Alert.alert("Foto obrigatória", "Selecione a foto do lacre da melosa.");
+        return;
+      }
     }
     setMessage(null);
     setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "quantidade_abastecida" });
@@ -2511,7 +2591,12 @@ export default function App() {
       return;
     }
     if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaMelosaDataUrl)) {
-      Alert.alert("Assinatura obrigatória", "Peça ao responsável pela melosa para assinar no resumo.");
+      Alert.alert(
+        "Assinatura obrigatória",
+        retiradaDestino === "EQUIPAMENTO"
+          ? "Peça ao operador do equipamento para assinar no resumo."
+          : "Peça ao responsável pela melosa para assinar no resumo.",
+      );
       return;
     }
     setMessage(null);
@@ -2607,16 +2692,29 @@ export default function App() {
       }
     }
     if (isRetiradaTanque) {
+      const paraEquipamento = retiradaDestino === "EQUIPAMENTO";
       if (!placaTexto.trim()) {
-        Alert.alert("Patrimônio obrigatório", "Selecione o patrimônio (melosa).");
+        Alert.alert(
+          "Patrimônio obrigatório",
+          paraEquipamento ? "Informe o patrimônio do equipamento." : "Selecione o patrimônio (melosa).",
+        );
         return;
       }
       if (!obraCombustivelTipo.trim()) {
         Alert.alert("Insumo obrigatório", "Selecione o tipo de insumo.");
         return;
       }
-      if (!numeroLacreTanque.trim() || !lacreTanqueFotoUri || !numeroLacreMelosa.trim() || !lacreMelosaFotoUri) {
-        Alert.alert("Lacres obrigatórios", "Preencha os dados e fotos dos lacres para continuar.");
+      if (
+        !numeroLacreTanque.trim() ||
+        !lacreTanqueFotoUri ||
+        (!paraEquipamento && (!numeroLacreMelosa.trim() || !lacreMelosaFotoUri))
+      ) {
+        Alert.alert(
+          "Lacres obrigatórios",
+          paraEquipamento
+            ? "Preencha o lacre do tanque para continuar."
+            : "Preencha os dados e fotos dos lacres para continuar.",
+        );
         return;
       }
       if (!tanqueQuantidadeAbastecidaTexto.trim()) {
@@ -2633,7 +2731,12 @@ export default function App() {
         return;
       }
       if (!isMeaningfulSignatureDataUrl(tanqueAssinaturaMelosaDataUrl)) {
-        Alert.alert("Assinatura obrigatória", "Peça ao responsável pela melosa para assinar no resumo.");
+        Alert.alert(
+          "Assinatura obrigatória",
+          retiradaDestino === "EQUIPAMENTO"
+            ? "Peça ao operador do equipamento para assinar no resumo."
+            : "Peça ao responsável pela melosa para assinar no resumo.",
+        );
         setBusy(false);
         return;
       }
@@ -2703,6 +2806,7 @@ export default function App() {
     }
 
     if (isRetiradaTanque) {
+      const paraEquipamento = retiradaDestino === "EQUIPAMENTO";
       const LACRE_TANQUE_BUCKET = "lacre_tanque";
       const LACRE_MELOSA_BUCKET = "lacre_melosa";
       const FOTO_QUANTIDADE_ABASTECIDA_BUCKET = "foto_quantidade_abastecida";
@@ -2711,13 +2815,16 @@ export default function App() {
       if (!userId) throw new Error("Usuário não encontrado para salvar as fotos.");
 
       const tanquePath = `${userId}/lacres/tanque/${operationId}.${extFromUri(lacreTanqueFotoUri as string)}`;
-      const melosaPath = `${userId}/lacres/melosa/${operationId}.${extFromUri(lacreMelosaFotoUri as string)}`;
       const quantidadePath = `${userId}/tanque/quantidade/${operationId}.${extFromUri(tanqueQuantidadeAbastecidaFotoUri as string)}`;
       const assinaturaOperadorPath = `${userId}/tanque/assinaturas/operador/${operationId}.png`;
-      const assinaturaMelosaPath = `${userId}/tanque/assinaturas/melosa/${operationId}.png`;
+      const assinaturaDestinoPath = `${userId}/tanque/assinaturas/${paraEquipamento ? "equipamento" : "melosa"}/${operationId}.png`;
 
       await stageImageFromUri(operationId, LACRE_TANQUE_BUCKET, tanquePath, lacreTanqueFotoUri as string);
-      await stageImageFromUri(operationId, LACRE_MELOSA_BUCKET, melosaPath, lacreMelosaFotoUri as string);
+      let melosaPath: string | null = null;
+      if (!paraEquipamento) {
+        melosaPath = `${userId}/lacres/melosa/${operationId}.${extFromUri(lacreMelosaFotoUri as string)}`;
+        await stageImageFromUri(operationId, LACRE_MELOSA_BUCKET, melosaPath, lacreMelosaFotoUri as string);
+      }
       await stageImageFromUri(
         operationId,
         FOTO_QUANTIDADE_ABASTECIDA_BUCKET,
@@ -2733,7 +2840,7 @@ export default function App() {
       await stageImageFromDataUrl(
         operationId,
         TANQUE_ASSINATURAS_BUCKET,
-        assinaturaMelosaPath,
+        assinaturaDestinoPath,
         tanqueAssinaturaMelosaDataUrl as string,
       );
 
@@ -2741,8 +2848,16 @@ export default function App() {
       lacreMelosaStoragePath = melosaPath;
       tanqueQuantidadeAbastecidaStoragePath = quantidadePath;
       tanqueAssinaturaOperadorStoragePath = assinaturaOperadorPath;
-      tanqueAssinaturaMelosaStoragePath = assinaturaMelosaPath;
+      tanqueAssinaturaMelosaStoragePath = assinaturaDestinoPath;
     }
+
+    const retiradaParaEquipamento = isRetiradaTanque && retiradaDestino === "EQUIPAMENTO";
+    const patrimonioRetirada = placaTexto.trim().toUpperCase();
+    const obsRetirada = retiradaParaEquipamento
+      ? `[TANQUE_EQUIPAMENTO] ${patrimonioRetirada}${obs.trim() ? ` ${obs.trim()}` : ""}`
+      : obs.trim()
+        ? obs.trim()
+        : null;
 
     const payload: MovimentacaoPayload = {
       operation_id: operationId,
@@ -2755,8 +2870,8 @@ export default function App() {
         : tanqueTexto.trim()
           ? tanqueTexto.trim()
           : null,
-      placa_texto: placaTexto.trim(),
-      fornecedor_texto: isRetiradaTanque ? null : fornecedorTexto.trim(),
+      placa_texto: isRetiradaTanque ? patrimonioRetirada : placaTexto.trim(),
+      fornecedor_texto: retiradaParaEquipamento ? patrimonioRetirada : isRetiradaTanque ? null : fornecedorTexto.trim(),
       tanque_numero: isTanqueObra ? tanqueNumero : tipoAtual === "RETIRADA_MELOSA" ? melosaTanqueNumero : null,
 
       combustivel_tipo: isTanqueObra ? obraCombustivelTipo.trim() : null,
@@ -2778,7 +2893,7 @@ export default function App() {
       local_latitude: localLatitude,
       local_longitude: localLongitude,
       local_address: localAddress,
-      obs: obs.trim() ? obs.trim() : null,
+      obs: isRetiradaTanque ? obsRetirada : obs.trim() ? obs.trim() : null,
     };
 
     enqueueOutbox(operationId, payload);
@@ -2799,7 +2914,9 @@ export default function App() {
       titulo: isEntradaTanqueObra
         ? "Entrada no tanque"
         : isRetiradaTanque
-          ? "Retirada do tanque"
+          ? retiradaParaEquipamento
+            ? "Retirada do tanque para equipamento"
+            : "Retirada do tanque"
           : "Registro",
       ativo: ativoAck,
       litros: litrosAck,
@@ -4559,11 +4676,19 @@ export default function App() {
         : obraCombustivelTipo === "ALCOOL"
           ? "Álcool"
           : "Diesel/S10 Aditivado";
-    const title = isEntradaTanqueObra ? "Entrada no tanque da obra" : "Retirada do tanque";
+    const title = isEntradaTanqueObra
+      ? "Entrada no tanque da obra"
+      : retiradaDestino === "EQUIPAMENTO"
+        ? "Retirada do tanque para equipamento"
+        : "Retirada do tanque";
     const subtitle = isRetiradaDados
-      ? "Dados da retirada"
+      ? retiradaDestino === "EQUIPAMENTO"
+        ? "Tanque direto para o equipamento"
+        : "Dados da retirada"
       : isRetiradaDetalhes
-        ? "Lacres"
+        ? retiradaDestino === "EQUIPAMENTO"
+          ? "Lacre do tanque"
+          : "Lacres"
         : isRetiradaQuantidadeAbastecida
           ? "Quantidade abastecida"
           : isRetiradaResumo
@@ -4755,6 +4880,111 @@ export default function App() {
                     </Picker>
                   </View>
 
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Destino</Text>
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.chip,
+                        retiradaDestino === "MELOSA"
+                          ? { backgroundColor: "#c00", borderColor: "#c00" }
+                          : !isDarkMode
+                            ? { backgroundColor: "#fff", borderColor: "#ccc" }
+                            : { backgroundColor: "#222", borderColor: "#444" },
+                        { flex: 1, alignItems: "center", justifyContent: "center" },
+                      ]}
+                      onPress={() => {
+                        if (retiradaDestino === "MELOSA") return;
+                        setRetiradaDestino("MELOSA");
+                        setPlacaTexto("");
+                        setTanqueEquipamentoNome("");
+                        setTanqueEquipamentoEmpresa("");
+                      }}
+                      disabled={busy}
+                    >
+                      <Text style={{ color: retiradaDestino === "MELOSA" ? "#fff" : !isDarkMode ? "#333" : "#ddd", fontWeight: "700" }}>
+                        Melosa
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.chip,
+                        retiradaDestino === "EQUIPAMENTO"
+                          ? { backgroundColor: "#c00", borderColor: "#c00" }
+                          : !isDarkMode
+                            ? { backgroundColor: "#fff", borderColor: "#ccc" }
+                            : { backgroundColor: "#222", borderColor: "#444" },
+                        { flex: 1, alignItems: "center", justifyContent: "center" },
+                      ]}
+                      onPress={() => {
+                        if (retiradaDestino === "EQUIPAMENTO") return;
+                        setRetiradaDestino("EQUIPAMENTO");
+                        setPlacaTexto("");
+                        setTanqueEquipamentoNome("");
+                        setTanqueEquipamentoEmpresa("");
+                      }}
+                      disabled={busy}
+                    >
+                      <Text style={{ color: retiradaDestino === "EQUIPAMENTO" ? "#fff" : !isDarkMode ? "#333" : "#ddd", fontWeight: "700" }}>
+                        Equipamento
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {retiradaDestino === "EQUIPAMENTO" ? (
+                    <>
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                        Patrimônio do equipamento
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.secondaryButton, !isDarkMode ? styles.secondaryButtonLight : null, { marginTop: 6 }]}
+                        onPress={() => setTanqueEquipamentoQrOpen(true)}
+                        disabled={busy}
+                      >
+                        <Text style={[styles.secondaryButtonText, !isDarkMode ? styles.secondaryButtonTextLight : null]}>
+                          Ler QR code do equipamento
+                        </Text>
+                      </TouchableOpacity>
+                      <TextInput
+                        value={placaTexto}
+                        onChangeText={(value) => {
+                          setPlacaTexto(value);
+                          setTanqueEquipamentoNome("");
+                          setTanqueEquipamentoEmpresa("");
+                        }}
+                        onEndEditing={() => {
+                          const found = findCachedEquipamento(equipamentoCatalogRef.current, placaTexto);
+                          if (!found?.ativo) return;
+                          aplicarEquipamentoNoTanque(found);
+                        }}
+                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null, { marginTop: 8 }]}
+                        placeholder="Ex.: REVTR02"
+                        placeholderTextColor={inputPlaceholderColor}
+                        autoCapitalize="characters"
+                      />
+                      {tanqueEquipamentoNome.trim() ? (
+                        <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 6 }]}>
+                          Descrição: {tanqueEquipamentoNome.trim()}
+                        </Text>
+                      ) : null}
+                      {tanqueEquipamentoEmpresa.trim() ? (
+                        <Text style={[styles.authMessage, !isDarkMode ? styles.authMessageLight : null, { marginTop: 4 }]}>
+                          Empresa: {labelEquipamentoEmpresa(tanqueEquipamentoEmpresa)}
+                        </Text>
+                      ) : null}
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>
+                        Operador do equipamento
+                      </Text>
+                      <TextInput
+                        value={retiradaMotoristaMelosaTexto}
+                        onChangeText={setRetiradaMotoristaMelosaTexto}
+                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                        placeholder="Ex.: João Silva"
+                        placeholderTextColor={inputPlaceholderColor}
+                        autoCapitalize="words"
+                      />
+                    </>
+                  ) : (
+                    <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Patrimônio (Placa/Ativo)</Text>
                   {melosasCadastradas.length > 0 ? (
                     <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
@@ -4800,6 +5030,8 @@ export default function App() {
                     placeholderTextColor={inputPlaceholderColor}
                     autoCapitalize="words"
                   />
+                    </>
+                  )}
                 </>
               ) : null}
 
@@ -4910,6 +5142,8 @@ export default function App() {
                     </TouchableOpacity>
                   </View>
 
+                  {retiradaDestino === "MELOSA" ? (
+                    <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 10 }]}>Número do Lacre da Melosa</Text>
                   <TextInput
                     value={numeroLacreMelosa}
@@ -4943,6 +5177,8 @@ export default function App() {
                       <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
                     </TouchableOpacity>
                   </View>
+                    </>
+                  ) : null}
                 </>
               ) : null}
 
@@ -5100,7 +5336,7 @@ export default function App() {
                       </View>
                       <View style={styles.melosaResumoRow}>
                         <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
-                          Patrimônio (melosa)
+                          {retiradaDestino === "EQUIPAMENTO" ? "Equipamento" : "Patrimônio (melosa)"}
                         </Text>
                         <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
                           {placaTexto.trim() || "—"}
@@ -5108,7 +5344,7 @@ export default function App() {
                       </View>
                       <View style={styles.melosaResumoRow}>
                         <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
-                          Motorista melosa
+                          {retiradaDestino === "EQUIPAMENTO" ? "Operador" : "Motorista melosa"}
                         </Text>
                         <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
                           {retiradaMotoristaMelosaTexto.trim() || "—"}
@@ -5122,6 +5358,7 @@ export default function App() {
                           {numeroLacreTanque.trim() || "—"}
                         </Text>
                       </View>
+                      {retiradaDestino === "MELOSA" ? (
                       <View style={styles.melosaResumoRow}>
                         <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                           Lacre melosa
@@ -5130,6 +5367,7 @@ export default function App() {
                           {numeroLacreMelosa.trim() || "—"}
                         </Text>
                       </View>
+                      ) : null}
                     </ScrollView>
                   </View>
 
@@ -5142,7 +5380,11 @@ export default function App() {
                       onScrollLockChange={setSignatureScrollLocked}
                     />
                     <MelosaSignaturePad
-                      label={`Motorista melosa (${retiradaMotoristaMelosaTexto.trim() || "—"})`}
+                      label={
+                        retiradaDestino === "EQUIPAMENTO"
+                          ? `Operador do equipamento (${retiradaMotoristaMelosaTexto.trim() || "—"})`
+                          : `Motorista melosa (${retiradaMotoristaMelosaTexto.trim() || "—"})`
+                      }
                       isDarkMode={isDarkMode}
                       onSigned={setTanqueAssinaturaMelosaDataUrl}
                       onClear={() => setTanqueAssinaturaMelosaDataUrl(null)}
@@ -5398,6 +5640,12 @@ export default function App() {
             {tanqueActionFooter}
           </View>
         </SafeAreaView>
+        <EquipamentoQrScanner
+          visible={tanqueEquipamentoQrOpen}
+          isDarkMode={isDarkMode}
+          onClose={() => setTanqueEquipamentoQrOpen(false)}
+          onScanned={(data) => void handleTanqueEquipamentoQrScanned(data)}
+        />
       </View>
     );
   }

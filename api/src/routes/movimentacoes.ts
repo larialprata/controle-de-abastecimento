@@ -28,6 +28,15 @@ import {
 } from "../lib/storage";
 import { buildMonthOrganizedStoragePath } from "../lib/storage/photoNaming";
 
+const TANQUE_EQUIPAMENTO_OBS_PREFIX = "[TANQUE_EQUIPAMENTO]";
+
+function isRetiradaTanqueParaEquipamento(obs: string | null | undefined): boolean {
+  return String(obs ?? "")
+    .trim()
+    .toUpperCase()
+    .startsWith(TANQUE_EQUIPAMENTO_OBS_PREFIX);
+}
+
 const router = Router();
 
 async function storageObjectExists(
@@ -1815,16 +1824,17 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
     }
 
     if (payload.tipo === "RETIRADA_TANQUE") {
+      const paraEquipamento = isRetiradaTanqueParaEquipamento(payload.obs);
       if (!payload.lacre_tanque_numero?.trim()) {
         return res.status(400).json({ error: "lacre_tanque_numero é obrigatório" });
       }
       if (!payload.lacre_tanque_storage_path?.trim()) {
         return res.status(400).json({ error: "lacre_tanque_storage_path é obrigatório" });
       }
-      if (!payload.lacre_melosa_numero?.trim()) {
+      if (!paraEquipamento && !payload.lacre_melosa_numero?.trim()) {
         return res.status(400).json({ error: "lacre_melosa_numero é obrigatório" });
       }
-      if (!payload.lacre_melosa_storage_path?.trim()) {
+      if (!paraEquipamento && !payload.lacre_melosa_storage_path?.trim()) {
         return res.status(400).json({ error: "lacre_melosa_storage_path é obrigatório" });
       }
       if (!payload.tanque_quantidade_abastecida?.trim()) {
@@ -1857,12 +1867,14 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         return res.status(400).json({ error: "Arquivo do lacre do tanque não encontrado no Storage" });
       }
 
-      const lacreMelosaExists = await storageExists(
-        envValidated.LACRE_MELOSA_BUCKET,
-        payload.lacre_melosa_storage_path,
-      );
-      if (!lacreMelosaExists) {
-        return res.status(400).json({ error: "Arquivo do lacre da melosa não encontrado no Storage" });
+      if (!paraEquipamento) {
+        const lacreMelosaExists = await storageExists(
+          envValidated.LACRE_MELOSA_BUCKET,
+          payload.lacre_melosa_storage_path!,
+        );
+        if (!lacreMelosaExists) {
+          return res.status(400).json({ error: "Arquivo do lacre da melosa não encontrado no Storage" });
+        }
       }
 
       const quantidadeTanqueFotoOk = await storageObjectExists(
@@ -2151,7 +2163,13 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
 
       placa_texto: needsVeiculoMeta ? placaNorm : null,
       fornecedor_texto:
-        payload.tipo === "RETIRADA_TANQUE" ? null : needsVeiculoMeta ? fornecedorNorm : null,
+        payload.tipo === "RETIRADA_TANQUE"
+          ? isRetiradaTanqueParaEquipamento(payload.obs)
+            ? fornecedorNorm || placaNorm
+            : null
+          : needsVeiculoMeta
+            ? fornecedorNorm
+            : null,
       tanque_numero: needsVeiculoMeta ? tanqueNum : null,
       local_latitude: payload.local_latitude ?? null,
       local_longitude: payload.local_longitude ?? null,
@@ -2175,7 +2193,11 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       after: insertRow as Record<string, unknown>,
     });
 
-    if (payload.tipo === "RETIRADA_TANQUE" && placaNorm) {
+    if (
+      payload.tipo === "RETIRADA_TANQUE" &&
+      placaNorm &&
+      !isRetiradaTanqueParaEquipamento(payload.obs)
+    ) {
       const dataHoraIso = insertRow.data_hora as string;
       const ciclo = await criarCicloRetiradaTanque(service, {
         operationId: payload.operation_id,
