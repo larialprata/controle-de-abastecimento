@@ -17,6 +17,7 @@ import { normalizeEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { requireAuth, type AuthedRequest } from "../middleware/requireAuth";
 import { assertUserObraAccess, getUserObraCodigos, ObraAccessError } from "../lib/userObras";
 import { findTanqueCadastradoNaObra } from "../lib/tanqueObras";
+import { resolverTanqueNumeroDoInsumo } from "../lib/oleoTanque";
 import { logMovimentacaoAudit } from "../lib/movimentacaoAudit";
 import { denyWebBiWriteIfNeeded, loadWebWriteProfile } from "../lib/webWriteAccess";
 import { canWriteBiAction } from "../lib/webPermissions";
@@ -1463,10 +1464,16 @@ router.post("/tanque/movimentacoes/entrada", requireAuth, async (req: AuthedRequ
       throw e;
     }
 
-    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+    const tanqueNumero = await resolverTanqueNumeroDoInsumo(
       service,
       payload.obra_codigo,
       payload.tanque_numero,
+      payload.combustivel_tipo,
+    );
+    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+      service,
+      payload.obra_codigo,
+      tanqueNumero,
     );
     if (!tanqueCadastrado) {
       return res.status(400).json({
@@ -1486,7 +1493,7 @@ router.post("/tanque/movimentacoes/entrada", requireAuth, async (req: AuthedRequ
       data_hora: new Date(payload.data_hora).toISOString(),
       litros: payload.litros,
       combustivel_tipo: payload.combustivel_tipo.trim(),
-      tanque_numero: payload.tanque_numero,
+      tanque_numero: tanqueNumero,
       nota_numero: payload.nota_numero?.trim() || null,
       valor_unitario: payload.valor_unitario ?? null,
       placa_texto: placa,
@@ -1540,10 +1547,16 @@ router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res
       throw e;
     }
 
-    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+    const tanqueNumero = await resolverTanqueNumeroDoInsumo(
       service,
       payload.obra_codigo,
       payload.tanque_numero,
+      payload.combustivel_tipo,
+    );
+    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+      service,
+      payload.obra_codigo,
+      tanqueNumero,
     );
     if (!tanqueCadastrado) {
       return res.status(400).json({
@@ -1566,7 +1579,7 @@ router.post("/tanque/movimentacoes", requireAuth, async (req: AuthedRequest, res
       data_hora: new Date(payload.data_hora).toISOString(),
       litros: payload.quantidade_litros,
       combustivel_tipo: payload.combustivel_tipo?.trim() || null,
-      tanque_numero: payload.tanque_numero,
+      tanque_numero: tanqueNumero,
       tanque_quantidade_abastecida: quantidadeStr,
       placa_texto: patrimonio,
       fornecedor_texto: patrimonio,
@@ -1615,10 +1628,16 @@ router.post("/tanque/movimentacoes/melosa", requireAuth, async (req: AuthedReque
       throw e;
     }
 
-    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+    const tanqueNumero = await resolverTanqueNumeroDoInsumo(
       service,
       payload.obra_codigo,
       payload.tanque_numero,
+      payload.combustivel_tipo,
+    );
+    const tanqueCadastrado = await findTanqueCadastradoNaObra(
+      service,
+      payload.obra_codigo,
+      tanqueNumero,
     );
     if (!tanqueCadastrado) {
       return res.status(400).json({
@@ -1649,7 +1668,7 @@ router.post("/tanque/movimentacoes/melosa", requireAuth, async (req: AuthedReque
       data_hora: dataHoraIso,
       litros: payload.quantidade_litros,
       combustivel_tipo: payload.combustivel_tipo?.trim() || null,
-      tanque_numero: payload.tanque_numero,
+      tanque_numero: tanqueNumero,
       tanque_quantidade_abastecida: quantidadeStr,
       placa_texto: ativoMelosa,
       placa_caminhao: ativoMelosa,
@@ -1748,7 +1767,20 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         console.warn("[movimentacoes] cadastro do equipamento:", lookupErr);
       }
     }
-    const tanqueNum = payload.tanque_numero;
+    let tanqueNum = payload.tanque_numero;
+    if (
+      (payload.tipo === "ENTRADA_TANQUE_OBRA" || payload.tipo === "RETIRADA_TANQUE") &&
+      typeof tanqueNum === "number" &&
+      Number.isInteger(tanqueNum) &&
+      tanqueNum > 0
+    ) {
+      tanqueNum = await resolverTanqueNumeroDoInsumo(
+        service,
+        payload.obra_codigo,
+        tanqueNum,
+        payload.combustivel_tipo,
+      );
+    }
 
     const needsVeiculoMeta =
       payload.tipo === "ENTRADA_TANQUE_OBRA" ||

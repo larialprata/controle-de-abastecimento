@@ -118,19 +118,26 @@ async function fetchMovimentacoesMelosaDesde(
   ativoMelosa: string,
   de: string,
 ): Promise<Array<{ litros: number; data_hora: string }>> {
-  const ativo = normalizeAtivo(ativoMelosa);
+  const ativo = normalizeAtivo(ativoMelosa).replace(/[\s\-]/g, "");
+  if (!ativo) return [];
   const { data } = await service
     .from("melosa_movimentacoes")
-    .select("litros, ativo_melosa_texto, data_hora")
-    .ilike("ativo_melosa_texto", ativo)
+    .select("litros, melosa_quantidade_abastecida, ativo_melosa_texto, data_hora")
     .gt("data_hora", de)
-    .order("data_hora", { ascending: true });
+    .order("data_hora", { ascending: true })
+    .limit(5000);
 
   if (!data?.length) return [];
-  return data.map((r) => ({
-    litros: toNum(r.litros),
-    data_hora: String(r.data_hora),
-  }));
+  return data
+    .filter((r) => normalizeAtivo(String(r.ativo_melosa_texto ?? "")).replace(/[\s\-]/g, "") === ativo)
+    .map((r) => {
+      const quantidade = toNum(r.melosa_quantidade_abastecida);
+      const litros = toNum(r.litros);
+      return {
+        litros: quantidade > 0 ? quantidade : litros,
+        data_hora: String(r.data_hora),
+      };
+    });
 }
 
 async function sumAbastecimentosEntre(

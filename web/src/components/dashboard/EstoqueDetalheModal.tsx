@@ -5,6 +5,7 @@ import { apiGet } from "../../lib/api";
 import { fmtLitrosDashboard } from "../../lib/combustivelControle";
 import { fmtEquipamentoTicketLabel } from "../../lib/equipamentoTicketLabel";
 import { glassPanel } from "../../lib/glass";
+import { codigoOleoPorTexto } from "../../lib/insumos";
 import type {
   EstoqueMelosaItem,
   EstoqueTanqueRegistradoItem,
@@ -227,12 +228,19 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
 
     return movimentacoes.filter((m) => {
       if (typeof m.obra_codigo !== "number" || !obrasTanque.has(m.obra_codigo)) return false;
-      const num = parseNumero(m.tanque_numero);
-      if (num != null && num !== tanqueNum) return false;
       if (cutoffOk) {
         const dh = m.data_hora ? new Date(String(m.data_hora)).getTime() : NaN;
         if (!Number.isFinite(dh) || dh <= cutoffMs!) return false;
       }
+      const oleoMov = codigoOleoPorTexto(m.combustivel_tipo);
+      const oleoTanque = codigoOleoPorTexto(alvo.item.nome);
+      if (oleoMov) return oleoMov === oleoTanque;
+      if (oleoTanque && !oleoMov) {
+        const num = parseNumero(m.tanque_numero);
+        return num != null && num === tanqueNum;
+      }
+      const num = parseNumero(m.tanque_numero);
+      if (num != null && num !== tanqueNum) return false;
       return true;
     });
   }, [alvo, isMelosa, movimentacoes]);

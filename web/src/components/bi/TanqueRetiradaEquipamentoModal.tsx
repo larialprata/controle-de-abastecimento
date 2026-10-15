@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { apiGet } from "../../lib/api";
 import { glassField, glassPanel, glassSelect } from "../../lib/glass";
 import { tanquePertenceAObra } from "../../lib/tanqueObras";
-import { INSUMO_OPCOES } from "../../lib/insumos";
+import { INSUMO_OPCOES, codigoOleoPorTexto, tanqueNumeroDoOleo } from "../../lib/insumos";
 
 type ObraOption = { codigo: number; nome: string };
 
@@ -220,7 +220,14 @@ export default function TanqueRetiradaEquipamentoModal({
               id="tanque-retirada-tanque"
               className={glassSelect}
               value={tanqueNumero}
-              onChange={(e) => setTanqueNumero(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setTanqueNumero(value);
+                const tanque = tanquesDaObra.find((t) => String(t.tanque_numero) === value);
+                const oleo = codigoOleoPorTexto(tanque?.nome);
+                if (oleo) setInsumo(oleo);
+                else if (codigoOleoPorTexto(insumo)) setInsumo("DIESEL_S10");
+              }}
               disabled={saving || tanquesDaObra.length === 0}
               required
             >
@@ -273,7 +280,12 @@ export default function TanqueRetiradaEquipamentoModal({
               id="tanque-retirada-insumo"
               className={glassSelect}
               value={insumo}
-              onChange={(e) => setInsumo(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setInsumo(value);
+                const numero = tanqueNumeroDoOleo(tanquesDaObra, value);
+                if (numero) setTanqueNumero(numero);
+              }}
               disabled={saving}
             >
               {INSUMO_OPCOES.map((o) => (

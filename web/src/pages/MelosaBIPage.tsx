@@ -25,6 +25,7 @@ import { enrichMelosaTicketRowsWithSignatures, fetchMelosaPhotoSignedUrl } from 
 import { labelEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { fmtEquipamentoTicketLabel, enrichMelosaRowsWithEquipamentoDescricao } from "../lib/equipamentoTicketLabel";
 import { biMovementRowKey, resolveSelectedRows } from "../lib/biSelection";
+import { chavesPatrimonio, ativoLimpoParaCadastro } from "../lib/equipamentoAtivo";
 import { labelInsumo } from "../lib/insumos";
 import {
   defaultPeriodoMesAtual,
@@ -469,7 +470,8 @@ export default function MelosaBIPage() {
       if (equipamentosCadastrados.size === 0) return false;
       const raw = ativoEquipamentoRaw(m);
       if (!raw) return false;
-      return !equipamentosCadastrados.has(normalizeAtivoKey(raw));
+      const chaves = chavesPatrimonio(raw);
+      return chaves.length > 0 && chaves.every((chave) => !equipamentosCadastrados.has(chave));
     },
     [equipamentosCadastrados],
   );
@@ -510,10 +512,17 @@ export default function MelosaBIPage() {
       let equipamentosAtivos = new Set<string>();
       let mobilidadeMap = new Map<string, string>();
       try {
-        const eqJson = await apiGet<{ equipamentos?: { ativo?: string; placa?: string | null; mobilidade?: string | null }[] }>(
-          "/v1/equipamentos",
-          token,
-        );
+        const [chavesJson, eqJson] = await Promise.all([
+          apiGet<{ chaves?: string[] }>("/v1/equipamentos?chaves=1", token),
+          apiGet<{ equipamentos?: { ativo?: string; placa?: string | null; mobilidade?: string | null }[] }>(
+            "/v1/equipamentos",
+            token,
+          ),
+        ]);
+        for (const chave of chavesJson?.chaves ?? []) {
+          const ativo = normalizeAtivoKey(chave);
+          if (ativo) equipamentosAtivos.add(ativo);
+        }
         for (const e of eqJson?.equipamentos ?? []) {
           const ativo = normalizeAtivoKey(e.ativo);
           const placa = normalizeAtivoKey(e.placa);
@@ -1343,7 +1352,17 @@ export default function MelosaBIPage() {
                     >
                       {isEquipamentoNaoCadastrado(m) ? (
                         <Link
-                          to={`/equipamentos?novo=${encodeURIComponent(ativoEquipamentoRaw(m))}`}
+                          to={(() => {
+                            const bruto = ativoEquipamentoRaw(m);
+                            const limpo = ativoLimpoParaCadastro(bruto);
+                            const obra =
+                              limpo.obraDoSufixo ??
+                              (typeof m.obra_codigo === "number" ? m.obra_codigo : null);
+                            const params = new URLSearchParams();
+                            params.set("novo", limpo.ativo || bruto);
+                            if (obra != null) params.set("obra", String(obra));
+                            return `/equipamentos?${params.toString()}`;
+                          })()}
                           className="underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:hover:text-white"
                         >
                           {fmtAtivoEquipamento(m)}

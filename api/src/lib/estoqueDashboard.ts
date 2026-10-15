@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseMedidorNumero } from "./melosaMedidorContinuidade";
+import { codigoOleoPorTexto } from "./oleoTanque";
 import {
   enriquecerCiclosParaListagem,
   litrosDisponivelNoCiclo,
@@ -189,6 +190,7 @@ export async function buildEstoqueDashboard(
   });
 
   const entradasPorTipo = new Map<EstoqueProdutoKey, number>();
+  const retiradasPorTipo = new Map<EstoqueProdutoKey, number>();
   let totalEntrada = 0;
   let totalRetirada = 0;
   let totalDevolvido = 0;
@@ -210,7 +212,10 @@ export async function buildEstoqueDashboard(
     }
     if (tipo === "RETIRADA_TANQUE") {
       const litros = litrosRetiradaTanque(m);
-      if (litros > 0) totalRetirada += litros;
+      if (litros <= 0) return;
+      totalRetirada += litros;
+      const key = normalizeCombustivelKey(m.combustivel_tipo);
+      retiradasPorTipo.set(key, (retiradasPorTipo.get(key) ?? 0) + litros);
     }
   });
 
@@ -220,16 +225,12 @@ export async function buildEstoqueDashboard(
   PRODUTOS_PADRAO.forEach((p) => saldosPorTipo.set(p.key, 0));
   saldosPorTipo.set("OUTROS", 0);
 
-  if (totalEntrada > 0 && retiradaEfetiva > 0) {
-    entradasPorTipo.forEach((entrada, key) => {
-      const alocado = (entrada / totalEntrada) * retiradaEfetiva;
-      saldosPorTipo.set(key, Math.max(0, entrada - alocado));
-    });
-  } else {
-    entradasPorTipo.forEach((entrada, key) => {
-      saldosPorTipo.set(key, entrada);
-    });
-  }
+  const tipos = new Set<EstoqueProdutoKey>([...entradasPorTipo.keys(), ...retiradasPorTipo.keys()]);
+  tipos.forEach((key) => {
+    const entrada = entradasPorTipo.get(key) ?? 0;
+    const retirada = retiradasPorTipo.get(key) ?? 0;
+    saldosPorTipo.set(key, Math.max(0, entrada - retirada));
+  });
 
   const tanques_por_combustivel: EstoqueTanqueItem[] = PRODUTOS_PADRAO.map((prod) => {
     const saldo = saldosPorTipo.get(prod.key) ?? 0;
@@ -419,10 +420,21 @@ async function buildTanquesRegistrados(
     const obra = Number(m.obra_codigo);
     if (!Number.isFinite(obra)) return;
     const tanque = Number(m.tanque_numero);
-    const ativo =
-      Number.isFinite(tanque) && tanque > 0
+    const oleo = codigoOleoPorTexto(m.combustivel_tipo);
+    const ativoOleo = oleo
+      ? rows.find((eq) => {
+          const ativoEq = String(eq.ativo ?? "");
+          const obrasEq = obrasByAtivo.get(ativoEq) ?? [];
+          return obrasEq.includes(obra) && codigoOleoPorTexto(eq.nome) === oleo;
+        })
+      : undefined;
+    const ativo = ativoOleo
+      ? String(ativoOleo.ativo ?? "")
+      : Number.isFinite(tanque) && tanque > 0
         ? ativoPorPar.get(tanqueRegistradoKey(obra, tanque))
-        : (ativosPorObra.get(obra)?.length === 1 ? ativosPorObra.get(obra)?.[0] : undefined);
+        : ativosPorObra.get(obra)?.length === 1
+          ? ativosPorObra.get(obra)?.[0]
+          : undefined;
     if (!ativo) return;
     if (cutoffPorAtivo.has(ativo) && !movimentoDepoisDaQuantidade(m.data_hora, cutoffPorAtivo.get(ativo))) {
       return;
@@ -547,17 +559,29 @@ async function buildMelosasEstoque(
 
   const abastApos = new Map<string, number>();
   if (saldoInicialPorAtivo.size > 0) {
-    const ativosComSaldo = Array.from(saldoInicialPorAtivo.keys());
+    const compactAtivo = (v: unknown) =>
+      String(v ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/[\s\-]/g, "");
+    const chavePorCompact = new Map<string, string>();
+    saldoInicialPorAtivo.forEach((_saldo, ativo) => {
+      chavePorCompact.set(compactAtivo(ativo), ativo);
+    });
+
     const { data: movMelosa } = await service
       .from("melosa_movimentacoes")
-      .select("ativo_melosa_texto, litros, data_hora")
-      .in("ativo_melosa_texto", ativosComSaldo);
+      .select("ativo_melosa_texto, litros, melosa_quantidade_abastecida, data_hora")
+      .limit(5000);
 
     (movMelosa ?? []).forEach((row) => {
-      const ativo = normPlaca(row.ativo_melosa_texto);
-      if (!saldoInicialPorAtivo.has(ativo)) return;
+      const ativo = chavePorCompact.get(compactAtivo(row.ativo_melosa_texto));
+      if (!ativo || !saldoInicialPorAtivo.has(ativo)) return;
       if (!movimentoDepoisDaQuantidade(row.data_hora, cutoffPorAtivo.get(ativo))) return;
-      abastApos.set(ativo, (abastApos.get(ativo) ?? 0) + toNum(row.litros));
+      const quantidade = toNum(row.melosa_quantidade_abastecida);
+      const litros = quantidade > 0 ? quantidade : toNum(row.litros);
+      if (litros <= 0) return;
+      abastApos.set(ativo, (abastApos.get(ativo) ?? 0) + litros);
     });
   }
 

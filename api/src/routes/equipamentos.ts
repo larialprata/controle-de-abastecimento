@@ -9,6 +9,7 @@ import {
   findEquipamentoExterno,
   equipamentosExternosConnectionMode,
   isEquipamentosExternosConfigured,
+  separarSufixoObraAtivo,
 } from "../lib/equipamentosExternos";
 import { loadAbastEquipamentoByAtivo } from "../lib/equipamentoAbastLookup";
 import { lookupEquipamentoFromQr } from "../lib/equipamentoQrLookup";
@@ -311,6 +312,26 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
     typeof req.query.empresa === "string" ? normalizeEquipamentoEmpresa(req.query.empresa) : null;
 
   const service = createSupabaseServiceRole();
+
+  if (req.query.chaves === "1") {
+    const { data, error } = await service.from("equipamentos").select("ativo, placa").limit(5000);
+    if (error) return res.status(500).json({ error: formatEquipamentoDbError(error.message) });
+    const chaves = new Set<string>();
+    for (const row of data ?? []) {
+      const ativo = String(row.ativo ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/[\s\-]/g, "");
+      const placa = String(row.placa ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/[\s\-]/g, "");
+      if (ativo) chaves.add(ativo);
+      if (placa) chaves.add(placa);
+    }
+    return res.json({ chaves: [...chaves] });
+  }
+
   const obraScope = await getUserObraCodigos(service, req.userId);
   let query = service.from("equipamentos").select(EQUIPAMENTO_SELECT);
   if (tipoRaw === "TANQUE") {
@@ -321,9 +342,11 @@ router.get("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
 
   if (obraScope && tipoRaw !== "TANQUE" && tipoRaw !== "MELOSA") {
     if (tipoRaw === "EQUIPAMENTO") {
-      query = query.in("obra_codigo", obraScope);
+      query = query.or(`obra_codigo.in.(${obraScope.join(",")}),obra_codigo.is.null`);
     } else {
-      query = query.or(`tipo.eq.MELOSA,tipo.eq.TANQUE,obra_codigo.in.(${obraScope.join(",")})`);
+      query = query.or(
+        `tipo.eq.MELOSA,tipo.eq.TANQUE,obra_codigo.in.(${obraScope.join(",")}),and(tipo.eq.EQUIPAMENTO,obra_codigo.is.null)`,
+      );
     }
   }
 
@@ -501,7 +524,7 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   }
 
   const tanqueObraCodigos = tipo === "TANQUE" ? resolveTanqueObraCodigos({ obra_codigo, obra_codigos }) : [];
-  const obraCodigoNormalizado =
+  let obraCodigoNormalizado =
     tipo === "MELOSA"
       ? null
       : tipo === "TANQUE"
@@ -518,6 +541,13 @@ router.post("/equipamentos", requireAuth, async (req: AuthedRequest, res) => {
   }
 
   let ativo = parsed.data.ativo?.trim() ?? "";
+  const separado = ativo ? separarSufixoObraAtivo(ativo) : { ativo: "", obra: null as number | null };
+  if (separado.ativo) ativo = separado.ativo;
+  if (tipo === "EQUIPAMENTO" && obraCodigoNormalizado == null && separado.obra != null) {
+    const obraErr = await validateObraCodigo(service, separado.obra);
+    if (obraErr) return res.status(400).json({ error: obraErr });
+    obraCodigoNormalizado = separado.obra;
+  }
   let tanqueNumeroFinal: number | null = null;
   if (tipo === "TANQUE") {
     if (obraCodigoNormalizado == null || tanque_numero == null) {

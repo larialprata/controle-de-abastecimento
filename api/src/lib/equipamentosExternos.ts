@@ -58,6 +58,20 @@ export function ativosPatrimonioEquivalentes(a: string, b: string): boolean {
   return normalizeAtivoPlacaExterno(a) === normalizeAtivoPlacaExterno(b);
 }
 
+/** Patrimônio gravado como `ATIVO_00.238` é o ativo ATIVO na obra 238. */
+export function separarSufixoObraAtivo(ativo: string): { ativo: string; obra: number | null } {
+  const trimmed = ativo.trim().toUpperCase();
+  const match = trimmed.match(/^(.*?)_0*\.(\d+)$/);
+  if (match?.[1]) {
+    const obra = Number(match[2]);
+    return {
+      ativo: match[1].trim(),
+      obra: Number.isFinite(obra) && obra > 0 ? obra : null,
+    };
+  }
+  return { ativo: trimmed, obra: null };
+}
+
 export function normalizeObraCodeExterno(value: number | string | null | undefined): string | null {
   if (value == null) return null;
   const raw = String(value).trim();

@@ -39,7 +39,7 @@ import {
 import { clearOutbox, enqueueOutbox, initDb, outboxCount } from "./src/db/sqlite";
 import { syncOutbox } from "./src/sync/syncOutbox";
 import { OBRAS, OBRA_USINA_CODIGO } from "./src/constants/obras";
-import { INSUMOS_MELOSA, INSUMOS_TANQUE, labelInsumo } from "./src/constants/insumos";
+import { INSUMOS_MELOSA, INSUMOS_TANQUE, codigoOleoPorTexto, labelInsumo } from "./src/constants/insumos";
 import type { MovimentoTipo, MovimentacaoPayload } from "./src/types/movimentacao";
 import { v4 as uuidv4 } from "uuid";
 import { apiGet, apiPost, registerCredentials } from "./src/lib/api";
@@ -2454,6 +2454,27 @@ export default function App() {
     });
   }
 
+  function selecionarTanque(ativo: string) {
+    setTanqueAtivo(ativo);
+    const tanque = tanquesCadastrados.find((t) => t.ativo === ativo);
+    const oleo = codigoOleoPorTexto(tanque?.nome);
+    if (oleo) {
+      setObraCombustivelTipo(oleo);
+      return;
+    }
+    setObraCombustivelTipo((atual) => (codigoOleoPorTexto(atual) ? "DIESEL_S10" : atual));
+  }
+
+  function selecionarInsumoTanque(codigo: string) {
+    setObraCombustivelTipo(codigo);
+    const oleo = codigoOleoPorTexto(codigo);
+    if (!oleo) return;
+    const daObra = tanquesDisponiveis.filter((t) => tanquePertenceObraMobile(t, obraCodigo));
+    const pool = daObra.length > 0 ? daObra : tanquesDisponiveis;
+    const tanque = pool.find((t) => codigoOleoPorTexto(t.nome) === oleo);
+    if (tanque) setTanqueAtivo(tanque.ativo);
+  }
+
   function continueRetiradaTanqueDados() {
     const paraEquipamento = retiradaDestino === "EQUIPAMENTO";
     if (!tanqueNumero) {
@@ -2873,7 +2894,18 @@ export default function App() {
           : null,
       placa_texto: isRetiradaTanque ? patrimonioRetirada : placaTexto.trim(),
       fornecedor_texto: retiradaParaEquipamento ? patrimonioRetirada : isRetiradaTanque ? null : fornecedorTexto.trim(),
-      tanque_numero: isTanqueObra ? tanqueNumero : tipoAtual === "RETIRADA_MELOSA" ? melosaTanqueNumero : null,
+      tanque_numero: isTanqueObra
+        ? (() => {
+            const oleo = codigoOleoPorTexto(obraCombustivelTipo);
+            const daObra = tanquesCadastrados.filter((t) => tanquePertenceObraMobile(t, obraCodigo));
+            const pool = daObra.length > 0 ? daObra : tanquesCadastrados;
+            const tanqueOleo = oleo ? pool.find((t) => codigoOleoPorTexto(t.nome) === oleo) : null;
+            const tanqueEscolhido = tanquesCadastrados.find((t) => t.ativo === tanqueAtivo);
+            return tanqueOleo?.tanque_numero ?? tanqueEscolhido?.tanque_numero ?? tanqueNumero;
+          })()
+        : tipoAtual === "RETIRADA_MELOSA"
+          ? melosaTanqueNumero
+          : null,
 
       combustivel_tipo: isTanqueObra ? obraCombustivelTipo.trim() : null,
       nota_numero: isEntradaTanqueObra ? notaNumero.trim() : null,
@@ -4855,7 +4887,7 @@ export default function App() {
                       tanques={tanquesDisponiveis}
                       obrasPorCodigo={obrasPorCodigo}
                       tanqueAtivo={tanqueAtivo}
-                      onSelect={setTanqueAtivo}
+                      onSelect={selecionarTanque}
                       isDarkMode={isDarkMode}
                     />
                   ) : (
@@ -4868,7 +4900,7 @@ export default function App() {
                   <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
                     <Picker
                       selectedValue={obraCombustivelTipo}
-                      onValueChange={(v) => setObraCombustivelTipo(String(v))}
+                      onValueChange={(v) => selecionarInsumoTanque(String(v))}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
                       {INSUMOS_TANQUE.map((item) => (
@@ -5079,7 +5111,7 @@ export default function App() {
                       tanques={tanquesDisponiveis}
                       obrasPorCodigo={obrasPorCodigo}
                       tanqueAtivo={tanqueAtivo}
-                      onSelect={setTanqueAtivo}
+                      onSelect={selecionarTanque}
                       isDarkMode={isDarkMode}
                     />
                   ) : (
@@ -5092,7 +5124,7 @@ export default function App() {
                   <View style={[styles.pickerShell, !isDarkMode ? styles.pickerShellLight : null]}>
                     <Picker
                       selectedValue={obraCombustivelTipo}
-                      onValueChange={(v) => setObraCombustivelTipo(String(v))}
+                      onValueChange={(v) => selecionarInsumoTanque(String(v))}
                       style={[styles.picker, !isDarkMode ? styles.pickerLight : null]}
                     >
                       {INSUMOS_TANQUE.map((item) => (

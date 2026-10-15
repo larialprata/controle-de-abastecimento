@@ -17,6 +17,7 @@ import {
   type EquipamentoImportRow,
 } from "../../lib/equipamentosImport";
 import { parseObraCodigoInput } from "../../lib/obraCodigo";
+import { ativoLimpoParaCadastro } from "../../lib/equipamentoAtivo";
 import { glassField, glassPanel } from "../../lib/glass";
 import { downloadEquipamentosQrHtml } from "../../lib/equipamentoQrCode";
 import { resolveEquipamentosQrBatch } from "../../lib/equipamentoQrResolve";
@@ -481,10 +482,19 @@ export default function CadastroAtivosPage({
 
   useEffect(() => {
     const ativo = searchParams.get("novo")?.trim();
-    if (!ativo || !canWrite) return;
-    openAddModalWithAtivo(ativo.toUpperCase());
+    if (!ativo) return;
+    if (!canWrite) {
+      setError("Sem permissão para cadastrar equipamentos. Peça ao administrador.");
+      return;
+    }
+    const limpo = ativoLimpoParaCadastro(ativo);
+    const obraParam = searchParams.get("obra")?.trim() ?? "";
+    const obra = obraParam || (limpo.obraDoSufixo != null ? String(limpo.obraDoSufixo) : "");
+    openAddModalWithAtivo(limpo.ativo);
+    if (obra) setFormObraCodigo(obra);
     const next = new URLSearchParams(searchParams);
     next.delete("novo");
+    next.delete("obra");
     setSearchParams(next, { replace: true });
   }, [searchParams, canWrite, openAddModalWithAtivo, setSearchParams]);
 
