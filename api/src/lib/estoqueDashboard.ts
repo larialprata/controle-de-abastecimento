@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseMedidorNumero } from "./melosaMedidorContinuidade";
-import { codigoOleoPorTexto } from "./oleoTanque";
+import { codigoOleoPorTexto, codigosOleo } from "./oleoTanque";
 import {
   enriquecerCiclosParaListagem,
   litrosDisponivelNoCiclo,
@@ -151,6 +151,12 @@ function litrosRetiradaTanque(row: Record<string, unknown>): number {
   const ini = parseMedidorNumero(row.medidor_tanque_numero_inicial as string | null);
   const fin = parseMedidorNumero(row.medidor_tanque_numero_final as string | null);
   if (ini != null && fin != null && fin > ini) return fin - ini;
+  return toNum(row.litros);
+}
+
+function litrosAbastecimento(row: Record<string, unknown>): number {
+  const quantidade = toNum(row.melosa_quantidade_abastecida);
+  if (quantidade > 0) return quantidade;
   return toNum(row.litros);
 }
 
@@ -450,6 +456,37 @@ async function buildTanquesRegistrados(
       if (litros > 0) bucket.retirada += litros;
     }
   });
+
+  // Abastecimento com óleo sai do tanque cujo nome é esse insumo (XP-68, 15W 40, …).
+  // Diesel continua saindo só na retirada do tanque, para não descontar duas vezes.
+  if (obraCodigos.length > 0) {
+    const { data: abastOleo } = await service
+      .from("melosa_movimentacoes")
+      .select("obra_codigo, litros, melosa_quantidade_abastecida, melosa_combustivel_tipo_retirada, data_hora")
+      .in("obra_codigo", obraCodigos)
+      .in("melosa_combustivel_tipo_retirada", codigosOleo());
+
+    for (const row of abastOleo ?? []) {
+      const oleo = codigoOleoPorTexto(row.melosa_combustivel_tipo_retirada);
+      if (!oleo) continue;
+      const obra = Number(row.obra_codigo);
+      if (!Number.isFinite(obra)) continue;
+      const eq = rows.find((item) => {
+        const ativoEq = String(item.ativo ?? "");
+        const obrasEq = obrasByAtivo.get(ativoEq) ?? [];
+        return obrasEq.includes(obra) && codigoOleoPorTexto(item.nome) === oleo;
+      });
+      const ativo = eq ? String(eq.ativo ?? "") : "";
+      if (!ativo) continue;
+      if (cutoffPorAtivo.has(ativo) && !movimentoDepoisDaQuantidade(row.data_hora, cutoffPorAtivo.get(ativo))) {
+        continue;
+      }
+      const litros = litrosAbastecimento(row as Record<string, unknown>);
+      if (litros <= 0) continue;
+      if (!saldos.has(ativo)) saldos.set(ativo, { entrada: 0, retirada: 0 });
+      saldos.get(ativo)!.retirada += litros;
+    }
+  }
 
   const DEFAULT_CAP = 10_000;
 

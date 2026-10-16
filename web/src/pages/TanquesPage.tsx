@@ -38,6 +38,12 @@ function fmtObrasCell(row: TanqueRow, obrasPorCodigo: Map<number, string>): stri
   return obras.map((c) => `${c} — ${obrasPorCodigo.get(c) ?? ""}`.trim()).join("; ");
 }
 
+function litrosDoCadastro(value: number | string | null | undefined): string {
+  if (value == null || value === "") return "";
+  const n = Number(value);
+  return Number.isFinite(n) ? String(n) : "";
+}
+
 function parseCapacidadeInput(value: string): number | null | "invalid" {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -137,16 +143,8 @@ export default function TanquesPage() {
     setFormTanqueNumero(tanque.tanque_numero != null ? String(tanque.tanque_numero) : "");
     setFormObraCodigos(obrasDoTanque(tanque));
     setFormDescricao(tanque.nome?.trim() ?? "");
-    setFormCapacidade(
-      tanque.capacidade_litros != null && Number.isFinite(tanque.capacidade_litros)
-        ? String(tanque.capacidade_litros)
-        : "",
-    );
-    setFormSaldo(
-      tanque.saldo_inicial_litros != null && Number.isFinite(tanque.saldo_inicial_litros)
-        ? String(tanque.saldo_inicial_litros)
-        : "",
-    );
+    setFormCapacidade(litrosDoCadastro(tanque.capacidade_litros));
+    setFormSaldo(litrosDoCadastro(tanque.saldo_inicial_litros));
     setFormError(null);
     setFormOpen(true);
   }

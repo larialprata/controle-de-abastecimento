@@ -991,8 +991,9 @@ router.patch("/equipamentos/:ativo", requireAuth, async (req: AuthedRequest, res
     const litros = aplicarSaldo ? parsed.data.saldo_inicial_litros : null;
     if (litros == null) {
       saldoInicialPatch = { saldo_inicial_litros: null, saldo_inicial_em: null };
-    } else if (!litrosIguais(existing.saldo_inicial_litros, litros)) {
-      // Quantidade nova é o estoque deste instante. O BI anterior não entra de novo na dashboard.
+    } else if (tipo === "TANQUE" || !litrosIguais(existing.saldo_inicial_litros, litros)) {
+      // No tanque, salvar a quantidade define o saldo da dashboard neste instante.
+      // O histórico anterior não entra de novo, mesmo se o número digitado for o mesmo.
       saldoInicialPatch = {
         saldo_inicial_litros: litros,
         saldo_inicial_em: new Date().toISOString(),

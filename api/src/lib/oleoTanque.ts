@@ -12,6 +12,10 @@ const OLEOS: Array<{ codigo: string; tokens: string[] }> = [
   { codigo: "ATF", tokens: ["ATF"] },
 ];
 
+export function codigosOleo(): string[] {
+  return OLEOS.map((oleo) => oleo.codigo);
+}
+
 export function compactOleo(raw: unknown): string {
   return String(raw ?? "")
     .normalize("NFD")

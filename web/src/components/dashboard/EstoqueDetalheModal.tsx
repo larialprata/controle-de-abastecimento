@@ -169,6 +169,7 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
   );
 
   const isMelosa = alvo.kind === "melosa";
+  const oleoDoTanque = !isMelosa ? codigoOleoPorTexto(alvo.item.nome) : null;
   const titulo = isMelosa ? alvo.item.ativo : alvo.item.label;
   const saldo = alvo.item.saldo_litros;
   const capacidade = isMelosa ? alvo.item.capacidade_litros ?? 0 : alvo.item.capacidade_litros;
@@ -183,18 +184,20 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const origem = isMelosa ? "melosa" : "tanque";
+      const origens = isMelosa ? ["melosa"] : oleoDoTanque ? ["tanque", "melosa"] : ["tanque"];
       const rows: Movimentacao[] = [];
-      let offset = 0;
-      for (let i = 0; i < MAX_PAGES; i += 1) {
-        const chunk = await apiGet<{ movimentacoes: Movimentacao[] }>(
-          `/v1/movimentacoes?limit=${PAGE_SIZE}&offset=${offset}&origem=${origem}`,
-          token,
-        );
-        const list = chunk?.movimentacoes ?? [];
-        rows.push(...list);
-        if (list.length < PAGE_SIZE) break;
-        offset += PAGE_SIZE;
+      for (const origem of origens) {
+        let offset = 0;
+        for (let i = 0; i < MAX_PAGES; i += 1) {
+          const chunk = await apiGet<{ movimentacoes: Movimentacao[] }>(
+            `/v1/movimentacoes?limit=${PAGE_SIZE}&offset=${offset}&origem=${origem}`,
+            token,
+          );
+          const list = chunk?.movimentacoes ?? [];
+          rows.push(...list);
+          if (list.length < PAGE_SIZE) break;
+          offset += PAGE_SIZE;
+        }
       }
       setMovimentacoes(rows);
     } catch (err: unknown) {
@@ -203,7 +206,7 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [isMelosa, token]);
+  }, [isMelosa, oleoDoTanque, token]);
 
   useEffect(() => {
     load();
@@ -233,7 +236,10 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
         if (!Number.isFinite(dh) || dh <= cutoffMs!) return false;
       }
       const oleoMov = codigoOleoPorTexto(m.combustivel_tipo);
+      const oleoAbast = codigoOleoPorTexto(m.melosa_combustivel_tipo_retirada);
       const oleoTanque = codigoOleoPorTexto(alvo.item.nome);
+      if (m.origem === "melosa" && !oleoAbast) return false;
+      if (oleoAbast) return oleoAbast === oleoTanque;
       if (oleoMov) return oleoMov === oleoTanque;
       if (oleoTanque && !oleoMov) {
         const num = parseNumero(m.tanque_numero);
@@ -255,6 +261,7 @@ export default function EstoqueDetalheModal({ alvo, token, onClose }: Props) {
     filtradas.forEach((m) => {
       if (m.tipo === "ENTRADA_TANQUE_OBRA") entrada += parseNumero(m.litros) ?? 0;
       else if (m.tipo === "RETIRADA_TANQUE") retirada += litrosRetiradaTanque(m);
+      else if (codigoOleoPorTexto(m.melosa_combustivel_tipo_retirada)) retirada += litrosMelosa(m);
     });
     const saldoInicial = Number(alvo.kind === "tanque" ? alvo.item.saldo_inicial_litros ?? 0 : 0);
     return { entrada, retirada, saldoInicial, count: filtradas.length };
