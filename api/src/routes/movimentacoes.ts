@@ -2,7 +2,11 @@ import { randomUUID } from "crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { createSupabaseServiceRole } from "../lib/supabase";
-import { criarCicloRetiradaTanque, vincularAbastecimentoAoCicloAberto } from "../lib/melosaCiclo";
+import {
+  criarCicloRetiradaTanque,
+  reverterCicloDaRetiradaTanque,
+  vincularAbastecimentoAoCicloAberto,
+} from "../lib/melosaCiclo";
 import {
   isTransferenciaMelosaObs,
   transferDestinoOperationId,
@@ -408,6 +412,7 @@ function parseImageBase64Payload(raw: string, contentTypeHint?: string): {
 const tanqueUpdateSchema = z
   .object({
     obra_codigo: z.number().int().positive().optional(),
+    data_hora: z.string().datetime().optional(),
     litros: z.number().min(0).optional(),
     combustivel_tipo: z.string().optional().nullable(),
     nota_numero: z.string().optional().nullable(),
@@ -416,6 +421,11 @@ const tanqueUpdateSchema = z
     placa_caminhao: z.string().optional().nullable(),
     fornecedor_texto: z.string().optional().nullable(),
     tanque_numero: tanqueNumeroSchema.optional().nullable(),
+    tanque_texto: z.string().optional().nullable(),
+    tanque_operador_nome: z.string().optional().nullable(),
+    lacre_tanque_numero: z.string().optional().nullable(),
+    lacre_melosa_numero: z.string().optional().nullable(),
+    melosa_horimetro_equipamento_abastecido_numero: z.string().optional().nullable(),
     obs: z.string().optional().nullable(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
@@ -1295,6 +1305,9 @@ router.patch("/tanque/movimentacoes/:operationId", requireAuth, async (req: Auth
     if (typeof updatePayload.litros === "number" && current.tipo === "RETIRADA_TANQUE") {
       updatePayload.tanque_quantidade_abastecida = String(updatePayload.litros);
     }
+    if (typeof updatePayload.data_hora === "string") {
+      updatePayload.data_hora = new Date(updatePayload.data_hora).toISOString();
+    }
 
     const { data: updated, error: updateError } = await service
       .from("movimentacoes")
@@ -1304,6 +1317,27 @@ router.patch("/tanque/movimentacoes/:operationId", requireAuth, async (req: Auth
       .maybeSingle();
 
     if (updateError) return res.status(400).json({ error: updateError.message });
+
+    if (
+      updated &&
+      updated.tipo === "RETIRADA_TANQUE" &&
+      !isRetiradaTanqueParaEquipamento(updated.obs as string | null)
+    ) {
+      const cicloPatch: Record<string, unknown> = {};
+      if (typeof updatePayload.litros === "number") cicloPatch.litros_retirada = updatePayload.litros;
+      if (typeof updatePayload.data_hora === "string") cicloPatch.data_hora = updatePayload.data_hora;
+      if (updatePayload.obra_codigo != null) cicloPatch.obra_codigo = updatePayload.obra_codigo;
+      if (typeof updatePayload.placa_texto === "string" && updatePayload.placa_texto.trim()) {
+        cicloPatch.ativo_melosa_texto = updatePayload.placa_texto.trim().toUpperCase();
+      }
+      if (Object.keys(cicloPatch).length > 0) {
+        const { error: cicloError } = await service
+          .from("melosa_ciclos")
+          .update(cicloPatch)
+          .eq("retirada_operation_id", operationId);
+        if (cicloError) return res.status(400).json({ error: cicloError.message });
+      }
+    }
 
     await logMovimentacaoAudit(service, {
       entity: "tanque",
@@ -1430,8 +1464,24 @@ router.delete("/tanque/movimentacoes/:operationId", requireAuth, async (req: Aut
       return res.status(400).json({ error: "Esta rota exclui apenas movimentações de tanque" });
     }
 
-    const { error: deleteError } = await service.from("movimentacoes").delete().eq("operation_id", operationId);
-    if (deleteError) return res.status(400).json({ error: deleteError.message });
+    let cicloRevertido = false;
+    if (current.tipo === "RETIRADA_TANQUE") {
+      try {
+        cicloRevertido = await reverterCicloDaRetiradaTanque(service, operationId);
+      } catch (revErr: unknown) {
+        return res.status(400).json({
+          error:
+            revErr instanceof Error
+              ? `Não foi possível devolver o volume da melosa ao tanque: ${revErr.message}`
+              : "Não foi possível devolver o volume da melosa ao tanque",
+        });
+      }
+    }
+
+    if (!cicloRevertido) {
+      const { error: deleteError } = await service.from("movimentacoes").delete().eq("operation_id", operationId);
+      if (deleteError) return res.status(400).json({ error: deleteError.message });
+    }
 
     await logMovimentacaoAudit(service, {
       entity: "tanque",

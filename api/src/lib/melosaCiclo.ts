@@ -599,6 +599,21 @@ export async function relinkFilhosAoExcluirCiclo(
   return atualizados;
 }
 
+/**
+ * Excluir uma saída de tanque que encheu a melosa: o ciclo deixa de somar na melosa
+ * e a retirada deixa de descontar o tanque.
+ * Retorna false quando a saída não gerou ciclo (foi direto para equipamento).
+ */
+export async function reverterCicloDaRetiradaTanque(
+  service: SupabaseClient,
+  operationId: string,
+): Promise<boolean> {
+  const ciclo = await findCicloByRetiradaOperationId(service, operationId);
+  if (!ciclo) return false;
+  await excluirMelosaCiclo(service, ciclo.id);
+  return true;
+}
+
 export async function excluirMelosaCiclo(
   service: SupabaseClient,
   id: string,

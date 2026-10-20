@@ -5,6 +5,9 @@ import TanqueRetiradaEquipamentoModal from "../components/bi/TanqueRetiradaEquip
 import TanqueRetiradaMelosaModal from "../components/bi/TanqueRetiradaMelosaModal";
 import TanqueEntradaCombustivelModal from "../components/bi/TanqueEntradaCombustivelModal";
 import TanqueFotosModal, { type TanqueFotosRow } from "../components/bi/TanqueFotosModal";
+import TanqueMovimentacaoFormModal, {
+  type TanqueMovimentacaoFormRow,
+} from "../components/bi/TanqueMovimentacaoFormModal";
 import StoragePhotoCell from "../components/bi/StoragePhotoCell";
 import MovementsMap, { type MapPoint } from "../components/bi/MovementsMap";
 import { useAuth } from "../state/AuthContext";
@@ -78,9 +81,10 @@ function fmtFornecedorRow(m: LinhaTanque): string {
 
 function fmtTanqueNumRow(m: LinhaTanque): string {
   const n = m.tanque_numero;
-  if (n === 1 || n === "1") return "1";
-  if (n === 2 || n === "2") return "2";
-  return "—";
+  if (n == null || n === "") return "—";
+  const num = Number(n);
+  if (!Number.isFinite(num) || num <= 0) return "—";
+  return String(num);
 }
 
 function isRetiradaTanque(m: LinhaTanque): boolean {
@@ -509,6 +513,7 @@ export default function TanqueBIPage() {
   const [entradaCombustivelOpen, setEntradaCombustivelOpen] = useState(false);
   const [fotosOpen, setFotosOpen] = useState(false);
   const [fotosRow, setFotosRow] = useState<TanqueFotosRow | null>(null);
+  const [editRow, setEditRow] = useState<TanqueMovimentacaoFormRow | null>(null);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL as string, []);
 
@@ -811,120 +816,13 @@ export default function TanqueBIPage() {
     }
   }, [apiBase, load, selectedOperationIds, token]);
 
-  const handleEditSelected = useCallback(async () => {
-    if (!token || selectedOperationIds.length !== 1) return;
+  const openEditForm = useCallback(() => {
+    if (selectedRows.length !== 1) return;
     const row = selectedRows[0];
-    const operationId = selectedOperationIds[0];
-    if (!row || !operationId) return;
-
-    const litrosCurrent = row.litros != null ? String(row.litros) : "";
-    const combustivelCurrent = row.combustivel_tipo != null ? String(row.combustivel_tipo) : "";
-    const notaCurrent = row.nota_numero != null ? String(row.nota_numero) : "";
-    const valorCurrent = row.valor_unitario != null ? String(row.valor_unitario) : "";
-    const placaCurrent = fmtPlacaRow(row) === "—" ? "" : fmtPlacaRow(row);
-    const fornecedorCurrent = fmtFornecedorRow(row) === "—" ? "" : fmtFornecedorRow(row);
-    const tanqueCurrent = fmtTanqueNumRow(row);
-    const obsCurrent = row.obs != null ? String(row.obs) : "";
-    const obraCurrent = row.obra_codigo != null ? String(row.obra_codigo) : "";
-    const obrasHint =
-      obras.length > 0
-        ? obras
-            .slice(0, 12)
-            .map((o) => `${o.codigo} (${o.nome})`)
-            .join(", ") + (obras.length > 12 ? "…" : "")
-        : "nenhuma obra carregada";
-
-    const obraInput = window.prompt(
-      `Editar código da obra/contrato:\nDisponíveis: ${obrasHint}`,
-      obraCurrent,
-    );
-    if (obraInput === null) return;
-    const litrosInput = window.prompt("Editar litros:", litrosCurrent);
-    if (litrosInput === null) return;
-    const combustivelInput = window.prompt("Editar insumo/combustível (vazio para limpar):", combustivelCurrent);
-    if (combustivelInput === null) return;
-    const notaInput = window.prompt("Editar número da nota (vazio para limpar):", notaCurrent);
-    if (notaInput === null) return;
-    const valorInput = window.prompt("Editar valor unitário (vazio para limpar):", valorCurrent);
-    if (valorInput === null) return;
-    const placaInput = window.prompt("Editar placa (vazio para limpar):", placaCurrent);
-    if (placaInput === null) return;
-    const fornecedorInput = window.prompt("Editar fornecedor (vazio para limpar):", fornecedorCurrent);
-    if (fornecedorInput === null) return;
-    const tanqueInput = window.prompt("Tanque: 1 ou 2 (vazio para limpar):", tanqueCurrent === "—" ? "" : tanqueCurrent);
-    if (tanqueInput === null) return;
-    const obsInput = window.prompt("Editar observação (vazio para limpar):", obsCurrent);
-    if (obsInput === null) return;
-
-    const parseNullableNumber = (value: string) => {
-      const trimmed = value.trim();
-      if (!trimmed) return null;
-      const num = Number(trimmed.replace(",", "."));
-      return Number.isFinite(num) && num >= 0 ? num : NaN;
-    };
-    const litros = parseNullableNumber(litrosInput);
-    const valorUnitario = parseNullableNumber(valorInput);
-    const obraCodigo = Number(obraInput.trim());
-
-    if (!Number.isFinite(obraCodigo) || obraCodigo <= 0 || !Number.isInteger(obraCodigo)) {
-      window.alert("Código da obra inválido.");
-      return;
-    }
-    if (!obras.some((o) => o.codigo === obraCodigo)) {
-      window.alert(`Obra ${obraCodigo} não encontrada na lista de contratos.`);
-      return;
-    }
-    if (litros === null || Number.isNaN(litros)) {
-      window.alert("Litros inválido.");
-      return;
-    }
-    if (Number.isNaN(valorUnitario)) {
-      window.alert("Valor unitário inválido.");
-      return;
-    }
-
-    const tanqueTrim = tanqueInput.trim();
-    let tanqueNumero: number | null = null;
-    if (tanqueTrim === "1") tanqueNumero = 1;
-    else if (tanqueTrim === "2") tanqueNumero = 2;
-    else if (tanqueTrim !== "") {
-      window.alert("Tanque inválido. Use 1 ou 2, ou deixe vazio.");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const payload: Record<string, unknown> = {
-        obra_codigo: obraCodigo,
-        litros,
-        combustivel_tipo: combustivelInput.trim() ? combustivelInput.trim() : null,
-        nota_numero: notaInput.trim() ? notaInput.trim() : null,
-        valor_unitario: valorUnitario,
-        placa_texto: placaInput.trim() ? placaInput.trim() : null,
-        placa_caminhao: placaInput.trim() ? placaInput.trim() : null,
-        fornecedor_texto: fornecedorInput.trim() ? fornecedorInput.trim() : null,
-        tanque_numero: tanqueNumero,
-        obs: obsInput.trim() ? obsInput.trim() : null,
-      };
-
-      const res = await fetch(`${apiBase}/v1/tanque/movimentacoes/${operationId}`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof json?.error === "string" ? json.error : `HTTP ${res.status}`);
-      setSelectedKeys([]);
-      await load();
-    } catch (err: unknown) {
-      window.alert(err instanceof Error ? err.message : "Erro ao editar movimentação");
-    } finally {
-      setLoading(false);
-    }
-  }, [apiBase, load, obras, selectedOperationIds, selectedRows, token]);
+    const operationId = typeof row?.operation_id === "string" ? row.operation_id : "";
+    if (!operationId) return;
+    setEditRow({ ...row, operation_id: operationId });
+  }, [selectedRows]);
 
   const handleExportExcel = useCallback(async () => {
     const rows = retiradasFiltradas;
@@ -1143,7 +1041,7 @@ export default function TanqueBIPage() {
           <>
             <button
               type="button"
-              onClick={handleEditSelected}
+              onClick={openEditForm}
               disabled={loading || selectedOperationIds.length !== 1}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -1297,6 +1195,19 @@ export default function TanqueBIPage() {
         token={authToken}
         onClose={() => setEntradaCombustivelOpen(false)}
         onSaved={() => void load()}
+      />
+
+      <TanqueMovimentacaoFormModal
+        open={editRow != null}
+        initialRow={editRow}
+        obras={obras}
+        apiBase={apiBase}
+        token={authToken}
+        onClose={() => setEditRow(null)}
+        onSaved={() => {
+          setSelectedKeys([]);
+          void load();
+        }}
       />
 
       {fotosOpen ? (
