@@ -455,11 +455,25 @@ function TanqueBiScrollTable({
                     <>
                       <td className={`${tdCls} max-w-[100px]`}>{fmt(m.lacre_tanque_numero)}</td>
                       <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "lacre_tanque_storage_path"), "Lacre T.")}
+                        <StoragePhotoCell
+                          storagePath={storagePath(m, "lacre_tanque_storage_path")}
+                          token={authToken}
+                          onOpen={onOpenPhoto}
+                          shortLabel="Lacre T."
+                          preview
+                          onAddClick={() => onAddFotos(m)}
+                        />
                       </td>
                       <td className={`${tdCls} max-w-[100px]`}>{fmt(m.lacre_melosa_numero)}</td>
                       <td className={tdPhotoCls}>
-                        {photo(storagePath(m, "lacre_melosa_storage_path"), "Lacre M.")}
+                        <StoragePhotoCell
+                          storagePath={storagePath(m, "lacre_melosa_storage_path")}
+                          token={authToken}
+                          onOpen={onOpenPhoto}
+                          shortLabel="Lacre M."
+                          preview
+                          onAddClick={() => onAddFotos(m)}
+                        />
                       </td>
                     </>
                   ) : null}
@@ -850,19 +864,18 @@ export default function TanqueBIPage() {
     }
     try {
       const cache = new Map<string, string | null>();
+      const urlFor = async (path: string | undefined): Promise<string | null> => {
+        if (!path) return null;
+        if (cache.has(path)) return cache.get(path) ?? null;
+        const url = await fetchTanquePhotoUrl(apiBase, token, path);
+        cache.set(path, url);
+        return url;
+      };
       const rows: HorimetroExcelRow[] = await Promise.all(
         retiradasFiltradas.map(async (m) => {
-          const path = storagePath(m, "retirada_horimetro_foto_storage_path");
-          let fotoHorimetroUrl: string | null = null;
-          if (path) {
-            if (cache.has(path)) {
-              fotoHorimetroUrl = cache.get(path) ?? null;
-            } else {
-              fotoHorimetroUrl = await fetchTanquePhotoUrl(apiBase, token, path);
-              cache.set(path, fotoHorimetroUrl);
-            }
-          }
           const horimetro = fmtHorimetroRow(m);
+          const lacreTanque = fmt(m.lacre_tanque_numero);
+          const lacreMelosa = fmt(m.lacre_melosa_numero);
           return {
             dataHora: m.data_hora,
             obra: fmtObra(m),
@@ -870,7 +883,11 @@ export default function TanqueBIPage() {
             insumo: fmtCombustivelCurto(m.combustivel_tipo),
             quantidadeLitros: calcQuantidadeLitros(m),
             horimetro: horimetro === "—" ? "" : horimetro,
-            fotoHorimetroUrl,
+            fotoHorimetroUrl: await urlFor(storagePath(m, "retirada_horimetro_foto_storage_path")),
+            lacreTanque: lacreTanque === "—" ? "" : lacreTanque,
+            lacreMelosa: lacreMelosa === "—" ? "" : lacreMelosa,
+            fotoLacreTanqueUrl: await urlFor(storagePath(m, "lacre_tanque_storage_path")),
+            fotoLacreMelosaUrl: await urlFor(storagePath(m, "lacre_melosa_storage_path")),
             tanque: fmtTanqueNumRow(m),
             usuario: fmtUsuarioTanque(m),
           };

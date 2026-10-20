@@ -11,12 +11,24 @@ export type HorimetroExcelRow = {
   quantidadeLitros?: number | null;
   horimetro?: string | null;
   fotoHorimetroUrl?: string | null;
+  lacreTanque?: string | null;
+  lacreMelosa?: string | null;
+  fotoLacreTanqueUrl?: string | null;
+  fotoLacreMelosaUrl?: string | null;
   motorista?: string | null;
   tanque?: string | null;
   usuario?: string | null;
 };
 
-type ColumnKey = Exclude<keyof HorimetroExcelRow, "quantidadeLitros" | "fotoHorimetroUrl"> | "quantidade" | "foto";
+type ColumnKey =
+  | Exclude<
+      keyof HorimetroExcelRow,
+      "quantidadeLitros" | "fotoHorimetroUrl" | "fotoLacreTanqueUrl" | "fotoLacreMelosaUrl"
+    >
+  | "quantidade"
+  | "foto"
+  | "fotoLacreTanque"
+  | "fotoLacreMelosa";
 
 const COLUMNS_ABASTECIMENTO: { header: string; key: ColumnKey; width: number }[] = [
   { header: "Data/Horário", key: "dataHora", width: 18 },
@@ -39,6 +51,10 @@ const COLUMNS_TANQUE: { header: string; key: ColumnKey; width: number }[] = [
   { header: "Quantidade (L)", key: "quantidade", width: 16 },
   { header: "Horímetro", key: "horimetro", width: 16 },
   { header: "Foto horímetro", key: "foto", width: 18 },
+  { header: "Nº lacre tanque", key: "lacreTanque", width: 16 },
+  { header: "Foto lacre tanque", key: "fotoLacreTanque", width: 18 },
+  { header: "Nº lacre melosa", key: "lacreMelosa", width: 16 },
+  { header: "Foto lacre melosa", key: "fotoLacreMelosa", width: 18 },
   { header: "Tanque", key: "tanque", width: 12 },
   { header: "Usuário", key: "usuario", width: 22 },
 ];
@@ -69,8 +85,15 @@ function cellText(row: HorimetroExcelRow, key: ColumnKey): string | number {
       : "—";
   }
   if (key === "dataHora") return fmtDataHoraBr(row.dataHora) || "—";
-  if (key === "foto") return "";
+  if (key === "foto" || key === "fotoLacreTanque" || key === "fotoLacreMelosa") return "";
   return textOrDash(row[key]);
+}
+
+function fotoUrl(row: HorimetroExcelRow, key: ColumnKey): string | null {
+  if (key === "foto") return row.fotoHorimetroUrl?.trim() || null;
+  if (key === "fotoLacreTanque") return row.fotoLacreTanqueUrl?.trim() || null;
+  if (key === "fotoLacreMelosa") return row.fotoLacreMelosaUrl?.trim() || null;
+  return null;
 }
 
 async function writeHorimetroWorkbook(
@@ -112,8 +135,8 @@ async function writeHorimetroWorkbook(
     const zebra = rowIdx % 2 === 1;
     columns.forEach((col, colIdx) => {
       const cell = excelRow.getCell(colIdx + 1);
-      if (col.key === "foto") {
-        const link = row.fotoHorimetroUrl?.trim();
+      if (col.key === "foto" || col.key === "fotoLacreTanque" || col.key === "fotoLacreMelosa") {
+        const link = fotoUrl(row, col.key);
         if (link) {
           cell.value = { text: "Abrir foto", hyperlink: link };
           cell.font = { name: "Calibri", size: 10, color: { argb: "FF1D4ED8" }, underline: true };
