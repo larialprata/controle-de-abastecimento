@@ -56,7 +56,10 @@ function fmtEquipamentoRow(m: LinhaSupabase): string {
 }
 
 function fmtHorimetroRow(m: LinhaSupabase): string {
-  return isRetiradaTanque(m) ? fmt(m.tanque_texto) : "—";
+  if (!isRetiradaTanque(m)) return "—";
+  const numero = m.melosa_horimetro_equipamento_abastecido_numero;
+  if (numero != null && String(numero).trim()) return fmt(numero);
+  return "—";
 }
 
 function storagePath(m: LinhaSupabase, key: string): string | undefined {

@@ -13,6 +13,7 @@ import { fmtTicketNumero, ticketNumeroParaFiltro } from "../lib/ticketNumero";
 import { enrichMelosaTicketRowsWithSignatures } from "../lib/melosaPhotoUrl";
 import { fmtEquipamentoTicketLabel, enrichMelosaRowsWithEquipamentoDescricao } from "../lib/equipamentoTicketLabel";
 import { downloadTanqueDescarbonizeExcel, type TanqueExcelRowInput } from "../lib/tanqueDescarbonizeExcel";
+import { downloadTanqueHorimetroExcel, type HorimetroExcelRow } from "../lib/horimetroExcel";
 import { resolveLitrosMovimentoTanque } from "../lib/descarbonizeExcel";
 import { biMovementRowKey, resolveSelectedRows } from "../lib/biSelection";
 import {
@@ -95,7 +96,28 @@ function fmtPatrimonioRow(m: LinhaTanque): string {
 }
 
 function fmtHorimetroRow(m: LinhaTanque): string {
-  return isRetiradaTanque(m) ? fmt(m.tanque_texto) : "—";
+  if (!isRetiradaTanque(m)) return "—";
+  const numero = m.melosa_horimetro_equipamento_abastecido_numero;
+  if (numero != null && String(numero).trim()) return fmt(numero);
+  return "—";
+}
+
+function fmtUsuarioTanque(m: LinhaTanque): string {
+  return typeof m.usuario_full_name === "string" && m.usuario_full_name.trim()
+    ? m.usuario_full_name.trim()
+    : "—";
+}
+
+async function fetchTanquePhotoUrl(apiBase: string, token: string, path: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${apiBase}/v1/tanque/photo-url?path=${encodeURIComponent(path)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = (await res.json().catch(() => ({}))) as { url?: string };
+    return res.ok && typeof json?.url === "string" && json.url.trim() ? json.url.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function storagePath(m: LinhaTanque, key: string): string | undefined {
@@ -242,7 +264,7 @@ function buildTanqueTicketRow(m: LinhaTanque): TanqueTicketRow {
     responsavelAbastecimento: responsavel,
     placaAtivo: entrada ? (nota ? `NF ${nota}` : fmtPlacaRow(m)) : fmtPatrimonioRow(m),
     insumo: fmtInsumoTicket(m),
-    horimetro: "—",
+    horimetro: fmtHorimetroRow(m),
     litros: fmtQuantidade(m),
     nomeMotorista: entrada ? responsavel : fmt(m.tanque_texto),
     equipamento: entrada
@@ -919,6 +941,49 @@ export default function TanqueBIPage() {
     }
   }, [retiradasFiltradas]);
 
+  const handleExportHorimetro = useCallback(async () => {
+    if (retiradasFiltradas.length === 0) {
+      window.alert("Não há retiradas de tanque para exportar.");
+      return;
+    }
+    if (!token?.trim()) {
+      window.alert("Sessão expirada. Faça login novamente.");
+      return;
+    }
+    try {
+      const cache = new Map<string, string | null>();
+      const rows: HorimetroExcelRow[] = await Promise.all(
+        retiradasFiltradas.map(async (m) => {
+          const path = storagePath(m, "retirada_horimetro_foto_storage_path");
+          let fotoHorimetroUrl: string | null = null;
+          if (path) {
+            if (cache.has(path)) {
+              fotoHorimetroUrl = cache.get(path) ?? null;
+            } else {
+              fotoHorimetroUrl = await fetchTanquePhotoUrl(apiBase, token, path);
+              cache.set(path, fotoHorimetroUrl);
+            }
+          }
+          const horimetro = fmtHorimetroRow(m);
+          return {
+            dataHora: m.data_hora,
+            obra: fmtObra(m),
+            patrimonio: fmtPatrimonioRow(m),
+            insumo: fmtCombustivelCurto(m.combustivel_tipo),
+            quantidadeLitros: calcQuantidadeLitros(m),
+            horimetro: horimetro === "—" ? "" : horimetro,
+            fotoHorimetroUrl,
+            tanque: fmtTanqueNumRow(m),
+            usuario: fmtUsuarioTanque(m),
+          };
+        }),
+      );
+      await downloadTanqueHorimetroExcel(rows);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : "Erro ao exportar horímetro");
+    }
+  }, [apiBase, retiradasFiltradas, token]);
+
   const authToken = token ?? "";
 
   return (
@@ -929,6 +994,7 @@ export default function TanqueBIPage() {
           Quantidade (L): entrada usa o campo litros da nota. Na saída, litros = medidor final − medidor
           inicial (medidor acumulado sobe ao abastecer; ex.: 50 → 5000 = 4950 L).
           O Excel Descarbonize usa a mesma planilha modelo do BI abastecimentos; só as retiradas entram na exportação.
+          <strong> Exportar horímetro</strong> baixa a leitura e a foto do horímetro das retiradas filtradas.
         </p>
       </header>
 
@@ -946,13 +1012,22 @@ export default function TanqueBIPage() {
         </div>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>Exportação</span>
-          <button
-            type="button"
-            onClick={handleExportExcel}
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700"
-          >
-            Exportar Excel
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700"
+            >
+              Exportar Excel
+            </button>
+            <button
+              type="button"
+              onClick={handleExportHorimetro}
+              className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-700/20 transition hover:bg-sky-800"
+            >
+              Exportar horímetro
+            </button>
+          </div>
         </div>
         <div className="flex flex-col gap-1">
           <span className={labelCls}>De</span>

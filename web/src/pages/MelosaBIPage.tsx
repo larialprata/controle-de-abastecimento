@@ -21,6 +21,7 @@ import {
   downloadMelosaBiResumoExcel,
   type MelosaBiResumoRow,
 } from "../lib/melosaBiResumoExcel";
+import { downloadAbastecimentoHorimetroExcel, type HorimetroExcelRow } from "../lib/horimetroExcel";
 import { enrichMelosaTicketRowsWithSignatures, fetchMelosaPhotoSignedUrl } from "../lib/melosaPhotoUrl";
 import { labelEquipamentoEmpresa } from "../lib/equipamentoEmpresa";
 import { fmtEquipamentoTicketLabel, enrichMelosaRowsWithEquipamentoDescricao } from "../lib/equipamentoTicketLabel";
@@ -980,6 +981,50 @@ export default function MelosaBIPage() {
     }
   }, [abastecimentosFiltradas, dataAte, dataDe, token]);
 
+  const handleExportHorimetro = useCallback(async () => {
+    if (abastecimentosFiltradas.length === 0) {
+      window.alert("Não há abastecimentos (sem transbordo) para exportar.");
+      return;
+    }
+    if (!token?.trim()) {
+      window.alert("Sessão expirada. Faça login novamente.");
+      return;
+    }
+    try {
+      const cache = new Map<string, string | null>();
+      const rows: HorimetroExcelRow[] = await Promise.all(
+        abastecimentosFiltradas.map(async (m) => {
+          const path = storagePath(m, "melosa_horimetro_equipamento_abastecido_storage_path");
+          let fotoHorimetroUrl: string | null = null;
+          if (path) {
+            if (cache.has(path)) {
+              fotoHorimetroUrl = cache.get(path) ?? null;
+            } else {
+              fotoHorimetroUrl = await fetchMelosaPhotoSignedUrl(token, path);
+              cache.set(path, fotoHorimetroUrl);
+            }
+          }
+          const horimetro = fmtHorimetro(m);
+          return {
+            dataHora: m.data_hora,
+            obra: fmtObra(m),
+            empresa: empresaEquipamentoParaResumo(m),
+            ativoMelosa: fmtAtivoPlaca(m),
+            ativoEquipamento: fmtAtivoEquipamento(m),
+            insumo: fmtInsumoMel(m),
+            quantidadeLitros: calcQuantidadeLitros(m),
+            horimetro: horimetro === "—" ? "" : horimetro,
+            fotoHorimetroUrl,
+            motorista: fmtMotoristaMelosa(m),
+          };
+        }),
+      );
+      await downloadAbastecimentoHorimetroExcel(rows);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : "Erro ao exportar horímetro");
+    }
+  }, [abastecimentosFiltradas, token]);
+
   const handleExportExcel = useCallback(async () => {
     if (abastecimentosFiltradas.length === 0) {
       window.alert("Não há abastecimentos (sem transbordo) para exportar.");
@@ -1022,7 +1067,8 @@ export default function MelosaBIPage() {
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl md:text-3xl dark:text-white">BI — Abastecimentos</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
           Quantidade (L) informada no app na retirada melosa. Use <strong>Exportar Excel Resumo</strong> para a planilha
-          organizada por empresa do equipamento; <strong>Descarbonize</strong> preenche o modelo GHG (uma aba por mês) a partir da linha 2.
+          organizada por empresa do equipamento; <strong>Exportar horímetro</strong> baixa a leitura e a foto do
+          horímetro dos abastecimentos filtrados; <strong>Descarbonize</strong> preenche o modelo GHG (uma aba por mês) a partir da linha 2.
         </p>
       </header>
 
@@ -1073,6 +1119,13 @@ export default function MelosaBIPage() {
               className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700"
             >
               Exportar Excel Resumo
+            </button>
+            <button
+              type="button"
+              onClick={handleExportHorimetro}
+              className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-700/20 transition hover:bg-sky-800"
+            >
+              Exportar horímetro
             </button>
             <button
               type="button"

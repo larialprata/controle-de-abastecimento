@@ -117,6 +117,20 @@ function tanquePertenceObraMobile(t: TanqueCadastrado, obra: number): boolean {
   return obraCodigosTanqueMobile(t).includes(obra);
 }
 
+const OBRA_RETIRADA_EQUIPAMENTO_HORIMETRO = 230;
+
+function retiradaEquipamentoPedeHorimetro(
+  obraSelecionada: number,
+  obraTanque: number | null | undefined,
+  destino: "MELOSA" | "EQUIPAMENTO",
+): boolean {
+  if (destino !== "EQUIPAMENTO") return false;
+  return (
+    Number(obraSelecionada) === OBRA_RETIRADA_EQUIPAMENTO_HORIMETRO ||
+    Number(obraTanque) === OBRA_RETIRADA_EQUIPAMENTO_HORIMETRO
+  );
+}
+
 function labelTanqueComObra(t: TanqueCadastrado, obraNome?: string | null): string {
   const tanque = t.tanque_numero != null ? `Tanque ${t.tanque_numero}` : "Tanque";
   const obras = obraCodigosTanqueMobile(t);
@@ -263,7 +277,7 @@ type Screen =
   | { name: "login" }
   | { name: "registro" }
   | { name: "home" }
-  | { name: "form"; tipo: MovimentoTipo; retiradaStep?: "dados" | "detalhes" | "quantidade_abastecida" | "resumo"; entradaStep?: "dados" | "detalhes" | "resumo" }
+  | { name: "form"; tipo: MovimentoTipo; retiradaStep?: "dados" | "detalhes" | "quantidade_abastecida" | "horimetro" | "resumo"; entradaStep?: "dados" | "detalhes" | "resumo" }
   | { name: "melosa"; step: "register" | "quantidade_abastecida" | "horimetro" | "resumo" };
 
 /** Espaço reservado no scroll para o rodapé fixo (Salvar/Cancelar) + barra do sistema. */
@@ -910,6 +924,10 @@ export default function App() {
   const [lacreMelosaFotoUri, setLacreMelosaFotoUri] = useState<string | null>(null);
   const [tanqueQuantidadeAbastecidaTexto, setTanqueQuantidadeAbastecidaTexto] = useState("");
   const [tanqueQuantidadeAbastecidaFotoUri, setTanqueQuantidadeAbastecidaFotoUri] = useState<string | null>(null);
+  const [tanqueHorimetroNumero, setTanqueHorimetroNumero] = useState("");
+  const [tanqueHorimetroFotoUri, setTanqueHorimetroFotoUri] = useState<string | null>(null);
+  const [tanqueNaoTenhoHorimetro, setTanqueNaoTenhoHorimetro] = useState(false);
+  const [tanqueHorimetroMotivo, setTanqueHorimetroMotivo] = useState<"" | "QUEBRADO" | "INEXISTENTE">("");
   const [tanqueAssinaturaOperadorDataUrl, setTanqueAssinaturaOperadorDataUrl] = useState<string | null>(null);
   const [tanqueAssinaturaMelosaDataUrl, setTanqueAssinaturaMelosaDataUrl] = useState<string | null>(null);
   const [tanqueNumero, setTanqueNumero] = useState<number | null>(null);
@@ -1393,6 +1411,10 @@ export default function App() {
     setLacreMelosaFotoUri(null);
     setTanqueQuantidadeAbastecidaTexto("");
     setTanqueQuantidadeAbastecidaFotoUri(null);
+    setTanqueHorimetroNumero("");
+    setTanqueHorimetroFotoUri(null);
+    setTanqueNaoTenhoHorimetro(false);
+    setTanqueHorimetroMotivo("");
     setTanqueAssinaturaOperadorDataUrl(null);
     setTanqueAssinaturaMelosaDataUrl(null);
     setTanqueAtivo(null);
@@ -1982,6 +2004,20 @@ export default function App() {
     if (uri) setTanqueQuantidadeAbastecidaFotoUri(uri);
   }
 
+  async function pickTanqueHorimetroFromLibrary() {
+    const uri = await pickImageFromLibrary(
+      "Habilite o acesso à galeria para enviar a foto do horímetro do equipamento.",
+    );
+    if (uri) setTanqueHorimetroFotoUri(uri);
+  }
+
+  async function pickTanqueHorimetroFromCamera() {
+    const uri = await pickImageFromCamera(
+      "Habilite o acesso à câmera para tirar a foto do horímetro do equipamento.",
+    );
+    if (uri) setTanqueHorimetroFotoUri(uri);
+  }
+
   async function pickMelosaComprovanteFromLibrary() {
     const uri = await pickImageFromLibrary(
       "Habilite o acesso à galeria para enviar a foto do comprovante.",
@@ -2542,6 +2578,30 @@ export default function App() {
       return;
     }
     setMessage(null);
+    setScreen({
+      name: "form",
+      tipo: "RETIRADA_TANQUE",
+      retiradaStep: retiradaEquipamentoPedeHorimetro(obraCodigo, tanqueSelecionado?.obra_codigo, retiradaDestino) ? "horimetro" : "resumo",
+    });
+  }
+
+  function continueRetiradaTanqueHorimetro() {
+    if (tanqueNaoTenhoHorimetro) {
+      if (!tanqueHorimetroMotivo) {
+        Alert.alert("Motivo obrigatório", "Selecione Quebrado ou Inexistente.");
+        return;
+      }
+    } else {
+      if (!tanqueHorimetroNumero.trim()) {
+        Alert.alert("Horímetro obrigatório", "Informe o número do horímetro do equipamento.");
+        return;
+      }
+      if (!tanqueHorimetroFotoUri) {
+        Alert.alert("Foto obrigatória", "Selecione a foto do horímetro do equipamento.");
+        return;
+      }
+    }
+    setMessage(null);
     setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "resumo" });
   }
 
@@ -2762,6 +2822,19 @@ export default function App() {
         setBusy(false);
         return;
       }
+      if (paraEquipamento && retiradaEquipamentoPedeHorimetro(obraCodigo, tanqueSelecionado?.obra_codigo, retiradaDestino)) {
+        if (tanqueNaoTenhoHorimetro) {
+          if (!tanqueHorimetroMotivo) {
+            Alert.alert("Motivo obrigatório", "Selecione Quebrado ou Inexistente.");
+            setBusy(false);
+            return;
+          }
+        } else if (!tanqueHorimetroNumero.trim() || !tanqueHorimetroFotoUri) {
+          Alert.alert("Horímetro obrigatório", "Informe o horímetro e a foto do equipamento.");
+          setBusy(false);
+          return;
+        }
+      }
       const litrosTanque = parseMelosaMedidorNumero(tanqueQuantidadeAbastecidaTexto);
       if (litrosTanque == null || litrosTanque <= 0) {
         Alert.alert("Quantidade inválida", "Informe uma quantidade abastecida válida em litros.");
@@ -2796,6 +2869,7 @@ export default function App() {
     let tanqueQuantidadeAbastecidaStoragePath: string | null = null;
     let tanqueAssinaturaOperadorStoragePath: string | null = null;
     let tanqueAssinaturaMelosaStoragePath: string | null = null;
+    let retiradaHorimetroFotoPath: string | null = null;
 
     if (isEntradaTanqueObra) {
       const NOTA_BUCKET = "notas";
@@ -2871,6 +2945,18 @@ export default function App() {
       tanqueQuantidadeAbastecidaStoragePath = quantidadePath;
       tanqueAssinaturaOperadorStoragePath = assinaturaOperadorPath;
       tanqueAssinaturaMelosaStoragePath = assinaturaDestinoPath;
+
+      if (
+        paraEquipamento &&
+        retiradaEquipamentoPedeHorimetro(obraCodigo, tanqueSelecionado?.obra_codigo, retiradaDestino) &&
+        !tanqueNaoTenhoHorimetro &&
+        tanqueHorimetroFotoUri
+      ) {
+        const RETIRADA_HORIMETRO_BUCKET = "retirada_horimetro";
+        const horimetroPath = `${userId}/tanque/horimetro/${operationId}.${extFromUri(tanqueHorimetroFotoUri)}`;
+        await stageImageFromUri(operationId, RETIRADA_HORIMETRO_BUCKET, horimetroPath, tanqueHorimetroFotoUri);
+        retiradaHorimetroFotoPath = horimetroPath;
+      }
     }
 
     const retiradaParaEquipamento = isRetiradaTanque && retiradaDestino === "EQUIPAMENTO";
@@ -2921,7 +3007,17 @@ export default function App() {
       tanque_operador_nome: isTanqueObra ? pickOperadorNome(driverFullName) || null : null,
       tanque_assinatura_operador_storage_path: isTanqueObra ? tanqueAssinaturaOperadorStoragePath : null,
       tanque_assinatura_melosa_storage_path: isTanqueObra ? tanqueAssinaturaMelosaStoragePath : null,
-      retirada_horimetro_foto_storage_path: null,
+      retirada_horimetro_foto_storage_path: retiradaHorimetroFotoPath,
+      melosa_horimetro_equipamento_abastecido_numero:
+        isRetiradaTanque && retiradaParaEquipamento && retiradaEquipamentoPedeHorimetro(obraCodigo, tanqueSelecionado?.obra_codigo, retiradaDestino)
+          ? tanqueNaoTenhoHorimetro
+            ? tanqueHorimetroMotivo === "QUEBRADO"
+              ? "Quebrado"
+              : tanqueHorimetroMotivo === "INEXISTENTE"
+                ? "Inexistente"
+                : null
+            : tanqueHorimetroNumero.trim() || null
+          : null,
 
       local_latitude: localLatitude,
       local_longitude: localLongitude,
@@ -4701,6 +4797,7 @@ export default function App() {
     const isRetiradaDados = isRetiradaTanque && retiradaStep === "dados";
     const isRetiradaDetalhes = isRetiradaTanque && retiradaStep === "detalhes";
     const isRetiradaQuantidadeAbastecida = isRetiradaTanque && retiradaStep === "quantidade_abastecida";
+    const isRetiradaHorimetro = isRetiradaTanque && retiradaStep === "horimetro";
     const isRetiradaResumo = isRetiradaTanque && retiradaStep === "resumo";
     const obraTanqueResumo = obrasDisponiveis.find((o) => o.codigo === obraCodigo);
     const obraTanqueResumoLabel = obraTanqueResumo ? `${obraTanqueResumo.codigo} - ${obraTanqueResumo.nome}` : String(obraCodigo);
@@ -4720,6 +4817,8 @@ export default function App() {
           : "Lacres"
         : isRetiradaQuantidadeAbastecida
           ? "Quantidade abastecida"
+          : isRetiradaHorimetro
+            ? "Horímetro do equipamento"
           : isRetiradaResumo
             ? "Resumo e assinaturas"
             : isEntradaDados
@@ -4750,8 +4849,18 @@ export default function App() {
                 setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "detalhes" });
                 return;
               }
-              if (isRetiradaResumo) {
+              if (isRetiradaHorimetro) {
                 setScreen({ name: "form", tipo: "RETIRADA_TANQUE", retiradaStep: "quantidade_abastecida" });
+                return;
+              }
+              if (isRetiradaResumo) {
+                setScreen({
+                  name: "form",
+                  tipo: "RETIRADA_TANQUE",
+                  retiradaStep: retiradaEquipamentoPedeHorimetro(obraCodigo, tanqueSelecionado?.obra_codigo, retiradaDestino)
+                    ? "horimetro"
+                    : "quantidade_abastecida",
+                });
                 return;
               }
               if (isRetiradaDetalhes) {
@@ -4763,7 +4872,7 @@ export default function App() {
             }}
           >
             <Text style={[styles.secondaryButtonText, !isDarkMode ? styles.secondaryButtonTextLight : null]}>
-              {isRetiradaDetalhes || isRetiradaQuantidadeAbastecida || isRetiradaResumo || isEntradaDetalhes || isEntradaResumo
+              {isRetiradaDetalhes || isRetiradaQuantidadeAbastecida || isRetiradaHorimetro || isRetiradaResumo || isEntradaDetalhes || isEntradaResumo
                 ? "Voltar"
                 : "Cancelar"}
             </Text>
@@ -4789,6 +4898,14 @@ export default function App() {
               style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
               disabled={busy}
               onPress={continueRetiradaTanqueQuantidadeAbastecida}
+            >
+              <Text style={styles.primaryButtonText}>Próximo</Text>
+            </TouchableOpacity>
+          ) : isRetiradaHorimetro ? (
+            <TouchableOpacity
+              style={[styles.primaryButton, !isDarkMode ? styles.primaryButtonLight : null, styles.formFooterPrimary, busy ? { opacity: 0.7 } : null]}
+              disabled={busy}
+              onPress={continueRetiradaTanqueHorimetro}
             >
               <Text style={styles.primaryButtonText}>Próximo</Text>
             </TouchableOpacity>
@@ -5264,6 +5381,153 @@ export default function App() {
                 </>
               ) : null}
 
+              {isRetiradaHorimetro ? (
+                <>
+                  <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
+                    Horímetro do equipamento
+                  </Text>
+                  <View style={{ alignItems: "center", marginTop: 6, marginBottom: 6 }}>
+                    <TouchableOpacity
+                      accessibilityRole="switch"
+                      accessibilityLabel="Registrar horímetro"
+                      accessibilityState={{ checked: !tanqueNaoTenhoHorimetro }}
+                      disabled={busy}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        const semHorimetro = !tanqueNaoTenhoHorimetro;
+                        setTanqueNaoTenhoHorimetro(semHorimetro);
+                        if (semHorimetro) {
+                          setTanqueHorimetroNumero("");
+                          setTanqueHorimetroFotoUri(null);
+                        } else {
+                          setTanqueHorimetroMotivo("");
+                        }
+                      }}
+                      style={[
+                        styles.toggleSwitchTrack,
+                        !tanqueNaoTenhoHorimetro ? styles.toggleSwitchTrackOn : styles.toggleSwitchTrackOff,
+                        !isDarkMode && tanqueNaoTenhoHorimetro ? styles.toggleSwitchTrackLightOff : null,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.toggleSwitchKnob,
+                          { transform: [{ translateX: tanqueNaoTenhoHorimetro ? 0 : 22 }] },
+                        ]}
+                      />
+                    </TouchableOpacity>
+                  </View>
+
+                  {!tanqueNaoTenhoHorimetro ? (
+                    <>
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null]}>
+                        Número do horímetro
+                      </Text>
+                      <TextInput
+                        value={tanqueHorimetroNumero}
+                        onChangeText={setTanqueHorimetroNumero}
+                        style={[styles.authInput, !isDarkMode ? styles.authInputLight : null]}
+                        placeholder="Ex.: 12540"
+                        placeholderTextColor={inputPlaceholderColor}
+                        keyboardType="decimal-pad"
+                      />
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 8 }]}>
+                        Foto do horímetro
+                      </Text>
+                      <View style={[styles.photoBox, styles.photoBoxCompact, !isDarkMode ? styles.photoBoxLight : null]}>
+                        {tanqueHorimetroFotoUri ? (
+                          <>
+                            <Image
+                              source={{ uri: tanqueHorimetroFotoUri }}
+                              style={[styles.photoPreview, styles.photoPreviewCompact]}
+                            />
+                            <TouchableOpacity
+                              style={styles.photoRemove}
+                              onPress={() => setTanqueHorimetroFotoUri(null)}
+                              disabled={busy}
+                            >
+                              <Text style={styles.photoRemoveText}>Remover</Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : (
+                          <Text
+                            style={[
+                              styles.photoPlaceholder,
+                              styles.photoPlaceholderCompact,
+                              !isDarkMode ? styles.photoPlaceholderLight : null,
+                            ]}
+                          >
+                            Selecione a foto do horímetro do equipamento
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.photoActionRow}>
+                        <TouchableOpacity
+                          style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
+                          onPress={pickTanqueHorimetroFromLibrary}
+                          disabled={busy}
+                        >
+                          <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Galeria</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.ghostButton, !isDarkMode ? styles.ghostButtonLight : null]}
+                          onPress={pickTanqueHorimetroFromCamera}
+                          disabled={busy}
+                        >
+                          <Text style={[styles.ghostButtonText, !isDarkMode ? styles.ghostButtonTextLight : null]}>Câmera</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
+                        Motivo (obrigatório)
+                      </Text>
+                      <View style={styles.horimetroMotivoRow}>
+                        <TouchableOpacity
+                          style={[
+                            styles.horimetroMotivoChip,
+                            !isDarkMode ? styles.horimetroMotivoChipLight : styles.horimetroMotivoChipDark,
+                            tanqueHorimetroMotivo === "QUEBRADO" ? styles.horimetroMotivoChipSelected : null,
+                          ]}
+                          onPress={() => setTanqueHorimetroMotivo("QUEBRADO")}
+                          disabled={busy}
+                        >
+                          <Text
+                            style={[
+                              styles.horimetroMotivoChipText,
+                              !isDarkMode ? styles.horimetroMotivoChipTextLight : null,
+                              tanqueHorimetroMotivo === "QUEBRADO" ? styles.horimetroMotivoChipTextSelected : null,
+                            ]}
+                          >
+                            Quebrado
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.horimetroMotivoChip,
+                            !isDarkMode ? styles.horimetroMotivoChipLight : styles.horimetroMotivoChipDark,
+                            tanqueHorimetroMotivo === "INEXISTENTE" ? styles.horimetroMotivoChipSelected : null,
+                          ]}
+                          onPress={() => setTanqueHorimetroMotivo("INEXISTENTE")}
+                          disabled={busy}
+                        >
+                          <Text
+                            style={[
+                              styles.horimetroMotivoChipText,
+                              !isDarkMode ? styles.horimetroMotivoChipTextLight : null,
+                              tanqueHorimetroMotivo === "INEXISTENTE" ? styles.horimetroMotivoChipTextSelected : null,
+                            ]}
+                          >
+                            Inexistente
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+                </>
+              ) : null}
+
               {isRetiradaResumo ? (
                 <>
                   <Text style={[styles.label, !isDarkMode ? styles.labelLight : null, { marginTop: 4 }]}>
@@ -5379,6 +5643,22 @@ export default function App() {
                           {retiradaMotoristaMelosaTexto.trim() || "—"}
                         </Text>
                       </View>
+                      {retiradaDestino === "EQUIPAMENTO" && retiradaEquipamentoPedeHorimetro(obraCodigo, tanqueSelecionado?.obra_codigo, retiradaDestino) ? (
+                      <View style={styles.melosaResumoRow}>
+                        <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
+                          Horímetro
+                        </Text>
+                        <Text style={[styles.melosaResumoValue, !isDarkMode ? styles.melosaResumoValueLight : styles.melosaResumoValueDark]}>
+                          {tanqueNaoTenhoHorimetro
+                            ? tanqueHorimetroMotivo === "QUEBRADO"
+                              ? "Quebrado"
+                              : tanqueHorimetroMotivo === "INEXISTENTE"
+                                ? "Inexistente"
+                                : "—"
+                            : tanqueHorimetroNumero.trim() || "—"}
+                        </Text>
+                      </View>
+                      ) : null}
                       <View style={styles.melosaResumoRow}>
                         <Text style={[styles.melosaResumoLabel, !isDarkMode ? styles.melosaResumoLabelLight : styles.melosaResumoLabelDark]}>
                           Lacre tanque

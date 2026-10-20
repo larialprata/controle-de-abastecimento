@@ -38,6 +38,13 @@ function isRetiradaTanqueParaEquipamento(obs: string | null | undefined): boolea
     .startsWith(TANQUE_EQUIPAMENTO_OBS_PREFIX);
 }
 
+const OBRA_RETIRADA_EQUIPAMENTO_HORIMETRO = 230;
+
+function horimetroSemLeitura(value: string): boolean {
+  const upper = value.trim().toUpperCase();
+  return upper === "QUEBRADO" || upper === "INEXISTENTE";
+}
+
 const router = Router();
 
 async function storageObjectExists(
@@ -1880,6 +1887,16 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
         return res.status(400).json({ error: "tanque_quantidade_abastecida_storage_path é obrigatório" });
       }
 
+      if (paraEquipamento && Number(payload.obra_codigo) === OBRA_RETIRADA_EQUIPAMENTO_HORIMETRO) {
+        const horimetroNumero = payload.melosa_horimetro_equipamento_abastecido_numero?.trim() ?? "";
+        if (!horimetroNumero) {
+          return res.status(400).json({ error: "Horímetro obrigatório na retirada para equipamento da obra 230" });
+        }
+        if (!horimetroSemLeitura(horimetroNumero) && !payload.retirada_horimetro_foto_storage_path?.trim()) {
+          return res.status(400).json({ error: "Foto do horímetro obrigatória na retirada para equipamento da obra 230" });
+        }
+      }
+
       const retiradaHorimetroFotoPath = payload.retirada_horimetro_foto_storage_path?.trim();
       if (retiradaHorimetroFotoPath) {
         const horimetroFotoExists = await storageExists(
@@ -2192,6 +2209,10 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       tanque_assinatura_melosa_storage_path:
         isTanqueTipo ? payload.tanque_assinatura_melosa_storage_path ?? null : null,
       retirada_horimetro_foto_storage_path: payload.retirada_horimetro_foto_storage_path ?? null,
+      melosa_horimetro_equipamento_abastecido_numero:
+        payload.tipo === "RETIRADA_TANQUE"
+          ? payload.melosa_horimetro_equipamento_abastecido_numero?.trim() || null
+          : null,
 
       placa_texto: needsVeiculoMeta ? placaNorm : null,
       fornecedor_texto:
