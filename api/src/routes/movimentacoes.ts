@@ -42,13 +42,6 @@ function isRetiradaTanqueParaEquipamento(obs: string | null | undefined): boolea
     .startsWith(TANQUE_EQUIPAMENTO_OBS_PREFIX);
 }
 
-const OBRA_RETIRADA_EQUIPAMENTO_HORIMETRO = 230;
-
-function horimetroSemLeitura(value: string): boolean {
-  const upper = value.trim().toUpperCase();
-  return upper === "QUEBRADO" || upper === "INEXISTENTE";
-}
-
 const router = Router();
 
 async function storageObjectExists(
@@ -1935,16 +1928,6 @@ router.post("/movimentacoes", requireAuth, async (req: AuthedRequest, res) => {
       }
       if (!payload.tanque_quantidade_abastecida_storage_path?.trim()) {
         return res.status(400).json({ error: "tanque_quantidade_abastecida_storage_path é obrigatório" });
-      }
-
-      if (paraEquipamento && Number(payload.obra_codigo) === OBRA_RETIRADA_EQUIPAMENTO_HORIMETRO) {
-        const horimetroNumero = payload.melosa_horimetro_equipamento_abastecido_numero?.trim() ?? "";
-        if (!horimetroNumero) {
-          return res.status(400).json({ error: "Horímetro obrigatório na retirada para equipamento da obra 230" });
-        }
-        if (!horimetroSemLeitura(horimetroNumero) && !payload.retirada_horimetro_foto_storage_path?.trim()) {
-          return res.status(400).json({ error: "Foto do horímetro obrigatória na retirada para equipamento da obra 230" });
-        }
       }
 
       const retiradaHorimetroFotoPath = payload.retirada_horimetro_foto_storage_path?.trim();
