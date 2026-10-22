@@ -4,6 +4,7 @@ import { apiGet } from "../../lib/api";
 import { glassField, glassPanel, glassSelect } from "../../lib/glass";
 import { tanquePertenceAObra } from "../../lib/tanqueObras";
 import { INSUMO_OPCOES, codigoOleoPorTexto, tanqueNumeroDoOleo } from "../../lib/insumos";
+import { parseNumeroPtBr } from "../../lib/combustivelControle";
 
 type ObraOption = { codigo: number; nome: string };
 
@@ -33,17 +34,13 @@ function toDatetimeLocalValue(iso?: string): string {
 }
 
 function parseLitros(value: string): number | null {
-  const trimmed = value.trim().replace(",", ".");
-  if (!trimmed) return null;
-  const n = Number(trimmed);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  const n = parseNumeroPtBr(value);
+  return n != null && n > 0 ? n : null;
 }
 
 function parseValorUnitario(value: string): number | null {
-  const trimmed = value.trim().replace(",", ".");
-  if (!trimmed) return null;
-  const n = Number(trimmed);
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  const n = parseNumeroPtBr(value);
+  return n != null && n >= 0 ? n : null;
 }
 
 export default function TanqueEntradaCombustivelModal({

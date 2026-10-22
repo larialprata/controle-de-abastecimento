@@ -1284,7 +1284,9 @@ router.patch("/tanque/movimentacoes/:operationId", requireAuth, async (req: Auth
     if (
       Number.isFinite(nextObra) &&
       nextObra > 0 &&
-      (nextTanque === 1 || nextTanque === 2) &&
+      nextTanque != null &&
+      Number.isInteger(nextTanque) &&
+      nextTanque > 0 &&
       (updatePayload.obra_codigo != null || updatePayload.tanque_numero !== undefined)
     ) {
       const tanqueCadastrado = await findTanqueCadastradoNaObra(service, nextObra, nextTanque);

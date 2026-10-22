@@ -66,6 +66,22 @@ export function calcularCombustivelControle(inputs: CombustivelControleInputs): 
   };
 }
 
+/**
+ * Número digitado no padrão brasileiro.
+ * 7.500 = 7500, 10.000 = 10000, 6,10 = 6.1, 125.4 = 125.4.
+ */
+export function parseNumeroPtBr(value: string): number | null {
+  let s = value.trim().replace(/\s/g, "").replace(/^R\$/i, "");
+  if (!s) return null;
+  if (s.includes(",")) {
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, "");
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function fmtLitrosDashboard(v: number, frac = 2): string {
   return new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: 0,

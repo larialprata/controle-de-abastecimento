@@ -121,7 +121,7 @@ export function resolveLitrosMovimentoTanque(row: {
   medidor_tanque_numero_final?: unknown;
 }): number | null {
   if (row.tipo === "RETIRADA_TANQUE") {
-    const fromQuantidade = parseMedidorNumero(row.tanque_quantidade_abastecida);
+    const fromQuantidade = parseMedidorNumero(row.tanque_quantidade_abastecida as string | null | undefined);
     if (fromQuantidade != null && fromQuantidade > 0) return fromQuantidade;
     const fromMedidor = calcQuantidadeLitrosRetiradaTanqueFromMedidores(
       row.medidor_tanque_numero_inicial,
@@ -129,8 +129,11 @@ export function resolveLitrosMovimentoTanque(row: {
     );
     if (fromMedidor != null) return fromMedidor;
   }
-  const litros = row.litros;
-  if (typeof litros === "number" && Number.isFinite(litros) && litros > 0) return litros;
+  if (typeof row.litros === "number" && Number.isFinite(row.litros) && row.litros > 0) return row.litros;
+  if (typeof row.litros === "string") {
+    const n = Number(row.litros.trim().replace(",", "."));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
   return null;
 }
 

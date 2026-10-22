@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { glassField, glassPanel, glassSelect } from "../../lib/glass";
 import { INSUMO_OPCOES } from "../../lib/insumos";
+import { parseNumeroPtBr } from "../../lib/combustivelControle";
 
 export type TanqueMovimentacaoFormRow = {
   operation_id: string;
@@ -69,6 +70,13 @@ function textOrEmpty(value: unknown): string {
   return raw === "—" ? "" : raw;
 }
 
+function fmtCampoNumero(value: unknown): string {
+  if (value == null || value === "") return "";
+  const n = typeof value === "number" ? value : Number(String(value).trim().replace(",", "."));
+  if (!Number.isFinite(n)) return String(value);
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 3 }).format(n);
+}
+
 const EQUIPAMENTO_OBS_PREFIX = "[TANQUE_EQUIPAMENTO]";
 
 function isRetiradaParaEquipamento(obs?: string | null): boolean {
@@ -121,10 +129,11 @@ export default function TanqueMovimentacaoFormModal({
     const combustivel = textOrEmpty(initialRow.combustivel_tipo);
     setInsumo(combustivel || "DIESEL_S10");
     const qtdRetirada = textOrEmpty(initialRow.tanque_quantidade_abastecida);
-    setQuantidade(qtdRetirada || textOrEmpty(initialRow.litros));
+    const qtdBruta = qtdRetirada || textOrEmpty(initialRow.litros);
+    setQuantidade(fmtCampoNumero(qtdBruta));
     setPatrimonio(textOrEmpty(initialRow.placa_texto ?? initialRow.placa_caminhao));
     setNotaNumero(textOrEmpty(initialRow.nota_numero));
-    setValorUnitario(textOrEmpty(initialRow.valor_unitario));
+    setValorUnitario(fmtCampoNumero(initialRow.valor_unitario));
     setFornecedor(textOrEmpty(initialRow.fornecedor_texto));
     setOperador(textOrEmpty(initialRow.tanque_texto));
     setOperadorTanque(textOrEmpty(initialRow.tanque_operador_nome));
@@ -162,8 +171,8 @@ export default function TanqueMovimentacaoFormModal({
       setError("Informe data e hora.");
       return;
     }
-    const litrosNum = Number(quantidade.trim().replace(",", "."));
-    if (!Number.isFinite(litrosNum) || litrosNum < 0) {
+    const litrosNum = parseNumeroPtBr(quantidade);
+    if (litrosNum == null || litrosNum < 0) {
       setError("Quantidade em litros inválida.");
       return;
     }
@@ -174,8 +183,8 @@ export default function TanqueMovimentacaoFormModal({
     }
     let valor: number | null = null;
     if (isEntrada && valorUnitario.trim()) {
-      valor = Number(valorUnitario.trim().replace(",", "."));
-      if (!Number.isFinite(valor) || valor < 0) {
+      valor = parseNumeroPtBr(valorUnitario);
+      if (valor == null || valor < 0) {
         setError("Valor unitário inválido.");
         return;
       }
